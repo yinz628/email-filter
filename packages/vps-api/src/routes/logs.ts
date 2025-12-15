@@ -62,11 +62,12 @@ export async function logsRoutes(fastify: FastifyInstance): Promise<void> {
    * DELETE /api/logs/cleanup
    * Delete old logs
    */
-  fastify.delete('/cleanup', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.delete('/cleanup', async (request: FastifyRequest<{ Querystring: { days?: string } }>, reply: FastifyReply) => {
     try {
       const db = getDatabase();
       const logRepository = new LogRepository(db);
-      const deleted = logRepository.cleanup(7);
+      const days = parseInt(request.query.days || '7', 10) || 7;
+      const deleted = logRepository.cleanup(days);
       
       return reply.send({ deleted, message: `Deleted ${deleted} old log entries` });
     } catch (error) {

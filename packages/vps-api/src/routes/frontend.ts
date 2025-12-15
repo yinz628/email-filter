@@ -184,12 +184,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     <!-- Logs Tab -->
     <div id="logs-tab" class="tab-content hidden">
-      <div class="card">
+      <div class="card" style="height:calc(100vh - 200px);display:flex;flex-direction:column;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">系统日志</h2>
-          <div style="display:flex;gap:10px;">
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="log-cleanup-days" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="1">1天前</option>
+              <option value="3">3天前</option>
+              <option value="7" selected>7天前</option>
+              <option value="30">30天前</option>
+            </select>
+            <button class="btn btn-danger btn-sm" onclick="cleanupLogs()">清理日志</button>
             <button class="btn btn-secondary" onclick="loadLogs()">🔄 刷新</button>
-            <button class="btn btn-danger btn-sm" onclick="cleanupLogs()">清理旧日志</button>
           </div>
         </div>
         <div class="filter-bar">
@@ -202,14 +208,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </select>
           <span id="log-counts" style="color:#666;font-size:13px;"></span>
         </div>
-        <div style="max-height:500px;overflow-y:auto;">
+        <div style="flex:1;overflow-y:auto;">
           <table>
-            <thead>
+            <thead style="position:sticky;top:0;background:#f8f9fa;">
               <tr>
-                <th style="width:140px;">时间</th>
-                <th style="width:80px;">类型</th>
-                <th>消息</th>
-                <th style="width:200px;">详情</th>
+                <th style="width:150px;">时间</th>
+                <th style="width:70px;">类型</th>
+                <th style="width:200px;">主题</th>
+                <th style="width:180px;">发件人</th>
+                <th style="width:180px;">收件人</th>
+                <th>命中规则</th>
               </tr>
             </thead>
             <tbody id="logs-table"></tbody>
@@ -631,7 +639,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderLogs(logs) {
       const tbody = document.getElementById('logs-table');
       if (logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999">暂无日志</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无日志</td></tr>';
         return;
       }
       const categoryLabels = {
@@ -643,11 +651,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tbody.innerHTML = logs.map(log => {
         const time = new Date(log.createdAt).toLocaleString('zh-CN');
         const cat = categoryLabels[log.category] || log.category;
-        const details = log.details ? '<small style="color:#888">' + escapeHtml(JSON.stringify(log.details).substring(0, 50)) + '...</small>' : '-';
-        return '<tr><td style="font-size:12px;color:#666">' + time + '</td>' +
+        const d = log.details || {};
+        const subject = d.subject || '-';
+        const from = d.from || '-';
+        const to = d.to || '-';
+        const rule = d.matchedRule || '-';
+        return '<tr>' +
+          '<td style="font-size:12px;color:#666">' + time + '</td>' +
           '<td>' + cat + '</td>' +
-          '<td>' + escapeHtml(log.message) + '</td>' +
-          '<td>' + details + '</td></tr>';
+          '<td title="' + escapeHtml(subject) + '">' + escapeHtml(subject.length > 25 ? subject.substring(0,25) + '...' : subject) + '</td>' +
+          '<td style="font-size:12px" title="' + escapeHtml(from) + '">' + escapeHtml(from.length > 22 ? from.substring(0,22) + '...' : from) + '</td>' +
+          '<td style="font-size:12px" title="' + escapeHtml(to) + '">' + escapeHtml(to.length > 22 ? to.substring(0,22) + '...' : to) + '</td>' +
+          '<td style="font-size:12px;color:#888">' + escapeHtml(rule) + '</td>' +
+          '</tr>';
       }).join('');
     }
 
@@ -661,9 +677,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function cleanupLogs() {
-      if (!confirm('确定清理7天前的旧日志？')) return;
+      const days = document.getElementById('log-cleanup-days').value;
+      if (!confirm('确定清理' + days + '天前的旧日志？')) return;
       try {
-        const res = await fetch('/api/logs/cleanup', { method: 'DELETE', headers: getHeaders() });
+        const res = await fetch('/api/logs/cleanup?days=' + days, { 
+          method: 'DELETE', 
+          headers: { 'Authorization': 'Bearer ' + apiToken }
+        });
         const data = await res.json();
         showAlert('已清理 ' + data.deleted + ' 条旧日志');
         loadLogs();

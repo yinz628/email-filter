@@ -22,7 +22,31 @@
 // VPS Sync Configuration
 // ============================================
 
-const VPS_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_SYNC_INTERVAL_MINUTES = 5; // 默认5分钟
+
+// 获取同步间隔（从 KV 配置或使用默认值）
+async function getSyncIntervalMs(kv) {
+  const config = await kv.get('config:vps-sync');
+  if (config) {
+    const parsed = JSON.parse(config);
+    return (parsed.syncIntervalMinutes || DEFAULT_SYNC_INTERVAL_MINUTES) * 60 * 1000;
+  }
+  return DEFAULT_SYNC_INTERVAL_MINUTES * 60 * 1000;
+}
+
+async function getVpsSyncConfig(kv) {
+  const config = await kv.get('config:vps-sync');
+  if (config) return JSON.parse(config);
+  return { syncIntervalMinutes: DEFAULT_SYNC_INTERVAL_MINUTES };
+}
+
+async function setVpsSyncConfig(kv, config) {
+  if (config.syncIntervalMinutes < 1 || config.syncIntervalMinutes > 60) {
+    throw { code: 'INVALID_CONFIG', message: '同步间隔必须在 1-60 分钟之间' };
+  }
+  await kv.put('config:vps-sync', JSON.stringify(config));
+  return config;
+}
 
 // ============================================
 // Response Helpers
@@ -192,7 +216,8 @@ async function setLastSyncTime(kv) {
 
 async function shouldSyncFromVps(kv) {
   const lastSync = await getLastSyncTime(kv);
-  return Date.now() - lastSync > VPS_SYNC_INTERVAL_MS;
+  const intervalMs = await getSyncIntervalMs(kv);
+  return Date.now() - lastSync > intervalMs;
 }
 
 async function syncDynamicRulesFromVps(kv, vpsApiUrl, vpsApiToken) {
@@ -643,16 +668,37 @@ async function handleVpsSyncStatus(env) {
     const lastSync = await getLastSyncTime(env.EMAIL_FILTER_KV);
     const rulesData = await getAllRulesData(env.EMAIL_FILTER_KV);
     const vpsRules = (rulesData.dynamic || []).filter(r => r.fromVps);
+    const syncConfig = await getVpsSyncConfig(env.EMAIL_FILTER_KV);
     
     return successResponse({
       configured: !!(env.VPS_API_URL && env.VPS_API_TOKEN),
       vpsApiUrl: env.VPS_API_URL ? env.VPS_API_URL.replace(/\/api.*$/, '') : null,
       lastSyncAt: lastSync ? new Date(lastSync).toISOString() : null,
       vpsRulesCount: vpsRules.length,
-      syncIntervalMinutes: VPS_SYNC_INTERVAL_MS / 60000,
+      syncIntervalMinutes: syncConfig.syncIntervalMinutes,
     });
   } catch (error) {
     return errorResponse('INTERNAL_ERROR', 'Failed to get sync status', 500);
+  }
+}
+
+async function handleGetVpsSyncConfig(env) {
+  try {
+    const config = await getVpsSyncConfig(env.EMAIL_FILTER_KV);
+    return successResponse(config);
+  } catch (error) {
+    return errorResponse('INTERNAL_ERROR', 'Failed to get sync config', 500);
+  }
+}
+
+async function handleSetVpsSyncConfig(request, env) {
+  try {
+    const body = await request.json();
+    const config = await setVpsSyncConfig(env.EMAIL_FILTER_KV, body);
+    return successResponse(config);
+  } catch (error) {
+    if (error.code) return errorResponse(error.code, error.message, 400);
+    return errorResponse('INTERNAL_ERROR', 'Failed to set sync config', 500);
   }
 }
 
@@ -744,6 +790,10 @@ async function handleRequest(request, env) {
     else response = errorResponse('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
   } else if (route === '/api/vps/status') {
     if (method === 'GET') response = await handleVpsSyncStatus(env);
+    else response = errorResponse('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
+  } else if (route === '/api/vps/config') {
+    if (method === 'GET') response = await handleGetVpsSyncConfig(env);
+    else if (method === 'PUT') response = await handleSetVpsSyncConfig(request, env);
     else response = errorResponse('METHOD_NOT_ALLOWED', 'Method not allowed', 405);
   } else {
     response = errorResponse('NOT_FOUND', 'Not found', 404);
@@ -955,9 +1005,22 @@ function getAdminHtml() {
             <button class="btn btn-primary" id="sync-vps-btn">从 VPS 同步</button>
           </div>
           <div class="card" id="vps-sync-status" style="margin-bottom:16px;padding:12px;background:#f1f5f9;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
               <span id="vps-status-text">VPS 同步状态: 检查中...</span>
               <span id="vps-rules-count" style="color:#64748b;font-size:.875rem;"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:.875rem;">
+              <label>同步间隔:</label>
+              <select id="sync-interval" style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:4px;">
+                <option value="1">1 分钟</option>
+                <option value="2">2 分钟</option>
+                <option value="5">5 分钟</option>
+                <option value="10">10 分钟</option>
+                <option value="15">15 分钟</option>
+                <option value="30">30 分钟</option>
+                <option value="60">60 分钟</option>
+              </select>
+              <button class="btn btn-secondary" id="save-sync-interval-btn" style="padding:4px 12px;font-size:.75rem;">保存</button>
             </div>
           </div>
           <div id="dynamic-list"></div>
@@ -1384,6 +1447,8 @@ function getAdminHtml() {
             $('vps-rules-count').textContent = '';
             $('sync-vps-btn').disabled = true;
           }
+          // 设置同步间隔下拉框
+          $('sync-interval').value = d.syncIntervalMinutes || 5;
         }
       } catch {
         $('vps-status-text').textContent = '❌ 获取状态失败';
@@ -1406,6 +1471,23 @@ function getAdminHtml() {
       } finally {
         $('sync-vps-btn').disabled = false;
         $('sync-vps-btn').textContent = '从 VPS 同步';
+      }
+    }
+
+    async function saveSyncInterval() {
+      const interval = parseInt($('sync-interval').value, 10);
+      try {
+        const r = await api('/api/vps/config', {
+          method: 'PUT',
+          body: JSON.stringify({ syncIntervalMinutes: interval })
+        });
+        if (r.success) {
+          toast('同步间隔已保存');
+        } else {
+          toast((r.error && r.error.message) || '保存失败', 'error');
+        }
+      } catch {
+        toast('保存失败', 'error');
       }
     }
 
@@ -1494,6 +1576,7 @@ function getAdminHtml() {
     $('add-rule-btn').onclick = () => openEd(null, 'manual');
     $('add-whitelist-btn').onclick = () => openEd(null, 'whitelist');
     $('sync-vps-btn').onclick = syncFromVps;
+    $('save-sync-interval-btn').onclick = saveSyncInterval;
     $('rule-match-mode').onchange = updateHint;
     $('rule-form').onsubmit = e => { e.preventDefault(); saveRule(); };
     $('cancel-rule').onclick = closeEd;

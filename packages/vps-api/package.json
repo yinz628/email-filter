@@ -1,0 +1,31 @@
+{
+  "name": "@email-filter/vps-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@email-filter/shared": "workspace:*",
+    "fastify": "^4.25.0",
+    "@fastify/cors": "^8.5.0",
+    "better-sqlite3": "^9.2.2",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.2",
+    "tsx": "^4.7.0",
+    "vitest": "^1.0.0",
+    "fast-check": "^3.14.0",
+    "sql.js": "^1.10.0"
+  }
+}

@@ -1,0 +1,26 @@
+name = "email-filter-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "email-filter-db"
+database_id = "951a9568-ceaf-443a-80fb-15404ceb7364"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Email routing - 使Worker出现在Email Workers列表中
+# 注意：需要在Cloudflare Dashboard中配置Email Routing才能生效
+[[send_email]]
+name = "SEND_EMAIL"
+
+# Build configuration
+[build]
+command = ""
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"

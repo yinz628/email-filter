@@ -1,0 +1,44 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+
+# Development files
+.git
+.gitignore
+.vscode
+.kiro
+
+# Environment files (will be passed via docker-compose)
+.env
+.env.*
+!.env.example
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+coverage
+
+# Wrangler state
+**/.wrangler
+
+# Documentation
+*.md
+!README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*

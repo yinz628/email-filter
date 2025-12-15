@@ -289,6 +289,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Log Detail Modal -->
+  <div id="log-detail-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>日志详情</h3>
+        <button class="modal-close" onclick="hideModal('log-detail-modal')">&times;</button>
+      </div>
+      <div id="log-detail-content"></div>
+    </div>
+  </div>
+
   <!-- Add Rule Modal -->
   <div id="add-rule-modal" class="modal hidden">
     <div class="modal-content">
@@ -636,7 +647,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } catch (e) { console.error('Error loading logs:', e); }
     }
 
+    let currentLogs = [];
+    
     function renderLogs(logs) {
+      currentLogs = logs;
       const tbody = document.getElementById('logs-table');
       if (logs.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无日志</td></tr>';
@@ -648,7 +662,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         admin_action: '<span style="color:#4a90d9">⚙️ 管理</span>',
         system: '<span style="color:#95a5a6">🖥️ 系统</span>'
       };
-      tbody.innerHTML = logs.map(log => {
+      tbody.innerHTML = logs.map((log, idx) => {
         const time = new Date(log.createdAt).toLocaleString('zh-CN');
         const cat = categoryLabels[log.category] || log.category;
         const d = log.details || {};
@@ -656,15 +670,34 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const from = d.from || '-';
         const to = d.to || '-';
         const rule = d.matchedRule || '-';
-        return '<tr>' +
+        return '<tr style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' +
           '<td style="font-size:12px;color:#666">' + time + '</td>' +
           '<td>' + cat + '</td>' +
-          '<td title="' + escapeHtml(subject) + '">' + escapeHtml(subject.length > 25 ? subject.substring(0,25) + '...' : subject) + '</td>' +
-          '<td style="font-size:12px" title="' + escapeHtml(from) + '">' + escapeHtml(from.length > 22 ? from.substring(0,22) + '...' : from) + '</td>' +
-          '<td style="font-size:12px" title="' + escapeHtml(to) + '">' + escapeHtml(to.length > 22 ? to.substring(0,22) + '...' : to) + '</td>' +
+          '<td>' + escapeHtml(subject.length > 25 ? subject.substring(0,25) + '...' : subject) + '</td>' +
+          '<td style="font-size:12px">' + escapeHtml(from.length > 22 ? from.substring(0,22) + '...' : from) + '</td>' +
+          '<td style="font-size:12px">' + escapeHtml(to.length > 22 ? to.substring(0,22) + '...' : to) + '</td>' +
           '<td style="font-size:12px;color:#888">' + escapeHtml(rule) + '</td>' +
           '</tr>';
       }).join('');
+    }
+    
+    function showLogDetail(idx) {
+      const log = currentLogs[idx];
+      if (!log) return;
+      const d = log.details || {};
+      const time = new Date(log.createdAt).toLocaleString('zh-CN');
+      const categoryNames = {email_forward:'转发',email_drop:'拦截',admin_action:'管理操作',system:'系统'};
+      const content = 
+        '<p><strong>时间:</strong> ' + time + '</p>' +
+        '<p><strong>类型:</strong> ' + (categoryNames[log.category] || log.category) + '</p>' +
+        '<p><strong>消息:</strong> ' + escapeHtml(log.message) + '</p>' +
+        '<hr style="margin:10px 0;border:none;border-top:1px solid #eee">' +
+        '<p><strong>主题:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.subject || '-') + '</p>' +
+        '<p><strong>发件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.from || '-') + '</p>' +
+        '<p><strong>收件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.to || '-') + '</p>' +
+        '<p><strong>命中规则:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.matchedRule || '-') + '</p>';
+      document.getElementById('log-detail-content').innerHTML = content;
+      showModal('log-detail-modal');
     }
 
     function renderLogCounts(counts) {

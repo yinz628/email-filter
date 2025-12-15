@@ -29,3 +29,7 @@ command = ""
 [dev]
 port = 8788
 local_protocol = "http"
+
+# Observability - Enable Workers Logs in Cloudflare Dashboard
+[observability]
+enabled = true

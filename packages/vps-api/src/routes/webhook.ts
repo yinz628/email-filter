@@ -12,6 +12,7 @@ import { EmailService } from '../services/email.service.js';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { WorkerRepository } from '../db/worker-repository.js';
+import { LogRepository } from '../db/log-repository.js';
 import { getDatabase } from '../db/index.js';
 import { config } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -61,6 +62,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       const workerRepository = new WorkerRepository(db);
       const ruleRepository = new RuleRepository(db);
       const statsRepository = new StatsRepository(db);
+      const logRepository = new LogRepository(db);
 
       // Find worker configuration by name (if provided)
       const worker = payload.workerName
@@ -75,7 +77,8 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         ruleRepository,
         statsRepository,
         defaultForwardTo,
-        workerId
+        workerId,
+        logRepository
       );
 
       // Process the email

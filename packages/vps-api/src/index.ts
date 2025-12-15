@@ -10,6 +10,7 @@ import {
   forwardRoutes,
   workerRoutes,
   frontendRoutes,
+  logsRoutes,
 } from './routes/index.js';
 
 // Create Fastify instance
@@ -61,6 +62,7 @@ await fastify.register(statsRoutes, { prefix: '/api/stats' });
 await fastify.register(dynamicRoutes, { prefix: '/api/dynamic' });
 await fastify.register(forwardRoutes, { prefix: '/api/forward' });
 await fastify.register(workerRoutes, { prefix: '/api/workers' });
+await fastify.register(logsRoutes, { prefix: '/api/logs' });
 
 // Start server
 async function start() {

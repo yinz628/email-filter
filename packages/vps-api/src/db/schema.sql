@@ -100,3 +100,17 @@ CREATE TABLE IF NOT EXISTS watch_stats (
   last_hit_at TEXT,
   FOREIGN KEY (rule_id) REFERENCES watch_rules(id) ON DELETE CASCADE
 );
+
+-- 系统日志表
+CREATE TABLE IF NOT EXISTS system_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL CHECK(category IN ('email_forward', 'email_drop', 'admin_action', 'system')),
+  level TEXT NOT NULL DEFAULT 'info' CHECK(level IN ('info', 'warn', 'error')),
+  message TEXT NOT NULL,
+  details TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_category ON system_logs(category);
+CREATE INDEX IF NOT EXISTS idx_logs_created ON system_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_level ON system_logs(level);

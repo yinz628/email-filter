@@ -11,6 +11,7 @@ import type { EmailWebhookPayload, FilterDecision, FilterRule } from '@email-fil
 import { FilterService, type FilterResult } from './filter.service.js';
 import type { RuleRepository } from '../db/rule-repository.js';
 import type { StatsRepository } from '../db/stats-repository.js';
+import type { LogRepository } from '../db/log-repository.js';
 
 /**
  * Result of email processing with additional metadata
@@ -33,7 +34,8 @@ export class EmailService {
     private ruleRepository: RuleRepository,
     private statsRepository: StatsRepository,
     defaultForwardTo: string,
-    private workerId?: string
+    private workerId?: string,
+    private logRepository?: LogRepository
   ) {
     this.filterService = new FilterService(defaultForwardTo);
   }
@@ -62,6 +64,9 @@ export class EmailService {
     // Step 3 & 4: Update statistics (global and rule-specific)
     this.updateStats(filterResult);
 
+    // Step 5: Log the email processing
+    this.logEmailProcessing(payload, filterResult);
+
     const processingTimeMs = Date.now() - startTime;
 
     return {
@@ -70,6 +75,28 @@ export class EmailService {
       processingTimeMs,
       workerId: this.workerId,
     };
+  }
+
+  /**
+   * Log email processing result
+   */
+  private logEmailProcessing(payload: EmailWebhookPayload, filterResult: FilterResult): void {
+    if (!this.logRepository) return;
+
+    const category = filterResult.action === 'drop' ? 'email_drop' : 'email_forward';
+    const message = filterResult.action === 'drop' 
+      ? `拦截邮件: ${payload.subject}`
+      : `转发邮件: ${payload.subject}`;
+    
+    this.logRepository.create(category, message, {
+      from: payload.from,
+      to: payload.to,
+      subject: payload.subject,
+      action: filterResult.action,
+      forwardTo: filterResult.forwardTo,
+      matchedRule: filterResult.matchedRule?.pattern,
+      reason: filterResult.reason,
+    });
   }
 
   /**

@@ -74,6 +74,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab active" onclick="showTab('workers')">Worker 实例</button>
       <button class="tab" onclick="showTab('rules')">过滤规则</button>
       <button class="tab" onclick="showTab('dynamic')">动态规则</button>
+      <button class="tab" onclick="showTab('logs')">日志</button>
       <button class="tab" onclick="showTab('stats')">统计信息</button>
       <button class="tab" onclick="showTab('settings')">设置</button>
     </div>
@@ -178,6 +179,42 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </thead>
           <tbody id="dynamic-rules-table"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Logs Tab -->
+    <div id="logs-tab" class="tab-content hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">系统日志</h2>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-secondary" onclick="loadLogs()">🔄 刷新</button>
+            <button class="btn btn-danger btn-sm" onclick="cleanupLogs()">清理旧日志</button>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <select id="log-category-filter" onchange="loadLogs()">
+            <option value="">全部类型</option>
+            <option value="email_forward">📤 转发</option>
+            <option value="email_drop">🚫 拦截</option>
+            <option value="admin_action">⚙️ 管理操作</option>
+            <option value="system">🖥️ 系统</option>
+          </select>
+          <span id="log-counts" style="color:#666;font-size:13px;"></span>
+        </div>
+        <div style="max-height:500px;overflow-y:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:140px;">时间</th>
+                <th style="width:80px;">类型</th>
+                <th>消息</th>
+                <th style="width:200px;">详情</th>
+              </tr>
+            </thead>
+            <tbody id="logs-table"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -314,6 +351,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'workers') loadWorkers();
       if (name === 'rules') loadRules();
       if (name === 'dynamic') loadDynamicConfig();
+      if (name === 'logs') loadLogs();
       if (name === 'stats') loadStats();
       if (name === 'settings') loadSettings();
     }
@@ -553,6 +591,63 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           showAlert('保存失败', 'error');
         }
       } catch (e) { showAlert('保存失败', 'error'); }
+    }
+
+    // Logs
+    async function loadLogs() {
+      if (!apiToken) return;
+      const category = document.getElementById('log-category-filter').value;
+      let url = '/api/logs?limit=200';
+      if (category) url += '&category=' + category;
+      
+      try {
+        const res = await fetch(url, { headers: getHeaders() });
+        const data = await res.json();
+        renderLogs(data.logs || []);
+        renderLogCounts(data.counts || {});
+      } catch (e) { console.error('Error loading logs:', e); }
+    }
+
+    function renderLogs(logs) {
+      const tbody = document.getElementById('logs-table');
+      if (logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999">暂无日志</td></tr>';
+        return;
+      }
+      const categoryLabels = {
+        email_forward: '<span style="color:#27ae60">📤 转发</span>',
+        email_drop: '<span style="color:#e74c3c">🚫 拦截</span>',
+        admin_action: '<span style="color:#4a90d9">⚙️ 管理</span>',
+        system: '<span style="color:#95a5a6">🖥️ 系统</span>'
+      };
+      tbody.innerHTML = logs.map(log => {
+        const time = new Date(log.createdAt).toLocaleString('zh-CN');
+        const cat = categoryLabels[log.category] || log.category;
+        const details = log.details ? '<small style="color:#888">' + escapeHtml(JSON.stringify(log.details).substring(0, 50)) + '...</small>' : '-';
+        return '<tr><td style="font-size:12px;color:#666">' + time + '</td>' +
+          '<td>' + cat + '</td>' +
+          '<td>' + escapeHtml(log.message) + '</td>' +
+          '<td>' + details + '</td></tr>';
+      }).join('');
+    }
+
+    function renderLogCounts(counts) {
+      const total = (counts.email_forward || 0) + (counts.email_drop || 0) + (counts.admin_action || 0) + (counts.system || 0);
+      document.getElementById('log-counts').innerHTML = 
+        '转发: ' + (counts.email_forward || 0) + ' | ' +
+        '拦截: ' + (counts.email_drop || 0) + ' | ' +
+        '管理: ' + (counts.admin_action || 0) + ' | ' +
+        '总计: ' + total;
+    }
+
+    async function cleanupLogs() {
+      if (!confirm('确定清理7天前的旧日志？')) return;
+      try {
+        const res = await fetch('/api/logs/cleanup', { method: 'DELETE', headers: getHeaders() });
+        const data = await res.json();
+        showAlert('已清理 ' + data.deleted + ' 条旧日志');
+        loadLogs();
+      } catch (e) { showAlert('清理失败', 'error'); }
     }
 
     // Stats

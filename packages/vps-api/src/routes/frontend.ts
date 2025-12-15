@@ -524,9 +524,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function toggleRule(id) {
       try {
-        await fetch('/api/rules/' + id + '/toggle', { method: 'POST', headers: getHeaders() });
-        loadRules();
-      } catch (e) {}
+        const res = await fetch('/api/rules/' + id + '/toggle', { method: 'POST', headers: getHeaders() });
+        if (res.ok) {
+          showAlert('规则状态已切换');
+          loadRules();
+        } else {
+          const data = await res.json();
+          showAlert(data.message || '切换失败', 'error');
+        }
+      } catch (e) { 
+        showAlert('切换失败: ' + e.message, 'error'); 
+      }
     }
 
     async function deleteRule(id) {

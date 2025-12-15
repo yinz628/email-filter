@@ -13,6 +13,8 @@ VPS_API_TOKEN = "nature123"
 DEFAULT_FORWARD_TO = "wangshengshan5@gmail.com"
 # Unique worker name - must match the name registered in VPS API
 WORKER_NAME = "aloemail.store worker"
+# Enable debug logging (true/false) - set to false in production
+DEBUG_LOGGING = "true"
 
 # Email routing binding - enables this worker to appear in Email Workers list
 # and allows forwarding emails using message.forward()

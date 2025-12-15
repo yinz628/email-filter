@@ -19,8 +19,17 @@ export interface Env {
   DEFAULT_FORWARD_TO: string;
   /** Unique worker name for routing to correct configuration on VPS */
   WORKER_NAME: string;
+  /** Enable debug logging (true/false) */
+  DEBUG_LOGGING: string;
   /** Send email binding for forwarding */
   SEB: SendEmail;
+}
+
+/** Debug logger - only logs when DEBUG_LOGGING is enabled */
+function debugLog(env: Env, ...args: unknown[]): void {
+  if (env.DEBUG_LOGGING === 'true') {
+    console.log(...args);
+  }
 }
 
 /** Webhook payload sent to VPS API */
@@ -58,8 +67,8 @@ async function getFilterDecision(
   env: Env
 ): Promise<FilterDecision | null> {
   try {
-    console.log(`Calling VPS API: ${env.VPS_API_URL}`);
-    console.log(`Payload: ${JSON.stringify(payload)}`);
+    debugLog(env, `[DEBUG] Calling VPS API: ${env.VPS_API_URL}`);
+    debugLog(env, `[DEBUG] Payload: ${JSON.stringify(payload)}`);
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
@@ -76,7 +85,7 @@ async function getFilterDecision(
 
     clearTimeout(timeoutId);
 
-    console.log(`VPS API response status: ${response.status}`);
+    debugLog(env, `[DEBUG] VPS API response status: ${response.status}`);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -85,7 +94,7 @@ async function getFilterDecision(
     }
 
     const result = await response.json() as FilterDecision;
-    console.log(`Filter decision: ${JSON.stringify(result)}`);
+    debugLog(env, `[DEBUG] Filter decision: ${JSON.stringify(result)}`);
     return result;
   } catch (error) {
     // VPS unreachable - will fallback to direct forwarding
@@ -102,6 +111,12 @@ export default {
     const subject = message.headers.get('subject') || '';
     const messageId = message.headers.get('message-id') || crypto.randomUUID();
 
+    debugLog(env, `[DEBUG] ========== Email Received ==========`);
+    debugLog(env, `[DEBUG] From: ${from}`);
+    debugLog(env, `[DEBUG] To: ${to}`);
+    debugLog(env, `[DEBUG] Subject: ${subject}`);
+    debugLog(env, `[DEBUG] Message-ID: ${messageId}`);
+
     // Build minimal webhook payload
     const payload: EmailWebhookPayload = {
       from,
@@ -117,6 +132,7 @@ export default {
 
     // Fallback: if VPS is unreachable, forward to default address
     if (!decision) {
+      debugLog(env, `[DEBUG] VPS unreachable, forwarding to default: ${env.DEFAULT_FORWARD_TO}`);
       await message.forward(env.DEFAULT_FORWARD_TO);
       return;
     }
@@ -124,7 +140,10 @@ export default {
     // Execute the filter decision
     if (decision.action === 'forward') {
       const forwardTo = decision.forwardTo || env.DEFAULT_FORWARD_TO;
+      debugLog(env, `[DEBUG] Action: FORWARD to ${forwardTo}`);
       await message.forward(forwardTo);
+    } else {
+      debugLog(env, `[DEBUG] Action: DROP (reason: ${decision.reason || 'no reason'})`);
     }
     // For 'drop' action: do nothing (silent drop)
     // Not calling any method causes the email to be silently discarded

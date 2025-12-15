@@ -184,7 +184,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     <!-- Stats Tab -->
     <div id="stats-tab" class="tab-content hidden">
       <div class="card">
-        <h2>统计信息</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">统计信息</h2>
+          <button class="btn btn-secondary" onclick="loadStats()">🔄 刷新</button>
+        </div>
         <div class="stats-grid" id="stats-container">
           <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">总处理数</div></div>
           <div class="stat-card"><div class="stat-value" id="stat-forwarded">-</div><div class="stat-label">已转发</div></div>

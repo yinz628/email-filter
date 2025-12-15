@@ -8,11 +8,11 @@ compatibility_date = "2024-01-01"
 # Environment variables - configure these for your deployment
 # These are placeholder values - update with your actual VPS API details
 [vars]
-VPS_API_URL = "https://your-vps-domain.com/api/webhook/email"
-VPS_API_TOKEN = "your-secret-token-here"
-DEFAULT_FORWARD_TO = "your-email@gmail.com"
+VPS_API_URL = "https://hkg2-aki.feimails.com/webhook"
+VPS_API_TOKEN = "nature123"
+DEFAULT_FORWARD_TO = "wangshengshan5@gmail.com"
 # Unique worker name - must match the name registered in VPS API
-WORKER_NAME = "my-domain-worker"
+WORKER_NAME = "aloemail.store worker"
 
 # Email routing binding - enables this worker to appear in Email Workers list
 # and allows forwarding emails using message.forward()

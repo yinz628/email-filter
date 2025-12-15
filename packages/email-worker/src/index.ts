@@ -58,6 +58,9 @@ async function getFilterDecision(
   env: Env
 ): Promise<FilterDecision | null> {
   try {
+    console.log(`Calling VPS API: ${env.VPS_API_URL}`);
+    console.log(`Payload: ${JSON.stringify(payload)}`);
+    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
@@ -73,12 +76,17 @@ async function getFilterDecision(
 
     clearTimeout(timeoutId);
 
+    console.log(`VPS API response status: ${response.status}`);
+
     if (!response.ok) {
-      console.error(`VPS API returned ${response.status}`);
+      const errorText = await response.text();
+      console.error(`VPS API returned ${response.status}: ${errorText}`);
       return null;
     }
 
-    return await response.json() as FilterDecision;
+    const result = await response.json() as FilterDecision;
+    console.log(`Filter decision: ${JSON.stringify(result)}`);
+    return result;
   } catch (error) {
     // VPS unreachable - will fallback to direct forwarding
     console.error('VPS API error:', error);

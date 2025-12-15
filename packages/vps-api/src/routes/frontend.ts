@@ -187,6 +187,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <h2>统计信息</h2>
         <div class="stats-grid" id="stats-container">
           <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">总处理数</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-forwarded">-</div><div class="stat-label">已转发</div></div>
           <div class="stat-card"><div class="stat-value" id="stat-deleted">-</div><div class="stat-label">已拦截</div></div>
           <div class="stat-card"><div class="stat-value" id="stat-rules">-</div><div class="stat-label">规则数量</div></div>
           <div class="stat-card"><div class="stat-value" id="stat-workers">-</div><div class="stat-label">Worker 数量</div></div>
@@ -567,6 +568,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         // stats.overall contains the aggregated statistics
         const overall = stats.overall || {};
         document.getElementById('stat-total').textContent = overall.totalProcessed || 0;
+        document.getElementById('stat-forwarded').textContent = overall.totalForwarded || 0;
         document.getElementById('stat-deleted').textContent = overall.totalDeleted || 0;
         document.getElementById('stat-rules').textContent = (rules.rules || []).length;
         document.getElementById('stat-workers').textContent = (workersData.workers || []).length;

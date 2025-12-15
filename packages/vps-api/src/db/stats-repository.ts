@@ -20,6 +20,7 @@ export interface OverallStats {
   totalRules: number;
   enabledRules: number;
   totalProcessed: number;
+  totalForwarded: number;
   totalDeleted: number;
   totalErrors: number;
 }
@@ -112,22 +113,65 @@ export class StatsRepository {
     `);
     const rulesResult = rulesStmt.get() as { total_rules: number; enabled_rules: number };
 
-    const statsStmt = this.db.prepare(`
-      SELECT 
-        COALESCE(SUM(total_processed), 0) as total_processed,
-        COALESCE(SUM(deleted_count), 0) as total_deleted,
-        COALESCE(SUM(error_count), 0) as total_errors
-      FROM rule_stats
+    // Get global stats
+    const globalStmt = this.db.prepare(`
+      SELECT total_processed, total_forwarded, total_deleted
+      FROM global_stats WHERE id = 1
     `);
-    const statsResult = statsStmt.get() as { total_processed: number; total_deleted: number; total_errors: number };
+    const globalResult = globalStmt.get() as { total_processed: number; total_forwarded: number; total_deleted: number } | undefined;
+
+    // Get error count from rule_stats
+    const errorStmt = this.db.prepare(`
+      SELECT COALESCE(SUM(error_count), 0) as total_errors FROM rule_stats
+    `);
+    const errorResult = errorStmt.get() as { total_errors: number };
 
     return {
       totalRules: rulesResult.total_rules,
       enabledRules: rulesResult.enabled_rules || 0,
-      totalProcessed: statsResult.total_processed,
-      totalDeleted: statsResult.total_deleted,
-      totalErrors: statsResult.total_errors,
+      totalProcessed: globalResult?.total_processed || 0,
+      totalForwarded: globalResult?.total_forwarded || 0,
+      totalDeleted: globalResult?.total_deleted || 0,
+      totalErrors: errorResult.total_errors,
     };
+  }
+
+  /**
+   * Increment global processed count (email forwarded)
+   */
+  incrementGlobalForwarded(): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE global_stats 
+      SET total_processed = total_processed + 1, 
+          total_forwarded = total_forwarded + 1, 
+          last_updated = ?
+      WHERE id = 1
+    `).run(now);
+  }
+
+  /**
+   * Increment global deleted count (email dropped)
+   */
+  incrementGlobalDeleted(): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE global_stats 
+      SET total_processed = total_processed + 1, 
+          total_deleted = total_deleted + 1, 
+          last_updated = ?
+      WHERE id = 1
+    `).run(now);
+  }
+
+  /**
+   * Initialize global stats table if not exists
+   */
+  initGlobalStats(): void {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO global_stats (id, total_processed, total_forwarded, total_deleted, last_updated)
+      VALUES (1, 0, 0, 0, datetime('now'))
+    `).run();
   }
 
   /**

@@ -59,10 +59,8 @@ export class EmailService {
     // Step 2: Process through filter service
     const filterResult = this.filterService.processEmail(payload, rules);
 
-    // Step 3 & 4: Update statistics and lastHitAt if a rule matched
-    if (filterResult.matchedRule) {
-      this.updateRuleStats(filterResult);
-    }
+    // Step 3 & 4: Update statistics (global and rule-specific)
+    this.updateStats(filterResult);
 
     const processingTimeMs = Date.now() - startTime;
 
@@ -75,24 +73,31 @@ export class EmailService {
   }
 
   /**
-   * Update statistics for a matched rule
-   * - Increment appropriate counter based on action
-   * - Update lastHitAt timestamp
+   * Update statistics for email processing
+   * - Increment global stats
+   * - Increment rule-specific stats if a rule matched
+   * - Update lastHitAt timestamp for matched rule
    */
-  private updateRuleStats(filterResult: FilterResult): void {
-    const ruleId = filterResult.matchedRule?.id;
-    if (!ruleId) return;
-
-    // Update lastHitAt on the rule
-    this.ruleRepository.updateLastHit(ruleId);
-
-    // Update statistics based on action
+  private updateStats(filterResult: FilterResult): void {
+    // Always update global stats
     if (filterResult.action === 'drop') {
-      // Email was dropped/deleted
-      this.statsRepository.incrementDeleted(ruleId);
+      this.statsRepository.incrementGlobalDeleted();
     } else {
-      // Email was forwarded (whitelist match)
-      this.statsRepository.incrementProcessed(ruleId);
+      this.statsRepository.incrementGlobalForwarded();
+    }
+
+    // Update rule-specific stats if a rule matched
+    const ruleId = filterResult.matchedRule?.id;
+    if (ruleId) {
+      // Update lastHitAt on the rule
+      this.ruleRepository.updateLastHit(ruleId);
+
+      // Update rule statistics based on action
+      if (filterResult.action === 'drop') {
+        this.statsRepository.incrementDeleted(ruleId);
+      } else {
+        this.statsRepository.incrementProcessed(ruleId);
+      }
     }
   }
 

@@ -68,6 +68,19 @@ CREATE INDEX IF NOT EXISTS idx_subject_tracker_worker ON email_subject_tracker(w
 CREATE INDEX IF NOT EXISTS idx_subject_tracker_hash ON email_subject_tracker(subject_hash);
 CREATE INDEX IF NOT EXISTS idx_subject_tracker_received ON email_subject_tracker(received_at);
 
+-- 全局统计表
+CREATE TABLE IF NOT EXISTS global_stats (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  total_processed INTEGER NOT NULL DEFAULT 0,
+  total_forwarded INTEGER NOT NULL DEFAULT 0,
+  total_deleted INTEGER NOT NULL DEFAULT 0,
+  last_updated TEXT NOT NULL
+);
+
+-- 初始化全局统计
+INSERT OR IGNORE INTO global_stats (id, total_processed, total_forwarded, total_deleted, last_updated)
+VALUES (1, 0, 0, 0, datetime('now'));
+
 -- 监控规则表
 CREATE TABLE IF NOT EXISTS watch_rules (
   id TEXT PRIMARY KEY,

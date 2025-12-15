@@ -1,48 +1,50 @@
-# Build stage - use npm instead of pnpm for better native module support
-FROM node:20-alpine AS builder
+# Single stage build with Debian to ensure native modules work
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# Install build tools
-RUN apk add --no-cache python3 make g++
+# Install build tools for native modules
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    build-essential \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy package files
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Copy workspace config
+COPY pnpm-workspace.yaml ./
 COPY package.json ./
+COPY pnpm-lock.yaml ./
+
+# Copy package.json files
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/vps-api/package.json ./packages/vps-api/
 
-# Copy source
+# Install dependencies (this will compile better-sqlite3)
+RUN pnpm install --frozen-lockfile
+
+# Copy source files
 COPY tsconfig.json ./
 COPY packages/shared/ ./packages/shared/
 COPY packages/vps-api/ ./packages/vps-api/
 
-# Install and build shared
-WORKDIR /app/packages/shared
-RUN npm install
-RUN npm run build
+# Build shared first, then vps-api
+RUN pnpm --filter @email-filter/shared build && \
+    pnpm --filter @email-filter/vps-api build
 
-# Install and build vps-api
-WORKDIR /app/packages/vps-api
-RUN npm install
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine
-
-WORKDIR /app
-
-# Copy built shared
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/packages/shared/package.json ./packages/shared/
-
-# Copy built vps-api
-COPY --from=builder /app/packages/vps-api/dist ./packages/vps-api/dist
-COPY --from=builder /app/packages/vps-api/package.json ./packages/vps-api/
-COPY --from=builder /app/packages/vps-api/node_modules ./packages/vps-api/node_modules
-COPY --from=builder /app/packages/vps-api/src/db/schema.sql ./packages/vps-api/dist/db/
+# Copy schema.sql to dist
+RUN cp packages/vps-api/src/db/schema.sql packages/vps-api/dist/db/
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R node:node /app/data
+
+# Clean up build tools to reduce image size (optional, keeps native modules)
+RUN apt-get purge -y python3 build-essential && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 USER node
 WORKDIR /app/packages/vps-api

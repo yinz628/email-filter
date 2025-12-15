@@ -73,6 +73,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     <div class="tabs">
       <button class="tab active" onclick="showTab('workers')">Worker 实例</button>
       <button class="tab" onclick="showTab('rules')">过滤规则</button>
+      <button class="tab" onclick="showTab('dynamic')">动态规则</button>
       <button class="tab" onclick="showTab('stats')">统计信息</button>
       <button class="tab" onclick="showTab('settings')">设置</button>
     </div>
@@ -130,6 +131,52 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </tr>
           </thead>
           <tbody id="rules-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Dynamic Rules Tab -->
+    <div id="dynamic-tab" class="tab-content hidden">
+      <div class="card">
+        <h2>动态规则配置</h2>
+        <p style="color:#666;margin-bottom:15px">当同一主题的邮件在指定时间窗口内超过阈值时，自动创建黑名单规则</p>
+        <div class="form-group">
+          <label>启用动态规则</label>
+          <select id="dynamic-enabled">
+            <option value="true">启用</option>
+            <option value="false">禁用</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>时间窗口（分钟）</label>
+            <input type="number" id="dynamic-time-window" min="1" value="60" placeholder="60">
+          </div>
+          <div class="form-group">
+            <label>触发阈值（次数）</label>
+            <input type="number" id="dynamic-threshold" min="1" value="5" placeholder="5">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>规则过期时间（小时）</label>
+          <input type="number" id="dynamic-expiration" min="1" value="48" placeholder="48">
+        </div>
+        <button class="btn btn-primary" onclick="saveDynamicConfig()">保存配置</button>
+      </div>
+      <div class="card">
+        <h2>自动生成的动态规则</h2>
+        <p style="color:#666;margin-bottom:15px">以下规则由系统根据邮件频率自动生成</p>
+        <table>
+          <thead>
+            <tr>
+              <th>规则内容</th>
+              <th>创建时间</th>
+              <th>最后命中</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="dynamic-rules-table"></tbody>
         </table>
       </div>
     </div>
@@ -262,6 +309,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       if (name === 'workers') loadWorkers();
       if (name === 'rules') loadRules();
+      if (name === 'dynamic') loadDynamicConfig();
       if (name === 'stats') loadStats();
       if (name === 'settings') loadSettings();
     }
@@ -446,6 +494,61 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         showAlert('删除成功');
         loadRules();
       } catch (e) { showAlert('删除失败', 'error'); }
+    }
+
+    // Dynamic Rules
+    async function loadDynamicConfig() {
+      if (!apiToken) return;
+      try {
+        const [configRes, rulesRes] = await Promise.all([
+          fetch('/api/dynamic/config', { headers: getHeaders() }),
+          fetch('/api/rules?category=dynamic', { headers: getHeaders() })
+        ]);
+        const config = await configRes.json();
+        const rulesData = await rulesRes.json();
+        
+        document.getElementById('dynamic-enabled').value = config.enabled ? 'true' : 'false';
+        document.getElementById('dynamic-time-window').value = config.timeWindowMinutes || 60;
+        document.getElementById('dynamic-threshold').value = config.thresholdCount || 5;
+        document.getElementById('dynamic-expiration').value = config.expirationHours || 48;
+        
+        renderDynamicRules(rulesData.rules || []);
+      } catch (e) { console.error('Error loading dynamic config:', e); }
+    }
+
+    function renderDynamicRules(rules) {
+      const tbody = document.getElementById('dynamic-rules-table');
+      if (rules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999">暂无动态规则</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rules.map(r => {
+        const status = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
+        const createdAt = new Date(r.createdAt).toLocaleString('zh-CN');
+        const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN') : '-';
+        return '<tr><td>' + escapeHtml(r.pattern) + '</td>' +
+          '<td>' + createdAt + '</td><td>' + lastHit + '</td><td>' + status + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteRule(\\'' + r.id + '\\'); loadDynamicConfig();">删除</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    async function saveDynamicConfig() {
+      const body = {
+        enabled: document.getElementById('dynamic-enabled').value === 'true',
+        timeWindowMinutes: parseInt(document.getElementById('dynamic-time-window').value) || 60,
+        thresholdCount: parseInt(document.getElementById('dynamic-threshold').value) || 5,
+        expirationHours: parseInt(document.getElementById('dynamic-expiration').value) || 48
+      };
+      try {
+        const res = await fetch('/api/dynamic/config', { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });
+        if (res.ok) {
+          showAlert('动态规则配置已保存');
+        } else {
+          showAlert('保存失败', 'error');
+        }
+      } catch (e) { showAlert('保存失败', 'error'); }
     }
 
     // Stats

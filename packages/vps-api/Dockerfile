@@ -1,67 +1,50 @@
-# Build stage
+# Build stage - use npm instead of pnpm for better native module support
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build tools for native modules
-RUN apk add --no-cache python3 make g++ git
-
-# Install pnpm and configure to run scripts
-RUN corepack enable && corepack prepare pnpm@latest --activate
-RUN pnpm config set ignore-scripts false
-
-# Copy workspace files
-COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
-COPY package.json ./
-COPY tsconfig.json ./
+# Install build tools
+RUN apk add --no-cache python3 make g++
 
 # Copy package files
+COPY package.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/vps-api/package.json ./packages/vps-api/
 
-# Install dependencies with scripts enabled
-RUN pnpm install --no-frozen-lockfile
-
-# Rebuild better-sqlite3 to ensure native module is compiled
-RUN cd /app && pnpm rebuild better-sqlite3
-
-# Copy source files
+# Copy source
+COPY tsconfig.json ./
 COPY packages/shared/ ./packages/shared/
 COPY packages/vps-api/ ./packages/vps-api/
 
-# Build shared package first
+# Install and build shared
 WORKDIR /app/packages/shared
-RUN pnpm build
+RUN npm install
+RUN npm run build
 
-# Build vps-api
+# Install and build vps-api
 WORKDIR /app/packages/vps-api
-RUN pnpm build
+RUN npm install
+RUN npm run build
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy everything from builder
-COPY --from=builder /app/node_modules ./node_modules
+# Copy built shared
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
-COPY --from=builder /app/packages/shared/node_modules ./packages/shared/node_modules
+
+# Copy built vps-api
 COPY --from=builder /app/packages/vps-api/dist ./packages/vps-api/dist
 COPY --from=builder /app/packages/vps-api/package.json ./packages/vps-api/
 COPY --from=builder /app/packages/vps-api/node_modules ./packages/vps-api/node_modules
 COPY --from=builder /app/packages/vps-api/src/db/schema.sql ./packages/vps-api/dist/db/
 
-# Copy workspace config
-COPY pnpm-workspace.yaml ./
-COPY package.json ./
-
 # Create data directory
 RUN mkdir -p /app/data && chown -R node:node /app/data
 
 USER node
-
 WORKDIR /app/packages/vps-api
 
 ENV NODE_ENV=production

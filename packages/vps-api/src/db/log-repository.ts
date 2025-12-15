@@ -26,6 +26,7 @@ export interface LogFilter {
   level?: LogLevel;
   limit?: number;
   offset?: number;
+  search?: string;
 }
 
 /**
@@ -83,6 +84,11 @@ export class LogRepository {
       query += ' AND level = ?';
       params.push(filter.level);
     }
+    if (filter?.search) {
+      query += ' AND (message LIKE ? OR details LIKE ?)';
+      const searchPattern = `%${filter.search}%`;
+      params.push(searchPattern, searchPattern);
+    }
 
     query += ' ORDER BY created_at DESC';
 
@@ -98,6 +104,35 @@ export class LogRepository {
     const stmt = this.db.prepare(query);
     const rows = stmt.all(...params) as LogRow[];
     return rows.map(row => this.rowToLog(row));
+  }
+
+  /**
+   * Delete logs by IDs
+   */
+  deleteByIds(ids: number[]): number {
+    if (ids.length === 0) return 0;
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = this.db.prepare(`DELETE FROM system_logs WHERE id IN (${placeholders})`);
+    const result = stmt.run(...ids);
+    return result.changes;
+  }
+
+  /**
+   * Delete logs by search criteria
+   */
+  deleteBySearch(search: string, category?: LogCategory): number {
+    let query = 'DELETE FROM system_logs WHERE (message LIKE ? OR details LIKE ?)';
+    const searchPattern = `%${search}%`;
+    const params: string[] = [searchPattern, searchPattern];
+    
+    if (category) {
+      query += ' AND category = ?';
+      params.push(category);
+    }
+    
+    const stmt = this.db.prepare(query);
+    const result = stmt.run(...params);
+    return result.changes;
   }
 
   /**

@@ -199,6 +199,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <div class="filter-bar">
+          <input type="text" id="log-search" placeholder="搜索主题/发件人..." style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;width:200px;" onkeydown="if(event.key==='Enter'){resetLogPage();loadLogs();}">
+          <button class="btn btn-sm btn-primary" onclick="resetLogPage(); loadLogs()">搜索</button>
           <select id="log-category-filter" onchange="resetLogPage(); loadLogs()">
             <option value="">全部类型</option>
             <option value="email_forward">📤 转发</option>
@@ -212,16 +214,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <option value="100">每页 100 条</option>
           </select>
           <span id="log-counts" style="color:#666;font-size:13px;"></span>
+          <button class="btn btn-sm btn-danger" id="batch-delete-btn" onclick="batchDeleteLogs()" style="display:none;">删除选中</button>
+          <button class="btn btn-sm btn-danger" id="search-delete-btn" onclick="deleteBySearch()" style="display:none;">删除搜索结果</button>
         </div>
         <div style="flex:1;overflow-y:auto;">
           <table>
             <thead style="position:sticky;top:0;background:#f8f9fa;">
               <tr>
-                <th style="width:150px;">时间</th>
+                <th style="width:40px;"><input type="checkbox" id="log-select-all" onchange="toggleSelectAllLogs()"></th>
+                <th style="width:140px;">时间</th>
                 <th style="width:70px;">类型</th>
-                <th style="width:200px;">主题</th>
-                <th style="width:180px;">发件人</th>
-                <th style="width:180px;">收件人</th>
+                <th style="width:180px;">主题</th>
+                <th style="width:160px;">发件人</th>
+                <th style="width:160px;">收件人</th>
                 <th>命中规则</th>
               </tr>
             </thead>
@@ -770,13 +775,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       logCurrentPage = 1;
     }
     
+    let currentSearchTerm = '';
+    
     async function loadLogs() {
       if (!apiToken) return;
       const category = document.getElementById('log-category-filter').value;
+      const search = document.getElementById('log-search').value.trim();
+      currentSearchTerm = search;
       const pageSize = parseInt(document.getElementById('log-page-size').value) || 50;
       const offset = (logCurrentPage - 1) * pageSize;
       let url = '/api/logs?limit=' + (pageSize + 1) + '&offset=' + offset;
       if (category) url += '&category=' + category;
+      if (search) url += '&search=' + encodeURIComponent(search);
       
       try {
         const res = await fetch(url, { headers: getHeaders() });
@@ -790,7 +800,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         renderLogs(displayLogs);
         renderLogCounts(data.counts || {});
         updateLogPagination();
+        updateBatchDeleteButtons();
       } catch (e) { console.error('Error loading logs:', e); }
+    }
+    
+    function updateBatchDeleteButtons() {
+      const searchDeleteBtn = document.getElementById('search-delete-btn');
+      if (currentSearchTerm) {
+        searchDeleteBtn.style.display = 'inline-block';
+        searchDeleteBtn.textContent = '删除搜索结果';
+      } else {
+        searchDeleteBtn.style.display = 'none';
+      }
     }
     
     function updateLogPagination() {
@@ -816,8 +837,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderLogs(logs) {
       currentLogs = logs;
       const tbody = document.getElementById('logs-table');
+      document.getElementById('log-select-all').checked = false;
+      document.getElementById('batch-delete-btn').style.display = 'none';
       if (logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无日志</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无日志</td></tr>';
         return;
       }
       const categoryLabels = {
@@ -834,15 +857,68 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const from = d.from || '-';
         const to = d.to || '-';
         const rule = d.matchedRule || '-';
-        return '<tr style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' +
-          '<td style="font-size:12px;color:#666">' + time + '</td>' +
-          '<td>' + cat + '</td>' +
-          '<td>' + escapeHtml(subject.length > 25 ? subject.substring(0,25) + '...' : subject) + '</td>' +
-          '<td style="font-size:12px">' + escapeHtml(from.length > 22 ? from.substring(0,22) + '...' : from) + '</td>' +
-          '<td style="font-size:12px">' + escapeHtml(to.length > 22 ? to.substring(0,22) + '...' : to) + '</td>' +
-          '<td style="font-size:12px;color:#888">' + escapeHtml(rule) + '</td>' +
+        return '<tr>' +
+          '<td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="' + log.id + '" onchange="updateBatchDeleteBtn()"></td>' +
+          '<td style="font-size:12px;color:#666;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + time + '</td>' +
+          '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + cat + '</td>' +
+          '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(subject.length > 22 ? subject.substring(0,22) + '...' : subject) + '</td>' +
+          '<td style="font-size:12px;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(from.length > 20 ? from.substring(0,20) + '...' : from) + '</td>' +
+          '<td style="font-size:12px;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(to.length > 20 ? to.substring(0,20) + '...' : to) + '</td>' +
+          '<td style="font-size:12px;color:#888;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(rule) + '</td>' +
           '</tr>';
       }).join('');
+    }
+    
+    function toggleSelectAllLogs() {
+      const selectAll = document.getElementById('log-select-all').checked;
+      document.querySelectorAll('.log-checkbox').forEach(cb => cb.checked = selectAll);
+      updateBatchDeleteBtn();
+    }
+    
+    function updateBatchDeleteBtn() {
+      const selected = document.querySelectorAll('.log-checkbox:checked').length;
+      const btn = document.getElementById('batch-delete-btn');
+      if (selected > 0) {
+        btn.style.display = 'inline-block';
+        btn.textContent = '删除选中 (' + selected + ')';
+      } else {
+        btn.style.display = 'none';
+      }
+    }
+    
+    async function batchDeleteLogs() {
+      const ids = Array.from(document.querySelectorAll('.log-checkbox:checked')).map(cb => parseInt(cb.dataset.id));
+      if (ids.length === 0) return;
+      if (!confirm('确定删除选中的 ' + ids.length + ' 条日志？')) return;
+      try {
+        const res = await fetch('/api/logs/batch', { 
+          method: 'DELETE', 
+          headers: getHeaders(),
+          body: JSON.stringify({ ids })
+        });
+        const data = await res.json();
+        showAlert('已删除 ' + data.deleted + ' 条日志');
+        loadLogs();
+      } catch (e) { showAlert('删除失败', 'error'); }
+    }
+    
+    async function deleteBySearch() {
+      if (!currentSearchTerm) return;
+      const category = document.getElementById('log-category-filter').value;
+      if (!confirm('确定删除所有匹配 "' + currentSearchTerm + '" 的日志？')) return;
+      try {
+        let url = '/api/logs/search?search=' + encodeURIComponent(currentSearchTerm);
+        if (category) url += '&category=' + category;
+        const res = await fetch(url, { 
+          method: 'DELETE', 
+          headers: { 'Authorization': 'Bearer ' + apiToken }
+        });
+        const data = await res.json();
+        showAlert('已删除 ' + data.deleted + ' 条日志');
+        document.getElementById('log-search').value = '';
+        currentSearchTerm = '';
+        loadLogs();
+      } catch (e) { showAlert('删除失败', 'error'); }
     }
     
     function showLogDetail(idx) {

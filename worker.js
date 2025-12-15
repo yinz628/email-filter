@@ -1216,11 +1216,20 @@ function getAdminHtml() {
 
     async function loadRules() {
       try {
-        const r = await api('/api/rules');
-        if (r.success) {
-          state.rules = r.data;
+        // 同时加载过滤规则和动态规则
+        const [rulesRes, dynamicRes] = await Promise.all([
+          api('/api/rules'),
+          api('/api/dynamic-rules')
+        ]);
+        if (rulesRes.success) {
+          // 合并过滤规则和动态规则
+          const manualRules = rulesRes.data || [];
+          const dynamicRules = (dynamicRes.success ? dynamicRes.data : []) || [];
+          // 标记动态规则
+          dynamicRules.forEach(r => { r.isDynamic = true; });
+          state.rules = [...manualRules, ...dynamicRules];
           renderRules();
-        } else if (r.error && (r.error.code === 'UNAUTHORIZED' || r.error.code === 'SESSION_EXPIRED')) {
+        } else if (rulesRes.error && (rulesRes.error.code === 'UNAUTHORIZED' || rulesRes.error.code === 'SESSION_EXPIRED')) {
           doLogout();
         }
       } catch {
@@ -1235,16 +1244,30 @@ function getAdminHtml() {
       state.rules.forEach(r => {
         const d = document.createElement('div');
         d.className = 'rule-item';
+        const isDynamic = r.isDynamic || r.category === 'dynamic';
+        const isVps = r.fromVps;
+        const typeLabel = {sender:'发件人名称',from:'发件邮箱',subject:'主题'}[r.type]||r.type;
+        const sourceTag = isVps ? '<span style="color:#3b82f6;font-size:.75rem;margin-left:4px">[VPS]</span>' : 
+                          isDynamic ? '<span style="color:#f59e0b;font-size:.75rem;margin-left:4px">[动态]</span>' : '';
         d.innerHTML = '<label class="toggle rule-toggle"><input type="checkbox" ' + (r.enabled ? 'checked' : '') + ' data-id="' + r.id + '"><span class="toggle-slider"></span></label>' +
-          '<div class="rule-info"><div class="rule-name">' + esc(r.name) + '</div>' +
-          '<div class="rule-meta"><span class="rule-type">' + ({sender:'发件人名称',from:'发件邮箱',subject:'主题'}[r.type]||r.type) + '</span>' +
+          '<div class="rule-info"><div class="rule-name">' + esc(r.name) + sourceTag + '</div>' +
+          '<div class="rule-meta"><span class="rule-type">' + typeLabel + '</span>' +
           '<code class="rule-pattern">' + esc(r.pattern) + '</code></div></div>' +
-          '<div class="rule-actions"><button class="btn btn-secondary">编辑</button><button class="btn btn-danger">删除</button></div>';
-        d.querySelector('input').onchange = e => toggleRule(r.id, e.target.checked);
-        d.querySelectorAll('button')[0].onclick = () => openEd(r);
-        d.querySelectorAll('button')[1].onclick = () => openDel(r);
+          '<div class="rule-actions">' + (isDynamic ? '' : '<button class="btn btn-secondary">编辑</button>') + '<button class="btn btn-danger">删除</button></div>';
+        d.querySelector('input').onchange = e => isDynamic ? toggleDynamicRule(r.id, e.target.checked) : toggleRule(r.id, e.target.checked);
+        if (!isDynamic) {
+          d.querySelectorAll('button')[0].onclick = () => openEd(r);
+          d.querySelectorAll('button')[1].onclick = () => openDel(r);
+        } else {
+          d.querySelector('.btn-danger').onclick = () => openDel(r, 'dynamic');
+        }
         l.appendChild(d);
       });
+    }
+
+    async function toggleDynamicRule(id, en) {
+      // 动态规则暂不支持切换，刷新列表
+      loadRules();
     }
 
     function escRx(s) {

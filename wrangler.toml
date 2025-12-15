@@ -1,0 +1,10 @@
+name = "xocky333"
+main = "worker.js"
+compatibility_date = "2025-12-15"
+
+[[kv_namespaces]]
+binding = "EMAIL_FILTER_KV"
+id = "392d1959dd564e348bec0081f6ff4159"
+
+[observability.logs]
+enabled = true

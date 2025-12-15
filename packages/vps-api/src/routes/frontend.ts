@@ -461,11 +461,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const rules = await rulesRes.json();
         const workersData = await workersRes.json();
         
-        document.getElementById('stat-total').textContent = stats.totalProcessed || 0;
-        document.getElementById('stat-deleted').textContent = stats.totalDeleted || 0;
+        // stats.overall contains the aggregated statistics
+        const overall = stats.overall || {};
+        document.getElementById('stat-total').textContent = overall.totalProcessed || 0;
+        document.getElementById('stat-deleted').textContent = overall.totalDeleted || 0;
         document.getElementById('stat-rules').textContent = (rules.rules || []).length;
         document.getElementById('stat-workers').textContent = (workersData.workers || []).length;
-      } catch (e) {}
+      } catch (e) { console.error('Error loading stats:', e); }
     }
 
     // Settings

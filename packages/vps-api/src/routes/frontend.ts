@@ -446,7 +446,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const w = workers.find(x => x.id === id);
       if (!w) return;
       try {
-        await fetch('/api/workers/' + id + '/toggle', { method: 'POST', headers: getHeaders() });
+        await fetch('/api/workers/' + id + '/toggle', { 
+          method: 'POST', 
+          headers: { 'Authorization': 'Bearer ' + apiToken }
+        });
         loadWorkers();
       } catch (e) {}
     }
@@ -454,7 +457,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function deleteWorker(id) {
       if (!confirm('确定删除？关联的规则也会被删除')) return;
       try {
-        await fetch('/api/workers/' + id, { method: 'DELETE', headers: getHeaders() });
+        await fetch('/api/workers/' + id, { 
+          method: 'DELETE', 
+          headers: { 'Authorization': 'Bearer ' + apiToken }
+        });
         showAlert('删除成功');
         loadWorkers();
       } catch (e) { showAlert('删除失败', 'error'); }
@@ -524,7 +530,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function toggleRule(id) {
       try {
-        const res = await fetch('/api/rules/' + id + '/toggle', { method: 'POST', headers: getHeaders() });
+        const res = await fetch('/api/rules/' + id + '/toggle', { 
+          method: 'POST', 
+          headers: { 'Authorization': 'Bearer ' + apiToken }
+        });
         if (res.ok) {
           showAlert('规则状态已切换');
           loadRules();
@@ -540,7 +549,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function deleteRule(id) {
       if (!confirm('确定删除此规则？')) return;
       try {
-        await fetch('/api/rules/' + id, { method: 'DELETE', headers: getHeaders() });
+        await fetch('/api/rules/' + id, { 
+          method: 'DELETE', 
+          headers: { 'Authorization': 'Bearer ' + apiToken }
+        });
         showAlert('删除成功');
         loadRules();
       } catch (e) { showAlert('删除失败', 'error'); }

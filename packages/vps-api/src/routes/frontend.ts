@@ -199,12 +199,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <div class="filter-bar">
-          <select id="log-category-filter" onchange="loadLogs()">
+          <select id="log-category-filter" onchange="resetLogPage(); loadLogs()">
             <option value="">全部类型</option>
             <option value="email_forward">📤 转发</option>
             <option value="email_drop">🚫 拦截</option>
             <option value="admin_action">⚙️ 管理操作</option>
             <option value="system">🖥️ 系统</option>
+          </select>
+          <select id="log-page-size" onchange="resetLogPage(); loadLogs()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <option value="20">每页 20 条</option>
+            <option value="50" selected>每页 50 条</option>
+            <option value="100">每页 100 条</option>
           </select>
           <span id="log-counts" style="color:#666;font-size:13px;"></span>
         </div>
@@ -222,6 +227,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </thead>
             <tbody id="logs-table"></tbody>
           </table>
+        </div>
+        <div id="log-pagination" style="display:flex;justify-content:center;align-items:center;gap:10px;padding:15px 0;border-top:1px solid #eee;margin-top:10px;">
+          <button class="btn btn-sm btn-secondary" onclick="prevLogPage()" id="log-prev-btn" disabled>上一页</button>
+          <span id="log-page-info" style="color:#666;font-size:13px;">第 1 页</span>
+          <button class="btn btn-sm btn-secondary" onclick="nextLogPage()" id="log-next-btn">下一页</button>
         </div>
       </div>
     </div>
@@ -694,22 +704,57 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } catch (e) { showAlert('保存失败', 'error'); }
     }
 
-    // Logs
+    // Logs with pagination
+    let currentLogs = [];
+    let logCurrentPage = 1;
+    let logHasMore = false;
+    
+    function resetLogPage() {
+      logCurrentPage = 1;
+    }
+    
     async function loadLogs() {
       if (!apiToken) return;
       const category = document.getElementById('log-category-filter').value;
-      let url = '/api/logs?limit=200';
+      const pageSize = parseInt(document.getElementById('log-page-size').value) || 50;
+      const offset = (logCurrentPage - 1) * pageSize;
+      let url = '/api/logs?limit=' + (pageSize + 1) + '&offset=' + offset;
       if (category) url += '&category=' + category;
       
       try {
         const res = await fetch(url, { headers: getHeaders() });
         const data = await res.json();
-        renderLogs(data.logs || []);
+        const logs = data.logs || [];
+        
+        // Check if there are more pages
+        logHasMore = logs.length > pageSize;
+        const displayLogs = logHasMore ? logs.slice(0, pageSize) : logs;
+        
+        renderLogs(displayLogs);
         renderLogCounts(data.counts || {});
+        updateLogPagination();
       } catch (e) { console.error('Error loading logs:', e); }
     }
-
-    let currentLogs = [];
+    
+    function updateLogPagination() {
+      document.getElementById('log-page-info').textContent = '第 ' + logCurrentPage + ' 页';
+      document.getElementById('log-prev-btn').disabled = logCurrentPage <= 1;
+      document.getElementById('log-next-btn').disabled = !logHasMore;
+    }
+    
+    function prevLogPage() {
+      if (logCurrentPage > 1) {
+        logCurrentPage--;
+        loadLogs();
+      }
+    }
+    
+    function nextLogPage() {
+      if (logHasMore) {
+        logCurrentPage++;
+        loadLogs();
+      }
+    }
     
     function renderLogs(logs) {
       currentLogs = logs;

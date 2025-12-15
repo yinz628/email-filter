@@ -1,15 +1,12 @@
-# Single stage build with Debian to ensure native modules work
-FROM node:20-bookworm-slim
+# Single stage build with Debian 11 (bullseye) to match VPS
+FROM node:20-bullseye-slim
 
 WORKDIR /app
 
-# Install build tools for native modules
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3 \
-    build-essential \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+# Install build tools for native modules (split commands for better error handling)
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends python3 build-essential wget
+RUN rm -rf /var/lib/apt/lists/*
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -40,11 +37,6 @@ RUN cp packages/vps-api/src/db/schema.sql packages/vps-api/dist/db/
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R node:node /app/data
-
-# Clean up build tools to reduce image size (optional, keeps native modules)
-RUN apt-get purge -y python3 build-essential && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
 
 USER node
 WORKDIR /app/packages/vps-api

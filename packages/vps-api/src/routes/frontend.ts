@@ -320,6 +320,32 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Edit Worker Modal -->
+  <div id="edit-worker-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>编辑 Worker 实例</h3>
+        <button class="modal-close" onclick="hideModal('edit-worker-modal')">&times;</button>
+      </div>
+      <form id="edit-worker-form">
+        <input type="hidden" id="edit-worker-id">
+        <div class="form-group">
+          <label>Worker 名称</label>
+          <input type="text" id="edit-worker-name" disabled style="background:#f5f5f5">
+        </div>
+        <div class="form-group">
+          <label>默认转发地址 *</label>
+          <input type="email" id="edit-worker-forward" required placeholder="admin@gmail.com">
+        </div>
+        <div class="form-group">
+          <label>域名（可选）</label>
+          <input type="text" id="edit-worker-domain" placeholder="example.com">
+        </div>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Add Watch Rule Modal -->
   <div id="add-watch-modal" class="modal hidden">
     <div class="modal-content">
@@ -496,6 +522,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + escapeHtml(w.defaultForwardTo) + '</td>' +
           '<td>' + status + '</td><td>' + date + '</td>' +
           '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="editWorker(\\'' + w.id + '\\')">编辑</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleWorker(\\'' + w.id + '\\')">' + (w.enabled ? '禁用' : '启用') + '</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteWorker(\\'' + w.id + '\\')">删除</button>' +
           '</td></tr>';
@@ -531,6 +558,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           showAlert(data.message || '创建失败', 'error');
         }
       } catch (e) { showAlert('创建失败', 'error'); }
+    });
+
+    function editWorker(id) {
+      const w = workers.find(x => x.id === id);
+      if (!w) return;
+      document.getElementById('edit-worker-id').value = w.id;
+      document.getElementById('edit-worker-name').value = w.name;
+      document.getElementById('edit-worker-forward').value = w.defaultForwardTo;
+      document.getElementById('edit-worker-domain').value = w.domain || '';
+      showModal('edit-worker-modal');
+    }
+    
+    document.getElementById('edit-worker-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('edit-worker-id').value;
+      const body = {
+        defaultForwardTo: document.getElementById('edit-worker-forward').value,
+        domain: document.getElementById('edit-worker-domain').value || undefined
+      };
+      try {
+        const res = await fetch('/api/workers/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });
+        if (res.ok) {
+          hideModal('edit-worker-modal');
+          showAlert('Worker 更新成功');
+          loadWorkers();
+        } else {
+          const data = await res.json();
+          showAlert(data.message || '更新失败', 'error');
+        }
+      } catch (e) { showAlert('更新失败', 'error'); }
     });
 
     async function toggleWorker(id) {

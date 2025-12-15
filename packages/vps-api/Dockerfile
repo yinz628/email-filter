@@ -3,7 +3,12 @@ FROM node:20-bullseye-slim
 
 WORKDIR /app
 
-# Install build tools for native modules (split commands for better error handling)
+# Replace apt sources
+RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bullseye-updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb http://security.debian.org/debian-security bullseye-security main contrib non-free" >> /etc/apt/sources.list
+
+# Install build tools for native modules
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends python3 build-essential wget
 RUN rm -rf /var/lib/apt/lists/*

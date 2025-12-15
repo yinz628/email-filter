@@ -1,13 +1,10 @@
-# Build stage - use Debian for better native module support
-FROM node:20-bookworm AS builder
+# Build stage - use Alpine with build tools
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 # Install build dependencies for better-sqlite3
-RUN apt-get update && apt-get install -y \
-    python3 \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache python3 make g++
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -37,8 +34,8 @@ RUN pnpm build
 WORKDIR /app/packages/vps-api
 RUN pnpm build
 
-# Production stage - use slim Debian
-FROM node:20-bookworm-slim AS production
+# Production stage - use Alpine
+FROM node:20-alpine AS production
 
 WORKDIR /app
 
@@ -46,8 +43,8 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Create non-root user
-RUN groupadd -g 1001 nodejs && \
-    useradd -u 1001 -g nodejs -m nodejs
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S -u 1001 -G nodejs nodejs
 
 # Copy workspace files
 COPY pnpm-workspace.yaml ./

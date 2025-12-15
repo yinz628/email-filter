@@ -8,12 +8,14 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { EmailWebhookPayload } from '@email-filter/shared';
+import { matchesRuleWebhook } from '@email-filter/shared';
 import { EmailService } from '../services/email.service.js';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { WorkerRepository } from '../db/worker-repository.js';
 import { LogRepository } from '../db/log-repository.js';
+import { WatchRepository } from '../db/watch-repository.js';
 import { getDatabase } from '../db/index.js';
 import { config } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -93,6 +95,25 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Process the email
       const result = await emailService.processEmail(payload);
+
+      // Track watch rules (statistics only, doesn't affect filtering)
+      const watchRepo = new WatchRepository(db);
+      const watchRules = watchRepo.findEnabled();
+      for (const watchRule of watchRules) {
+        const matched = matchesRuleWebhook(payload, {
+          id: watchRule.id,
+          category: 'whitelist', // category doesn't matter for matching
+          matchType: watchRule.matchType,
+          matchMode: watchRule.matchMode,
+          pattern: watchRule.pattern,
+          enabled: true,
+          createdAt: watchRule.createdAt,
+          updatedAt: watchRule.updatedAt,
+        });
+        if (matched) {
+          watchRepo.incrementHit(watchRule.id);
+        }
+      }
 
       // Return the filter decision
       return reply.send(result.decision);

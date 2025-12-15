@@ -11,3 +11,4 @@ export { forwardRoutes } from './forward.js';
 export { workerRoutes } from './workers.js';
 export { frontendRoutes } from './frontend.js';
 export { logsRoutes } from './logs.js';
+export { watchRoutes } from './watch.js';

@@ -241,6 +241,27 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div class="stat-card"><div class="stat-value" id="stat-workers">-</div><div class="stat-label">Worker 数量</div></div>
         </div>
       </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">监控规则</h2>
+          <button class="btn btn-primary" onclick="showModal('add-watch-modal')">+ 添加监控</button>
+        </div>
+        <p style="color:#666;margin-bottom:15px">监控规则仅统计命中次数，不影响邮件过滤</p>
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>匹配字段</th>
+              <th>匹配模式</th>
+              <th>规则内容</th>
+              <th>命中次数</th>
+              <th>最后命中</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="watch-rules-table"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Settings Tab -->
@@ -283,6 +304,47 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-group">
           <label>域名（可选）</label>
           <input type="text" id="worker-domain" placeholder="example.com">
+        </div>
+        <button type="submit" class="btn btn-success">创建</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Watch Rule Modal -->
+  <div id="add-watch-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>添加监控规则</h3>
+        <button class="modal-close" onclick="hideModal('add-watch-modal')">&times;</button>
+      </div>
+      <form id="add-watch-form">
+        <div class="form-group">
+          <label>规则名称 *</label>
+          <input type="text" id="watch-name" required placeholder="例如：某某发件人统计">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>匹配字段 *</label>
+            <select id="watch-match-type" required>
+              <option value="sender">发件人</option>
+              <option value="subject">主题</option>
+              <option value="domain">发件域名</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>匹配模式 *</label>
+            <select id="watch-match-mode" required>
+              <option value="contains">包含</option>
+              <option value="exact">精确匹配</option>
+              <option value="startsWith">开头匹配</option>
+              <option value="endsWith">结尾匹配</option>
+              <option value="regex">正则表达式</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>规则内容 *</label>
+          <input type="text" id="watch-pattern" required placeholder="要匹配的内容">
         </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
@@ -727,14 +789,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadStats() {
       if (!apiToken) return;
       try {
-        const [statsRes, rulesRes, workersRes] = await Promise.all([
+        const [statsRes, rulesRes, workersRes, watchRes] = await Promise.all([
           fetch('/api/stats', { headers: getHeaders() }),
           fetch('/api/rules', { headers: getHeaders() }),
-          fetch('/api/workers', { headers: getHeaders() })
+          fetch('/api/workers', { headers: getHeaders() }),
+          fetch('/api/watch', { headers: getHeaders() })
         ]);
         const stats = await statsRes.json();
         const rules = await rulesRes.json();
         const workersData = await workersRes.json();
+        const watchData = await watchRes.json();
         
         // stats.overall contains the aggregated statistics
         const overall = stats.overall || {};
@@ -743,7 +807,83 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         document.getElementById('stat-deleted').textContent = overall.totalDeleted || 0;
         document.getElementById('stat-rules').textContent = (rules.rules || []).length;
         document.getElementById('stat-workers').textContent = (workersData.workers || []).length;
+        
+        renderWatchRules(watchData.rules || []);
       } catch (e) { console.error('Error loading stats:', e); }
+    }
+    
+    // Watch Rules
+    function renderWatchRules(rules) {
+      const tbody = document.getElementById('watch-rules-table');
+      if (rules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无监控规则</td></tr>';
+        return;
+      }
+      const matchTypeLabels = {sender:'发件人',subject:'主题',domain:'域名'};
+      const matchModeLabels = {exact:'精确',contains:'包含',startsWith:'开头',endsWith:'结尾',regex:'正则'};
+      tbody.innerHTML = rules.map(r => {
+        const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN') : '-';
+        const status = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
+          '<td>' + (matchTypeLabels[r.matchType] || r.matchType) + '</td>' +
+          '<td>' + (matchModeLabels[r.matchMode] || r.matchMode) + '</td>' +
+          '<td>' + escapeHtml(r.pattern) + '</td>' +
+          '<td style="font-size:18px;font-weight:bold;color:#4a90d9">' + (r.hitCount || 0) + '</td>' +
+          '<td style="font-size:12px;color:#666">' + lastHit + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-secondary" onclick="toggleWatch(\\'' + r.id + '\\')">' + (r.enabled ? '禁用' : '启用') + '</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="resetWatch(\\'' + r.id + '\\')">重置</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteWatch(\\'' + r.id + '\\')">删除</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+    
+    document.getElementById('add-watch-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        name: document.getElementById('watch-name').value,
+        matchType: document.getElementById('watch-match-type').value,
+        matchMode: document.getElementById('watch-match-mode').value,
+        pattern: document.getElementById('watch-pattern').value
+      };
+      try {
+        const res = await fetch('/api/watch', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
+        if (res.ok) {
+          hideModal('add-watch-modal');
+          e.target.reset();
+          showAlert('监控规则创建成功');
+          loadStats();
+        } else {
+          const data = await res.json();
+          showAlert(data.message || '创建失败', 'error');
+        }
+      } catch (e) { showAlert('创建失败', 'error'); }
+    });
+    
+    async function toggleWatch(id) {
+      try {
+        await fetch('/api/watch/' + id + '/toggle', { method: 'POST', headers: { 'Authorization': 'Bearer ' + apiToken } });
+        loadStats();
+      } catch (e) {}
+    }
+    
+    async function resetWatch(id) {
+      if (!confirm('确定重置此规则的命中次数？')) return;
+      try {
+        await fetch('/api/watch/' + id + '/reset', { method: 'POST', headers: { 'Authorization': 'Bearer ' + apiToken } });
+        showAlert('已重置');
+        loadStats();
+      } catch (e) { showAlert('重置失败', 'error'); }
+    }
+    
+    async function deleteWatch(id) {
+      if (!confirm('确定删除此监控规则？')) return;
+      try {
+        await fetch('/api/watch/' + id, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + apiToken } });
+        showAlert('删除成功');
+        loadStats();
+      } catch (e) { showAlert('删除失败', 'error'); }
     }
 
     // Settings

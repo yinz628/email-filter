@@ -9,6 +9,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { EmailWebhookPayload } from '@email-filter/shared';
 import { EmailService } from '../services/email.service.js';
+import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { WorkerRepository } from '../db/worker-repository.js';
@@ -80,6 +81,15 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         workerId,
         logRepository
       );
+
+      // Track subject for dynamic rule generation (before processing)
+      const dynamicService = new DynamicRuleService(db, ruleRepository);
+      if (payload.subject) {
+        const newDynamicRule = dynamicService.trackSubject(payload.subject);
+        if (newDynamicRule) {
+          request.log.info({ ruleId: newDynamicRule.id, pattern: newDynamicRule.pattern }, 'Created dynamic rule');
+        }
+      }
 
       // Process the email
       const result = await emailService.processEmail(payload);

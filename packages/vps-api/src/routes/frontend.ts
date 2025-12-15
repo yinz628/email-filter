@@ -47,9 +47,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .hidden { display: none; }
     .actions { display: flex; gap: 8px; }
     .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-    .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+    .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; position: relative; }
     .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-    .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #999; }
+    .modal-close { background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 0 8px; line-height: 1; position: absolute; top: 10px; right: 10px; z-index: 1001; }
+    .modal-close:hover { color: #e74c3c; }
     .alert { padding: 12px; border-radius: 4px; margin-bottom: 15px; }
     .alert-success { background: #d4edda; color: #155724; }
     .alert-error { background: #f8d7da; color: #721c24; }
@@ -266,6 +267,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
     function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+    
+    // Close modal when clicking outside
+    document.querySelectorAll('.modal').forEach(modal => {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+      });
+    });
 
     function showAlert(msg, type = 'success') {
       const container = document.getElementById('alert-container');

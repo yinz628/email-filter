@@ -1,4 +1,4 @@
-# Build stage - use Alpine with prebuilt better-sqlite3
+# Build stage
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -6,8 +6,9 @@ WORKDIR /app
 # Install build tools for native modules
 RUN apk add --no-cache python3 make g++ git
 
-# Install pnpm
+# Install pnpm and configure to run scripts
 RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN pnpm config set ignore-scripts false
 
 # Copy workspace files
 COPY pnpm-workspace.yaml ./
@@ -19,8 +20,11 @@ COPY tsconfig.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/vps-api/package.json ./packages/vps-api/
 
-# Install dependencies (without frozen-lockfile to allow resolution)
+# Install dependencies with scripts enabled
 RUN pnpm install --no-frozen-lockfile
+
+# Rebuild better-sqlite3 to ensure native module is compiled
+RUN cd /app && pnpm rebuild better-sqlite3
 
 # Copy source files
 COPY packages/shared/ ./packages/shared/
@@ -34,12 +38,12 @@ RUN pnpm build
 WORKDIR /app/packages/vps-api
 RUN pnpm build
 
-# Production stage - minimal Alpine
+# Production stage
 FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Copy everything from builder (including compiled native modules)
+# Copy everything from builder
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/

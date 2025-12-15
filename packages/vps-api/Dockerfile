@@ -1,12 +1,10 @@
-# Build stage - use Debian for better compatibility
-FROM node:20-bullseye AS builder
+# Build stage - use Alpine with prebuilt better-sqlite3
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies for better-sqlite3
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 build-essential && \
-    rm -rf /var/lib/apt/lists/*
+# Install build tools for native modules
+RUN apk add --no-cache python3 make g++ git
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -21,8 +19,8 @@ COPY tsconfig.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/vps-api/package.json ./packages/vps-api/
 
-# Install dependencies
-RUN pnpm install
+# Install dependencies (without frozen-lockfile to allow resolution)
+RUN pnpm install --no-frozen-lockfile
 
 # Copy source files
 COPY packages/shared/ ./packages/shared/
@@ -36,39 +34,29 @@ RUN pnpm build
 WORKDIR /app/packages/vps-api
 RUN pnpm build
 
-# Production stage
-FROM node:20-bullseye-slim AS production
+# Production stage - minimal Alpine
+FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Copy everything from builder (including compiled native modules)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+COPY --from=builder /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY --from=builder /app/packages/vps-api/dist ./packages/vps-api/dist
+COPY --from=builder /app/packages/vps-api/package.json ./packages/vps-api/
+COPY --from=builder /app/packages/vps-api/node_modules ./packages/vps-api/node_modules
+COPY --from=builder /app/packages/vps-api/src/db/schema.sql ./packages/vps-api/dist/db/
 
-# Create non-root user
-RUN groupadd -g 1001 nodejs && \
-    useradd -u 1001 -g nodejs -m nodejs
-
-# Copy workspace files
+# Copy workspace config
 COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
 COPY package.json ./
 
-# Copy package files
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/vps-api/package.json ./packages/vps-api/
-
-# Copy built files and node_modules from builder
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/packages/vps-api/dist ./packages/vps-api/dist
-COPY --from=builder /app/packages/vps-api/src/db/schema.sql ./packages/vps-api/dist/db/
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/shared/node_modules ./packages/shared/node_modules
-COPY --from=builder /app/packages/vps-api/node_modules ./packages/vps-api/node_modules
-
 # Create data directory
-RUN mkdir -p /app/data && chown -R nodejs:nodejs /app/data
+RUN mkdir -p /app/data && chown -R node:node /app/data
 
-USER nodejs
+USER node
 
 WORKDIR /app/packages/vps-api
 
@@ -78,8 +66,5 @@ ENV HOST=0.0.0.0
 ENV DB_PATH=/app/data/filter.db
 
 EXPOSE 3000
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 CMD ["node", "dist/index.js"]

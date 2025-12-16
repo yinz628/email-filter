@@ -340,6 +340,43 @@ export class DynamicRuleService {
   }
 
   /**
+   * Clean up subject tracking records older than specified days
+   * More aggressive cleanup for disk space management
+   * 
+   * @param days - Number of days to keep (default: 1)
+   * @returns Number of deleted records
+   */
+  cleanupSubjectTrackerByDays(days: number = 1): number {
+    const cutoffTime = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    
+    const stmt = this.db.prepare(
+      `DELETE FROM email_subject_tracker WHERE received_at < ?`
+    );
+    const result = stmt.run(cutoffTime.toISOString());
+
+    return result.changes;
+  }
+
+  /**
+   * Get subject tracker table statistics
+   */
+  getSubjectTrackerStats(): { totalRecords: number; oldestRecord: string | null; newestRecord: string | null } {
+    const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM email_subject_tracker');
+    const countResult = countStmt.get() as { count: number };
+
+    const rangeStmt = this.db.prepare(
+      `SELECT MIN(received_at) as oldest, MAX(received_at) as newest FROM email_subject_tracker`
+    );
+    const rangeResult = rangeStmt.get() as { oldest: string | null; newest: string | null };
+
+    return {
+      totalRecords: countResult.count,
+      oldestRecord: rangeResult.oldest,
+      newestRecord: rangeResult.newest,
+    };
+  }
+
+  /**
    * Get subject counts within the current time window
    * Useful for monitoring and debugging
    */

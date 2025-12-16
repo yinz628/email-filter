@@ -166,4 +166,36 @@ export class LogRepository {
     const result = stmt.run(cutoff);
     return result.changes;
   }
+
+  /**
+   * Get top blocked rules by count in recent time period
+   * @param hours - Time period in hours (default: 24)
+   * @param limit - Max number of results (default: 5)
+   */
+  getTopBlockedRules(hours: number = 24, limit: number = 5): { pattern: string; count: number; lastSeen: string }[] {
+    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+    // Query logs where category is email_drop and extract matchedRule from details JSON
+    const stmt = this.db.prepare(`
+      SELECT 
+        json_extract(details, '$.matchedRule') as pattern,
+        COUNT(*) as count,
+        MAX(created_at) as last_seen
+      FROM system_logs 
+      WHERE category = 'email_drop' 
+        AND created_at >= ?
+        AND json_extract(details, '$.matchedRule') IS NOT NULL
+      GROUP BY json_extract(details, '$.matchedRule')
+      ORDER BY count DESC
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(cutoff, limit) as { pattern: string; count: number; last_seen: string }[];
+
+    return rows.map((row) => ({
+      pattern: row.pattern,
+      count: row.count,
+      lastSeen: row.last_seen,
+    }));
+  }
 }

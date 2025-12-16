@@ -130,4 +130,46 @@ export async function dynamicRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  /**
+   * DELETE /api/dynamic/tracker
+   * Clean up subject tracker records to free disk space
+   * Query params: days (default: 1) - keep records from last N days
+   */
+  fastify.delete('/tracker', async (request: FastifyRequest<{ Querystring: { days?: string } }>, reply: FastifyReply) => {
+    try {
+      const db = getDatabase();
+      const ruleRepository = new RuleRepository(db);
+      const dynamicService = new DynamicRuleService(db, ruleRepository);
+
+      const days = parseInt(request.query.days || '1', 10) || 1;
+      const deleted = dynamicService.cleanupSubjectTrackerByDays(days);
+      
+      return reply.send({ 
+        deleted, 
+        message: `Deleted ${deleted} subject tracker records older than ${days} day(s)` 
+      });
+    } catch (error) {
+      request.log.error(error, 'Error cleaning up subject tracker');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/dynamic/tracker/stats
+   * Get subject tracker statistics
+   */
+  fastify.get('/tracker/stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const db = getDatabase();
+      const ruleRepository = new RuleRepository(db);
+      const dynamicService = new DynamicRuleService(db, ruleRepository);
+
+      const stats = dynamicService.getSubjectTrackerStats();
+      return reply.send(stats);
+    } catch (error) {
+      request.log.error(error, 'Error fetching subject tracker stats');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

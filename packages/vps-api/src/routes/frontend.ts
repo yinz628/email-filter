@@ -166,6 +166,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+          <h2 style="margin:0;border:none;padding:0;">主题追踪数据</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span id="tracker-stats" style="color:#666;font-size:13px;">加载中...</span>
+            <button class="btn btn-danger btn-sm" onclick="cleanupSubjectTracker()">清理追踪数据</button>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">用于检测重复主题邮件的追踪数据，定期清理可释放磁盘空间</p>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
           <h2 style="margin:0;border:none;padding:0;">自动生成的动态规则</h2>
           <button class="btn btn-danger btn-sm" onclick="cleanupExpiredDynamicRules()">清理过期规则</button>
         </div>
@@ -258,6 +268,32 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div class="stat-card"><div class="stat-value" id="stat-rules">-</div><div class="stat-label">规则数量</div></div>
           <div class="stat-card"><div class="stat-value" id="stat-workers">-</div><div class="stat-label">Worker 数量</div></div>
         </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">🔥 热门拦截规则</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="trending-hours" onchange="loadTrendingRules()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="1">最近 1 小时</option>
+              <option value="6">最近 6 小时</option>
+              <option value="24" selected>最近 24 小时</option>
+              <option value="72">最近 3 天</option>
+              <option value="168">最近 7 天</option>
+            </select>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">自动统计拦截数量最多的规则（最多显示5条）</p>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:50px;">排名</th>
+              <th>规则内容</th>
+              <th style="width:100px;">拦截次数</th>
+              <th style="width:160px;">最后拦截</th>
+            </tr>
+          </thead>
+          <tbody id="trending-rules-table"></tbody>
+        </table>
       </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
@@ -731,6 +767,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         document.getElementById('dynamic-expiration').value = config.expirationHours || 48;
         
         renderDynamicRules(rulesData.rules || []);
+        loadTrackerStats();
       } catch (e) { console.error('Error loading dynamic config:', e); }
     }
 
@@ -777,6 +814,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         if (res.ok) {
           showAlert('已清理 ' + data.deletedCount + ' 条过期规则');
           loadDynamicConfig();
+        } else {
+          showAlert('清理失败', 'error');
+        }
+      } catch (e) { showAlert('清理失败', 'error'); }
+    }
+
+    async function loadTrackerStats() {
+      try {
+        const res = await fetch('/api/dynamic/tracker/stats', { headers: getHeaders() });
+        const data = await res.json();
+        if (res.ok) {
+          const statsEl = document.getElementById('tracker-stats');
+          if (data.totalRecords === 0) {
+            statsEl.textContent = '暂无数据';
+          } else {
+            const oldest = data.oldestRecord ? new Date(data.oldestRecord).toLocaleString('zh-CN') : '-';
+            statsEl.textContent = '共 ' + data.totalRecords + ' 条记录，最早: ' + oldest;
+          }
+        }
+      } catch (e) { console.error('Failed to load tracker stats'); }
+    }
+
+    async function cleanupSubjectTracker() {
+      if (!confirm('确定清理主题追踪数据？这不会影响已生成的动态规则。')) return;
+      try {
+        const res = await fetch('/api/dynamic/tracker?days=1', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + apiToken } });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert('已清理 ' + data.deleted + ' 条追踪记录');
+          loadTrackerStats();
         } else {
           showAlert('清理失败', 'error');
         }
@@ -1004,7 +1071,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         document.getElementById('stat-workers').textContent = (workersData.workers || []).length;
         
         renderWatchRules(watchData.rules || []);
+        loadTrendingRules();
       } catch (e) { console.error('Error loading stats:', e); }
+    }
+
+    async function loadTrendingRules() {
+      if (!apiToken) return;
+      const hours = document.getElementById('trending-hours').value || '24';
+      try {
+        const res = await fetch('/api/stats/trending?hours=' + hours + '&limit=5', { headers: getHeaders() });
+        const data = await res.json();
+        renderTrendingRules(data.trending || []);
+      } catch (e) { console.error('Error loading trending rules:', e); }
+    }
+
+    function renderTrendingRules(rules) {
+      const tbody = document.getElementById('trending-rules-table');
+      if (rules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999">暂无拦截记录</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rules.map((r, idx) => {
+        const lastSeen = r.lastSeen ? new Date(r.lastSeen).toLocaleString('zh-CN') : '-';
+        const rankIcon = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : (idx + 1);
+        return '<tr>' +
+          '<td style="text-align:center;font-size:18px;">' + rankIcon + '</td>' +
+          '<td>' + escapeHtml(r.pattern) + '</td>' +
+          '<td style="font-size:18px;font-weight:bold;color:#e74c3c;text-align:center;">' + r.count + '</td>' +
+          '<td style="font-size:12px;color:#666">' + lastSeen + '</td>' +
+        '</tr>';
+      }).join('');
     }
     
     // Watch Rules

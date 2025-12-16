@@ -5,6 +5,8 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { LogRepository, type LogCategory, type LogLevel } from '../db/log-repository.js';
+import { RuleRepository } from '../db/rule-repository.js';
+import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -64,16 +66,27 @@ export async function logsRoutes(fastify: FastifyInstance): Promise<void> {
 
   /**
    * DELETE /api/logs/cleanup
-   * Delete old logs
+   * Delete old logs and subject tracker records
    */
   fastify.delete('/cleanup', async (request: FastifyRequest<{ Querystring: { days?: string } }>, reply: FastifyReply) => {
     try {
       const db = getDatabase();
       const logRepository = new LogRepository(db);
-      const days = parseInt(request.query.days || '7', 10) || 7;
-      const deleted = logRepository.cleanup(days);
+      const ruleRepository = new RuleRepository(db);
+      const dynamicService = new DynamicRuleService(db, ruleRepository);
       
-      return reply.send({ deleted, message: `Deleted ${deleted} old log entries` });
+      const days = parseInt(request.query.days || '7', 10) || 7;
+      const deletedLogs = logRepository.cleanup(days);
+      
+      // Also cleanup subject tracker records (keep only 1 day for dynamic rules)
+      const trackerDays = Math.min(days, 1); // Subject tracker only needs recent data
+      const deletedTracker = dynamicService.cleanupSubjectTrackerByDays(trackerDays);
+      
+      return reply.send({ 
+        deletedLogs, 
+        deletedTracker,
+        message: `Deleted ${deletedLogs} log entries and ${deletedTracker} tracker records` 
+      });
     } catch (error) {
       request.log.error(error, 'Error cleaning up logs');
       return reply.status(500).send({ error: 'Internal error' });

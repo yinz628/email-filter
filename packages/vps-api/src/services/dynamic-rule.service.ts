@@ -244,6 +244,9 @@ export class DynamicRuleService {
   /**
    * Find expired dynamic rules
    * Returns rules that haven't been hit within the expiration period
+   * A rule is expired if:
+   * - last_hit_at is NULL and created_at is older than expiration time
+   * - OR last_hit_at is older than expiration time
    */
   findExpiredDynamicRules(expirationHours: number): FilterRule[] {
     const cutoffTime = new Date(Date.now() - expirationHours * 60 * 60 * 1000);
@@ -252,8 +255,10 @@ export class DynamicRuleService {
     const stmt = this.db.prepare(
       `SELECT * FROM filter_rules 
        WHERE category = 'dynamic' 
-       AND (last_hit_at IS NULL OR last_hit_at < ?)
-       AND created_at < ?`
+       AND (
+         (last_hit_at IS NULL AND created_at < ?) 
+         OR (last_hit_at IS NOT NULL AND last_hit_at < ?)
+       )`
     );
     const rows = stmt.all(cutoffTimeStr, cutoffTimeStr) as {
       id: string;

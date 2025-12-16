@@ -162,6 +162,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-group">
           <label>规则过期时间（小时）</label>
           <input type="number" id="dynamic-expiration" min="1" value="48" placeholder="48">
+          <p style="color:#888;font-size:12px;margin-top:5px">规则在此时间内无命中将被清理（最后命中时间超过此值的规则会被删除）</p>
         </div>
         <button class="btn btn-primary" onclick="saveDynamicConfig()">保存配置</button>
       </div>

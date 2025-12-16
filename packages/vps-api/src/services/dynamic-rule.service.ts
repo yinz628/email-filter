@@ -72,6 +72,9 @@ export class DynamicRuleService {
         case 'expirationHours':
           config.expirationHours = parseInt(row.value, 10);
           break;
+        case 'lastHitThresholdHours':
+          config.lastHitThresholdHours = parseInt(row.value, 10);
+          break;
       }
     }
 
@@ -92,6 +95,7 @@ export class DynamicRuleService {
       ['timeWindowMinutes', String(newConfig.timeWindowMinutes)],
       ['thresholdCount', String(newConfig.thresholdCount)],
       ['expirationHours', String(newConfig.expirationHours)],
+      ['lastHitThresholdHours', String(newConfig.lastHitThresholdHours)],
     ];
 
     const upsertStmt = this.db.prepare(
@@ -245,12 +249,16 @@ export class DynamicRuleService {
    * Find expired dynamic rules
    * Returns rules that haven't been hit within the expiration period
    * A rule is expired if:
-   * - last_hit_at is NULL and created_at is older than expiration time
-   * - OR last_hit_at is older than expiration time
+   * - last_hit_at is NULL and created_at is older than expirationHours
+   * - OR last_hit_at is older than lastHitThresholdHours
    */
-  findExpiredDynamicRules(expirationHours: number): FilterRule[] {
-    const cutoffTime = new Date(Date.now() - expirationHours * 60 * 60 * 1000);
-    const cutoffTimeStr = cutoffTime.toISOString();
+  findExpiredDynamicRules(expirationHours: number, lastHitThresholdHours?: number): FilterRule[] {
+    const createdCutoff = new Date(Date.now() - expirationHours * 60 * 60 * 1000);
+    const createdCutoffStr = createdCutoff.toISOString();
+    
+    // Use lastHitThresholdHours if provided, otherwise use expirationHours
+    const lastHitCutoff = new Date(Date.now() - (lastHitThresholdHours || expirationHours) * 60 * 60 * 1000);
+    const lastHitCutoffStr = lastHitCutoff.toISOString();
 
     const stmt = this.db.prepare(
       `SELECT * FROM filter_rules 
@@ -260,7 +268,7 @@ export class DynamicRuleService {
          OR (last_hit_at IS NOT NULL AND last_hit_at < ?)
        )`
     );
-    const rows = stmt.all(cutoffTimeStr, cutoffTimeStr) as {
+    const rows = stmt.all(createdCutoffStr, lastHitCutoffStr) as {
       id: string;
       category: string;
       match_type: string;
@@ -300,7 +308,7 @@ export class DynamicRuleService {
       return [];
     }
 
-    const expiredRules = this.findExpiredDynamicRules(config.expirationHours);
+    const expiredRules = this.findExpiredDynamicRules(config.expirationHours, config.lastHitThresholdHours);
     const deletedIds: string[] = [];
 
     for (const rule of expiredRules) {

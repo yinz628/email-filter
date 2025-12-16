@@ -159,10 +159,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <input type="number" id="dynamic-threshold" min="1" value="5" placeholder="5">
           </div>
         </div>
-        <div class="form-group">
-          <label>规则过期时间（小时）</label>
-          <input type="number" id="dynamic-expiration" min="1" value="48" placeholder="48">
-          <p style="color:#888;font-size:12px;margin-top:5px">规则在此时间内无命中将被清理（最后命中时间超过此值的规则会被删除）</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>规则过期时间（小时）</label>
+            <input type="number" id="dynamic-expiration" min="1" value="48" placeholder="48">
+            <p style="color:#888;font-size:12px;margin-top:5px">从未命中的规则，创建后超过此时间将被清理</p>
+          </div>
+          <div class="form-group">
+            <label>最后命中阈值（小时）</label>
+            <input type="number" id="dynamic-last-hit-threshold" min="1" value="72" placeholder="72">
+            <p style="color:#888;font-size:12px;margin-top:5px">有命中记录的规则，最后命中超过此时间将被清理</p>
+          </div>
         </div>
         <button class="btn btn-primary" onclick="saveDynamicConfig()">保存配置</button>
       </div>
@@ -775,6 +782,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         document.getElementById('dynamic-time-window').value = config.timeWindowMinutes || 60;
         document.getElementById('dynamic-threshold').value = config.thresholdCount || 5;
         document.getElementById('dynamic-expiration').value = config.expirationHours || 48;
+        document.getElementById('dynamic-last-hit-threshold').value = config.lastHitThresholdHours || 72;
         
         renderDynamicRules(rulesData.rules || []);
         loadTrackerStats();
@@ -804,7 +812,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         enabled: document.getElementById('dynamic-enabled').value === 'true',
         timeWindowMinutes: parseInt(document.getElementById('dynamic-time-window').value) || 60,
         thresholdCount: parseInt(document.getElementById('dynamic-threshold').value) || 5,
-        expirationHours: parseInt(document.getElementById('dynamic-expiration').value) || 48
+        expirationHours: parseInt(document.getElementById('dynamic-expiration').value) || 48,
+        lastHitThresholdHours: parseInt(document.getElementById('dynamic-last-hit-threshold').value) || 72
       };
       try {
         const res = await fetch('/api/dynamic/config', { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });

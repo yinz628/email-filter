@@ -54,6 +54,14 @@ function validateDynamicConfig(body: unknown): { valid: boolean; error?: string;
     config.expirationHours = value;
   }
 
+  if (data.lastHitThresholdHours !== undefined) {
+    const value = Number(data.lastHitThresholdHours);
+    if (isNaN(value) || value < 1) {
+      return { valid: false, error: 'lastHitThresholdHours must be a positive number' };
+    }
+    config.lastHitThresholdHours = value;
+  }
+
   return { valid: true, data: config };
 }
 

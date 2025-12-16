@@ -170,6 +170,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <h2 style="margin:0;border:none;padding:0;">主题追踪数据</h2>
           <div style="display:flex;gap:10px;align-items:center;">
             <span id="tracker-stats" style="color:#666;font-size:13px;">加载中...</span>
+            <select id="tracker-cleanup-hours" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="0.5">30分钟前</option>
+              <option value="1" selected>1小时前</option>
+              <option value="6">6小时前</option>
+              <option value="12">12小时前</option>
+            </select>
             <button class="btn btn-danger btn-sm" onclick="cleanupSubjectTracker()">清理追踪数据</button>
           </div>
         </div>
@@ -840,9 +846,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function cleanupSubjectTracker() {
-      if (!confirm('确定清理主题追踪数据？这不会影响已生成的动态规则。')) return;
+      const hours = document.getElementById('tracker-cleanup-hours').value || '1';
+      const hoursText = hours === '0.5' ? '30分钟' : hours + '小时';
+      if (!confirm('确定清理 ' + hoursText + ' 前的追踪数据？这不会影响已生成的动态规则。')) return;
       try {
-        const res = await fetch('/api/dynamic/tracker?days=1', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + apiToken } });
+        const res = await fetch('/api/dynamic/tracker?hours=' + hours, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + apiToken } });
         const data = await res.json();
         if (res.ok) {
           showAlert('已清理 ' + data.deleted + ' 条追踪记录');

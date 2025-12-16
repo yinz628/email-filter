@@ -358,6 +358,23 @@ export class DynamicRuleService {
   }
 
   /**
+   * Clean up subject tracking records older than specified hours
+   * 
+   * @param hours - Number of hours to keep (default: 1)
+   * @returns Number of deleted records
+   */
+  cleanupSubjectTrackerByHours(hours: number = 1): number {
+    const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+    
+    const stmt = this.db.prepare(
+      `DELETE FROM email_subject_tracker WHERE received_at < ?`
+    );
+    const result = stmt.run(cutoffTime.toISOString());
+
+    return result.changes;
+  }
+
+  /**
    * Get subject tracker table statistics
    */
   getSubjectTrackerStats(): { totalRecords: number; oldestRecord: string | null; newestRecord: string | null } {

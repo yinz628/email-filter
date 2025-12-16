@@ -134,20 +134,20 @@ export async function dynamicRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * DELETE /api/dynamic/tracker
    * Clean up subject tracker records to free disk space
-   * Query params: days (default: 1) - keep records from last N days
+   * Query params: hours (default: 1) - keep records from last N hours
    */
-  fastify.delete('/tracker', async (request: FastifyRequest<{ Querystring: { days?: string } }>, reply: FastifyReply) => {
+  fastify.delete('/tracker', async (request: FastifyRequest<{ Querystring: { hours?: string } }>, reply: FastifyReply) => {
     try {
       const db = getDatabase();
       const ruleRepository = new RuleRepository(db);
       const dynamicService = new DynamicRuleService(db, ruleRepository);
 
-      const days = parseInt(request.query.days || '1', 10) || 1;
-      const deleted = dynamicService.cleanupSubjectTrackerByDays(days);
+      const hours = parseFloat(request.query.hours || '1') || 1;
+      const deleted = dynamicService.cleanupSubjectTrackerByHours(hours);
       
       return reply.send({ 
         deleted, 
-        message: `Deleted ${deleted} subject tracker records older than ${days} day(s)` 
+        message: `Deleted ${deleted} subject tracker records older than ${hours} hour(s)` 
       });
     } catch (error) {
       request.log.error(error, 'Error cleaning up subject tracker');

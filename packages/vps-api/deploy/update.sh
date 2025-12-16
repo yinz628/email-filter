@@ -20,6 +20,11 @@ echo ""
 echo "📥 拉取最新代码..."
 git pull
 
+# 构建 shared 包（依赖）
+echo ""
+echo "🔨 构建 shared 包..."
+pnpm --filter @email-filter/shared build
+
 # 构建 VPS API
 echo ""
 echo "🔨 构建 VPS API..."

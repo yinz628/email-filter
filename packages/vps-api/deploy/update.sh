@@ -1,4 +1,5 @@
 #!/bin/bash
+# Email Filter VPS API Update Script
 # VPS API 更新脚本
 # 用法: ./update.sh 或 bash update.sh
 
@@ -34,6 +35,13 @@ pnpm --filter @email-filter/vps-api build
 echo ""
 echo "📋 复制数据库 schema..."
 cp packages/vps-api/src/db/schema.sql packages/vps-api/dist/db/
+
+# 运行数据库迁移
+echo ""
+echo "🗄️ 运行数据库迁移..."
+cd packages/vps-api
+npx tsx src/db/migrate.ts
+cd "$PROJECT_DIR"
 
 # 重启服务
 echo ""

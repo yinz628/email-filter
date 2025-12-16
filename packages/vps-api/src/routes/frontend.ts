@@ -127,6 +127,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <th>匹配模式</th>
               <th>规则内容</th>
               <th>Worker</th>
+              <th>最后命中</th>
               <th>状态</th>
               <th>操作</th>
             </tr>
@@ -678,7 +679,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderRules(rules) {
       const tbody = document.getElementById('rules-table');
       if (rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无规则</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">暂无规则</td></tr>';
         return;
       }
       tbody.innerHTML = rules.map(r => {
@@ -688,8 +689,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const worker = r.workerId ? (workers.find(w => w.id === r.workerId)?.name || '未知') : '全局';
         const matchType = {sender:'发件人',subject:'主题',domain:'域名'}[r.matchType] || r.matchType;
         const matchMode = {exact:'精确',contains:'包含',startsWith:'开头',endsWith:'结尾',regex:'正则'}[r.matchMode] || r.matchMode;
+        const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN') : '-';
         return '<tr><td>' + cat + '</td><td>' + matchType + '</td><td>' + matchMode + '</td>' +
-          '<td>' + escapeHtml(r.pattern) + '</td><td>' + escapeHtml(worker) + '</td><td>' + status + '</td>' +
+          '<td>' + escapeHtml(r.pattern) + '</td><td>' + escapeHtml(worker) + '</td>' +
+          '<td style="font-size:12px;color:#666">' + lastHit + '</td><td>' + status + '</td>' +
           '<td class="actions">' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleRule(\\'' + r.id + '\\')">切换</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteRule(\\'' + r.id + '\\')">删除</button>' +

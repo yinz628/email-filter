@@ -165,8 +165,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <button class="btn btn-primary" onclick="saveDynamicConfig()">保存配置</button>
       </div>
       <div class="card">
-        <h2>自动生成的动态规则</h2>
-        <p style="color:#666;margin-bottom:15px">以下规则由系统根据邮件频率自动生成</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+          <h2 style="margin:0;border:none;padding:0;">自动生成的动态规则</h2>
+          <button class="btn btn-danger btn-sm" onclick="cleanupExpiredDynamicRules()">清理过期规则</button>
+        </div>
+        <p style="color:#666;margin-bottom:15px">以下规则由系统根据邮件频率自动生成，超过过期时间未命中将自动删除</p>
         <table>
           <thead>
             <tr>
@@ -764,6 +767,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           showAlert('保存失败', 'error');
         }
       } catch (e) { showAlert('保存失败', 'error'); }
+    }
+
+    async function cleanupExpiredDynamicRules() {
+      if (!confirm('确定清理所有过期的动态规则？')) return;
+      try {
+        const res = await fetch('/api/dynamic/cleanup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + apiToken } });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert('已清理 ' + data.deletedCount + ' 条过期规则');
+          loadDynamicConfig();
+        } else {
+          showAlert('清理失败', 'error');
+        }
+      } catch (e) { showAlert('清理失败', 'error'); }
     }
 
     // Logs with pagination

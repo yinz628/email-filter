@@ -108,4 +108,26 @@ export async function dynamicRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  /**
+   * POST /api/dynamic/cleanup
+   * Manually trigger cleanup of expired dynamic rules
+   */
+  fastify.post('/cleanup', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const db = getDatabase();
+      const ruleRepository = new RuleRepository(db);
+      const dynamicService = new DynamicRuleService(db, ruleRepository);
+
+      const deletedIds = dynamicService.cleanupExpiredRules();
+      return reply.send({ 
+        deletedCount: deletedIds.length, 
+        deletedIds,
+        message: `Cleaned up ${deletedIds.length} expired dynamic rules` 
+      });
+    } catch (error) {
+      request.log.error(error, 'Error cleaning up dynamic rules');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

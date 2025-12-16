@@ -93,6 +93,14 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         }
       }
 
+      // Periodically cleanup expired dynamic rules (every ~100 emails)
+      if (Math.random() < 0.01) {
+        const deletedIds = dynamicService.cleanupExpiredRules();
+        if (deletedIds.length > 0) {
+          request.log.info({ count: deletedIds.length }, 'Cleaned up expired dynamic rules');
+        }
+      }
+
       // Process the email
       const result = await emailService.processEmail(payload);
 

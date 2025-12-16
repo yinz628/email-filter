@@ -1063,7 +1063,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           headers: { 'Authorization': 'Bearer ' + apiToken }
         });
         const data = await res.json();
-        showAlert('已清理 ' + data.deleted + ' 条旧日志');
+        showAlert('已清理 ' + data.deletedLogs + ' 条日志，' + data.deletedTracker + ' 条追踪记录');
         loadLogs();
       } catch (e) { showAlert('清理失败', 'error'); }
     }

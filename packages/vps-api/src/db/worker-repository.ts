@@ -192,19 +192,25 @@ export class WorkerRepository {
   /**
    * Check if a worker is online by calling its health endpoint
    */
-  async checkWorkerHealth(workerUrl: string): Promise<{ online: boolean; latency?: number; error?: string }> {
+  async checkWorkerHealth(workerUrl: string): Promise<{ 
+    online: boolean; 
+    latency?: number; 
+    error?: string;
+    vpsConnection?: { success: boolean; latency: number; error?: string };
+  }> {
     if (!workerUrl) {
       return { online: false, error: 'No worker URL configured' };
     }
 
-    const healthUrl = workerUrl.endsWith('/') ? `${workerUrl}health` : `${workerUrl}/health`;
+    // Use test-connection endpoint for full connectivity test
+    const testUrl = workerUrl.endsWith('/') ? `${workerUrl}test-connection` : `${workerUrl}/test-connection`;
     const startTime = Date.now();
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for full test
 
-      const response = await fetch(healthUrl, {
+      const response = await fetch(testUrl, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -213,7 +219,12 @@ export class WorkerRepository {
       const latency = Date.now() - startTime;
 
       if (response.ok) {
-        return { online: true, latency };
+        const data = await response.json() as any;
+        return { 
+          online: true, 
+          latency,
+          vpsConnection: data.vpsConnection,
+        };
       } else {
         return { online: false, latency, error: `HTTP ${response.status}` };
       }

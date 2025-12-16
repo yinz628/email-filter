@@ -110,13 +110,75 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     
-    // Health check endpoint
+    // Basic health check - just checks Worker is running
     if (url.pathname === '/health' || url.pathname === '/') {
       return new Response(JSON.stringify({
         status: 'ok',
         workerName: env.WORKER_NAME,
         timestamp: Date.now(),
       }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    
+    // Full connectivity test - tests Worker -> VPS connection
+    if (url.pathname === '/test-connection') {
+      const result = {
+        workerName: env.WORKER_NAME,
+        vpsApiUrl: env.VPS_API_URL ? env.VPS_API_URL.substring(0, 50) + '...' : 'NOT SET',
+        vpsApiToken: env.VPS_API_TOKEN ? '***configured***' : 'NOT SET',
+        timestamp: Date.now(),
+        vpsConnection: { success: false, error: '', latency: 0 },
+      };
+
+      if (!env.VPS_API_URL) {
+        result.vpsConnection.error = 'VPS_API_URL not configured';
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Test actual connection to VPS
+      const startTime = Date.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const testPayload = {
+          from: 'health-check@test.local',
+          to: 'health-check@test.local',
+          subject: '[HEALTH CHECK] Connection Test',
+          messageId: 'health-check-' + Date.now(),
+          timestamp: Date.now(),
+          workerName: env.WORKER_NAME,
+          isHealthCheck: true,
+        };
+
+        const response = await fetch(env.VPS_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + env.VPS_API_TOKEN,
+          },
+          body: JSON.stringify(testPayload),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        result.vpsConnection.latency = Date.now() - startTime;
+
+        if (response.ok) {
+          result.vpsConnection.success = true;
+        } else {
+          const errorText = await response.text();
+          result.vpsConnection.error = 'HTTP ' + response.status + ': ' + errorText.substring(0, 100);
+        }
+      } catch (error: any) {
+        result.vpsConnection.latency = Date.now() - startTime;
+        result.vpsConnection.error = error.name === 'AbortError' ? 'Timeout (5s)' : (error.message || 'Unknown error');
+      }
+
+      return new Response(JSON.stringify(result), {
         headers: { 'Content-Type': 'application/json' },
       });
     }

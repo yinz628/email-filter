@@ -593,14 +593,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tbody.innerHTML = workers.map(w => {
         const enabledStatus = w.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const health = workerHealthStatus[w.id];
-        let onlineStatus = '<span style="color:#999">未配置</span>';
+        let onlineStatus = '<span style="color:#999">未配置URL</span>';
         if (w.workerUrl) {
           if (health === undefined) {
-            onlineStatus = '<span style="color:#999">未检测</span>';
-          } else if (health.online) {
-            onlineStatus = '<span class="status status-enabled">🟢 在线 (' + health.latency + 'ms)</span>';
+            onlineStatus = '<span style="color:#999">点击检测</span>';
           } else {
-            onlineStatus = '<span class="status status-disabled">🔴 离线</span>';
+            onlineStatus = formatHealthStatus(health);
           }
         }
         const workerUrlDisplay = w.workerUrl ? '<a href="' + escapeHtml(w.workerUrl) + '" target="_blank" style="color:#4a90d9;font-size:12px;">' + escapeHtml(w.workerUrl.replace('https://', '')) + '</a>' : '<span style="color:#999">-</span>';
@@ -626,18 +624,30 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const data = await res.json();
         workerHealthStatus[id] = data;
         if (cell) {
-          if (data.online) {
-            cell.innerHTML = '<span class="status status-enabled">🟢 在线 (' + data.latency + 'ms)</span>';
-          } else {
-            cell.innerHTML = '<span class="status status-disabled">🔴 离线</span>';
-          }
+          cell.innerHTML = formatHealthStatus(data);
         }
       } catch (e) {
         if (cell) cell.innerHTML = '<span class="status status-disabled">🔴 错误</span>';
       }
     }
 
+    function formatHealthStatus(data) {
+      if (!data.online) {
+        return '<span class="status status-disabled">🔴 Worker离线</span>';
+      }
+      // Worker online, check VPS connection
+      if (data.vpsConnection) {
+        if (data.vpsConnection.success) {
+          return '<span class="status status-enabled">🟢 正常 (' + data.vpsConnection.latency + 'ms)</span>';
+        } else {
+          return '<span class="status status-disabled" title="' + escapeHtml(data.vpsConnection.error || '') + '">🟡 Worker在线，VPS连接失败</span>';
+        }
+      }
+      return '<span class="status status-enabled">🟢 在线 (' + data.latency + 'ms)</span>';
+    }
+
     async function checkAllWorkersHealth() {
+      showAlert('正在检测所有 Worker 状态...');
       try {
         const res = await fetch('/api/workers/health/all', { headers: getHeaders() });
         const data = await res.json();

@@ -13,9 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Try multiple possible database paths
 const possiblePaths = [
   process.env.DB_PATH,
+  '/var/lib/email-filter/filter.db',
   path.join(__dirname, '../data/filter.db'),
   path.join(__dirname, '../../data/filter.db'),
-  '/opt/email-filter/packages/vps-api/data/filter.db',
 ].filter(Boolean) as string[];
 
 let dbPath: string | null = null;

@@ -87,13 +87,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <h2>Worker 实例</h2>
         <p style="color:#666;margin-bottom:15px">每个 Cloudflare Email Worker 对应一个实例，通过 workerName 关联</p>
         <button class="btn btn-primary" onclick="showModal('add-worker-modal')" style="margin-bottom:15px">+ 添加 Worker</button>
+        <div style="margin-bottom:10px;">
+          <button class="btn btn-sm btn-secondary" onclick="checkAllWorkersHealth()">🔄 检测所有 Worker 状态</button>
+        </div>
         <table>
           <thead>
             <tr>
               <th>名称</th>
+              <th>Worker URL</th>
               <th>默认转发地址</th>
-              <th>状态</th>
-              <th>创建时间</th>
+              <th>在线状态</th>
+              <th>启用</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -374,6 +378,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>域名（可选）</label>
           <input type="text" id="worker-domain" placeholder="example.com">
         </div>
+        <div class="form-group">
+          <label>Worker URL（可选，用于在线检测）</label>
+          <input type="url" id="worker-url" placeholder="https://xxx.workers.dev">
+          <p style="color:#888;font-size:12px;margin-top:5px">填写后可检测 Worker 是否在线</p>
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -399,6 +408,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-group">
           <label>域名（可选）</label>
           <input type="text" id="edit-worker-domain" placeholder="example.com">
+        </div>
+        <div class="form-group">
+          <label>Worker URL（可选，用于在线检测）</label>
+          <input type="url" id="edit-worker-url" placeholder="https://xxx.workers.dev">
+          <p style="color:#888;font-size:12px;margin-top:5px">填写后可检测 Worker 是否在线</p>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -568,24 +582,71 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
+    let workerHealthStatus = {};
+
     function renderWorkers() {
       const tbody = document.getElementById('workers-table');
       if (workers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999">暂无 Worker 实例</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无 Worker 实例</td></tr>';
         return;
       }
       tbody.innerHTML = workers.map(w => {
-        const status = w.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
-        const date = new Date(w.createdAt).toLocaleDateString('zh-CN');
-        return '<tr><td><strong>' + escapeHtml(w.name) + '</strong></td>' +
+        const enabledStatus = w.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
+        const health = workerHealthStatus[w.id];
+        let onlineStatus = '<span style="color:#999">未配置</span>';
+        if (w.workerUrl) {
+          if (health === undefined) {
+            onlineStatus = '<span style="color:#999">未检测</span>';
+          } else if (health.online) {
+            onlineStatus = '<span class="status status-enabled">🟢 在线 (' + health.latency + 'ms)</span>';
+          } else {
+            onlineStatus = '<span class="status status-disabled">🔴 离线</span>';
+          }
+        }
+        const workerUrlDisplay = w.workerUrl ? '<a href="' + escapeHtml(w.workerUrl) + '" target="_blank" style="color:#4a90d9;font-size:12px;">' + escapeHtml(w.workerUrl.replace('https://', '')) + '</a>' : '<span style="color:#999">-</span>';
+        return '<tr data-worker-id="' + w.id + '"><td><strong>' + escapeHtml(w.name) + '</strong></td>' +
+          '<td>' + workerUrlDisplay + '</td>' +
           '<td>' + escapeHtml(w.defaultForwardTo) + '</td>' +
-          '<td>' + status + '</td><td>' + date + '</td>' +
+          '<td id="health-' + w.id + '">' + onlineStatus + '</td>' +
+          '<td>' + enabledStatus + '</td>' +
           '<td class="actions">' +
+            (w.workerUrl ? '<button class="btn btn-sm btn-secondary" onclick="checkWorkerHealth(\\'' + w.id + '\\')">检测</button>' : '') +
             '<button class="btn btn-sm btn-primary" onclick="editWorker(\\'' + w.id + '\\')">编辑</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleWorker(\\'' + w.id + '\\')">' + (w.enabled ? '禁用' : '启用') + '</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteWorker(\\'' + w.id + '\\')">删除</button>' +
           '</td></tr>';
       }).join('');
+    }
+
+    async function checkWorkerHealth(id) {
+      const cell = document.getElementById('health-' + id);
+      if (cell) cell.innerHTML = '<span style="color:#999">检测中...</span>';
+      try {
+        const res = await fetch('/api/workers/' + id + '/health', { headers: getHeaders() });
+        const data = await res.json();
+        workerHealthStatus[id] = data;
+        if (cell) {
+          if (data.online) {
+            cell.innerHTML = '<span class="status status-enabled">🟢 在线 (' + data.latency + 'ms)</span>';
+          } else {
+            cell.innerHTML = '<span class="status status-disabled">🔴 离线</span>';
+          }
+        }
+      } catch (e) {
+        if (cell) cell.innerHTML = '<span class="status status-disabled">🔴 错误</span>';
+      }
+    }
+
+    async function checkAllWorkersHealth() {
+      try {
+        const res = await fetch('/api/workers/health/all', { headers: getHeaders() });
+        const data = await res.json();
+        workerHealthStatus = data.health || {};
+        renderWorkers();
+        showAlert('Worker 状态检测完成');
+      } catch (e) {
+        showAlert('检测失败', 'error');
+      }
     }
 
     function updateWorkerSelects() {
@@ -603,7 +664,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const body = {
         name: document.getElementById('worker-name').value,
         defaultForwardTo: document.getElementById('worker-forward').value,
-        domain: document.getElementById('worker-domain').value || undefined
+        domain: document.getElementById('worker-domain').value || undefined,
+        workerUrl: document.getElementById('worker-url').value || undefined
       };
       try {
         const res = await fetch('/api/workers', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
@@ -626,6 +688,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-worker-name').value = w.name;
       document.getElementById('edit-worker-forward').value = w.defaultForwardTo;
       document.getElementById('edit-worker-domain').value = w.domain || '';
+      document.getElementById('edit-worker-url').value = w.workerUrl || '';
       showModal('edit-worker-modal');
     }
     
@@ -634,7 +697,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const id = document.getElementById('edit-worker-id').value;
       const body = {
         defaultForwardTo: document.getElementById('edit-worker-forward').value,
-        domain: document.getElementById('edit-worker-domain').value || undefined
+        domain: document.getElementById('edit-worker-domain').value || undefined,
+        workerUrl: document.getElementById('edit-worker-url').value || undefined
       };
       try {
         const res = await fetch('/api/workers/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });

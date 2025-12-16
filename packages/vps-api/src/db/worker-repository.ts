@@ -10,6 +10,7 @@ export interface WorkerInstance {
   name: string;
   domain: string;
   defaultForwardTo: string;
+  workerUrl: string | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -19,12 +20,14 @@ export interface CreateWorkerInput {
   name: string;
   domain?: string;
   defaultForwardTo: string;
+  workerUrl?: string;
 }
 
 export interface UpdateWorkerInput {
   name?: string;
   domain?: string;
   defaultForwardTo?: string;
+  workerUrl?: string;
   enabled?: boolean;
 }
 
@@ -36,7 +39,7 @@ export class WorkerRepository {
    */
   findAll(): WorkerInstance[] {
     const rows = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
       FROM worker_instances
       ORDER BY created_at DESC
     `).all() as any[];
@@ -49,7 +52,7 @@ export class WorkerRepository {
    */
   findEnabled(): WorkerInstance[] {
     const rows = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
       FROM worker_instances
       WHERE enabled = 1
       ORDER BY created_at DESC
@@ -63,7 +66,7 @@ export class WorkerRepository {
    */
   findById(id: string): WorkerInstance | null {
     const row = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
       FROM worker_instances
       WHERE id = ?
     `).get(id) as any;
@@ -76,7 +79,7 @@ export class WorkerRepository {
    */
   findByName(name: string): WorkerInstance | null {
     const row = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
       FROM worker_instances
       WHERE name = ? AND enabled = 1
     `).get(name) as any;
@@ -89,7 +92,7 @@ export class WorkerRepository {
    */
   findByDomain(domain: string): WorkerInstance | null {
     const row = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
       FROM worker_instances
       WHERE domain = ? AND enabled = 1
     `).get(domain) as any;
@@ -105,9 +108,9 @@ export class WorkerRepository {
     const now = new Date().toISOString();
 
     this.db.prepare(`
-      INSERT INTO worker_instances (id, name, domain, default_forward_to, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?)
-    `).run(id, input.name, input.domain || null, input.defaultForwardTo, now, now);
+      INSERT INTO worker_instances (id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, input.name, input.domain || null, input.defaultForwardTo, input.workerUrl || null, now, now);
 
     return this.findById(id)!;
   }
@@ -134,6 +137,10 @@ export class WorkerRepository {
     if (input.defaultForwardTo !== undefined) {
       updates.push('default_forward_to = ?');
       values.push(input.defaultForwardTo);
+    }
+    if (input.workerUrl !== undefined) {
+      updates.push('worker_url = ?');
+      values.push(input.workerUrl || null);
     }
     if (input.enabled !== undefined) {
       updates.push('enabled = ?');
@@ -175,9 +182,47 @@ export class WorkerRepository {
       name: row.name,
       domain: row.domain,
       defaultForwardTo: row.default_forward_to,
+      workerUrl: row.worker_url,
       enabled: row.enabled === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  /**
+   * Check if a worker is online by calling its health endpoint
+   */
+  async checkWorkerHealth(workerUrl: string): Promise<{ online: boolean; latency?: number; error?: string }> {
+    if (!workerUrl) {
+      return { online: false, error: 'No worker URL configured' };
+    }
+
+    const healthUrl = workerUrl.endsWith('/') ? `${workerUrl}health` : `${workerUrl}/health`;
+    const startTime = Date.now();
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(healthUrl, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      const latency = Date.now() - startTime;
+
+      if (response.ok) {
+        return { online: true, latency };
+      } else {
+        return { online: false, latency, error: `HTTP ${response.status}` };
+      }
+    } catch (error: any) {
+      const latency = Date.now() - startTime;
+      if (error.name === 'AbortError') {
+        return { online: false, latency, error: 'Timeout' };
+      }
+      return { online: false, latency, error: error.message || 'Unknown error' };
+    }
   }
 }

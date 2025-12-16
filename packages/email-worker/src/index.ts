@@ -104,6 +104,26 @@ async function getFilterDecision(
 }
 
 export default {
+  /**
+   * HTTP handler for health check endpoint
+   */
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    
+    // Health check endpoint
+    if (url.pathname === '/health' || url.pathname === '/') {
+      return new Response(JSON.stringify({
+        status: 'ok',
+        workerName: env.WORKER_NAME,
+        timestamp: Date.now(),
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    
+    return new Response('Not Found', { status: 404 });
+  },
+
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
     // Extract essential fields only (no body parsing to minimize CPU)
     const from = extractEmail(message.from);

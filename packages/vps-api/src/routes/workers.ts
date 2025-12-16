@@ -113,4 +113,44 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
     
     return { worker };
   });
+
+  /**
+   * GET /api/workers/:id/health
+   * Check if a worker is online
+   */
+  fastify.get<{ Params: WorkerParams }>('/:id/health', async (request, reply) => {
+    const worker = getRepository().findById(request.params.id);
+    
+    if (!worker) {
+      return reply.status(404).send({ error: 'Worker not found' });
+    }
+
+    if (!worker.workerUrl) {
+      return { online: false, error: 'No worker URL configured' };
+    }
+
+    const health = await getRepository().checkWorkerHealth(worker.workerUrl);
+    return health;
+  });
+
+  /**
+   * GET /api/workers/health/all
+   * Check health of all workers
+   */
+  fastify.get('/health/all', async () => {
+    const workers = getRepository().findAll();
+    const results: Record<string, { online: boolean; latency?: number; error?: string }> = {};
+
+    await Promise.all(
+      workers.map(async (worker) => {
+        if (worker.workerUrl) {
+          results[worker.id] = await getRepository().checkWorkerHealth(worker.workerUrl);
+        } else {
+          results[worker.id] = { online: false, error: 'No URL' };
+        }
+      })
+    );
+
+    return { health: results };
+  });
 }

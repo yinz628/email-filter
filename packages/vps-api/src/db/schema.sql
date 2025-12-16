@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS worker_instances (
   name TEXT NOT NULL UNIQUE,
   domain TEXT,
   default_forward_to TEXT NOT NULL,
+  worker_url TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

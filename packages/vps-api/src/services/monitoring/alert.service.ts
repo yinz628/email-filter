@@ -38,6 +38,8 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   FREQUENCY_DOWN: '频率下降',
   SIGNAL_DEAD: '信号消失',
   SIGNAL_RECOVERED: '信号恢复',
+  RATIO_LOW: '比例过低',
+  RATIO_RECOVERED: '比例恢复',
 };
 
 /**

@@ -89,3 +89,37 @@ CREATE TABLE IF NOT EXISTS alert_channels (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- ============================================
+-- Ratio Monitoring Tables
+-- ============================================
+
+-- 比例监控规则表
+CREATE TABLE IF NOT EXISTS ratio_monitors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  first_rule_id TEXT NOT NULL,
+  second_rule_id TEXT NOT NULL,
+  threshold_percent REAL NOT NULL,
+  time_window TEXT NOT NULL DEFAULT '24h',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (first_rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE,
+  FOREIGN KEY (second_rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ratio_monitors_tag ON ratio_monitors(tag);
+CREATE INDEX IF NOT EXISTS idx_ratio_monitors_enabled ON ratio_monitors(enabled);
+
+-- 比例状态表
+CREATE TABLE IF NOT EXISTS ratio_states (
+  monitor_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'HEALTHY',
+  first_count INTEGER NOT NULL DEFAULT 0,
+  second_count INTEGER NOT NULL DEFAULT 0,
+  current_ratio REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
+);

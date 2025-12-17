@@ -3,6 +3,17 @@
  */
 
 // ============================================================================
+// Monitoring Rule Types (Base)
+// ============================================================================
+
+/**
+ * Monitoring rule type
+ * - signal: Traditional signal monitoring (email frequency)
+ * - ratio: Ratio monitoring (compare two rules' email counts)
+ */
+export type MonitoringRuleType = 'signal' | 'ratio';
+
+// ============================================================================
 // Signal State Types
 // ============================================================================
 
@@ -19,8 +30,10 @@ export type SignalState = 'ACTIVE' | 'WEAK' | 'DEAD';
  * - FREQUENCY_DOWN: ACTIVE → WEAK
  * - SIGNAL_DEAD: WEAK → DEAD
  * - SIGNAL_RECOVERED: DEAD/WEAK → ACTIVE
+ * - RATIO_LOW: Ratio dropped below threshold
+ * - RATIO_RECOVERED: Ratio recovered above threshold
  */
-export type AlertType = 'FREQUENCY_DOWN' | 'SIGNAL_DEAD' | 'SIGNAL_RECOVERED';
+export type AlertType = 'FREQUENCY_DOWN' | 'SIGNAL_DEAD' | 'SIGNAL_RECOVERED' | 'RATIO_LOW' | 'RATIO_RECOVERED';
 
 /**
  * Alert channel types for notification delivery
@@ -363,4 +376,111 @@ export function determineAlertType(
   }
   
   return null;
+}
+
+// ============================================================================
+// Ratio Monitoring Types
+// ============================================================================
+
+/**
+ * Ratio state representing the health of a ratio monitor
+ * - HEALTHY: Ratio is above threshold
+ * - LOW: Ratio is below threshold
+ */
+export type RatioState = 'HEALTHY' | 'LOW';
+
+/**
+ * Time window for ratio calculation
+ */
+export type RatioTimeWindow = '1h' | '12h' | '24h';
+
+/**
+ * Ratio monitor - monitors the ratio between two rules' email counts
+ * within the same tag group
+ */
+export interface RatioMonitor {
+  id: string;
+  name: string;                        // Monitor name for display
+  tag: string;                         // Tag to group rules
+  firstRuleId: string;                 // First rule (denominator)
+  secondRuleId: string;                // Second rule (numerator)
+  thresholdPercent: number;            // Alert when ratio < threshold (e.g., 80 = 80%)
+  timeWindow: RatioTimeWindow;         // Time window for calculation
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * DTO for creating a ratio monitor
+ */
+export interface CreateRatioMonitorDTO {
+  name: string;
+  tag: string;
+  firstRuleId: string;
+  secondRuleId: string;
+  thresholdPercent: number;
+  timeWindow: RatioTimeWindow;
+  enabled?: boolean;
+}
+
+/**
+ * DTO for updating a ratio monitor
+ */
+export interface UpdateRatioMonitorDTO {
+  name?: string;
+  tag?: string;
+  firstRuleId?: string;
+  secondRuleId?: string;
+  thresholdPercent?: number;
+  timeWindow?: RatioTimeWindow;
+  enabled?: boolean;
+}
+
+/**
+ * Current status of a ratio monitor
+ */
+export interface RatioStatus {
+  monitorId: string;
+  monitor: RatioMonitor;
+  state: RatioState;
+  firstRuleName: string;
+  secondRuleName: string;
+  firstCount: number;                  // Count of first rule emails
+  secondCount: number;                 // Count of second rule emails
+  currentRatio: number;                // Current ratio (secondCount / firstCount * 100)
+  updatedAt: Date;
+}
+
+/**
+ * Database representation of ratio state
+ */
+export interface RatioStateRecord {
+  monitorId: string;
+  state: RatioState;
+  firstCount: number;
+  secondCount: number;
+  currentRatio: number;
+  updatedAt: string;
+}
+
+/**
+ * Calculate ratio state based on current ratio and threshold
+ */
+export function calculateRatioState(
+  currentRatio: number,
+  thresholdPercent: number
+): RatioState {
+  return currentRatio >= thresholdPercent ? 'HEALTHY' : 'LOW';
+}
+
+/**
+ * Calculate ratio percentage
+ * @returns Ratio as percentage (0-100+), or 0 if firstCount is 0
+ */
+export function calculateRatio(firstCount: number, secondCount: number): number {
+  if (firstCount === 0) {
+    return secondCount > 0 ? 100 : 0;
+  }
+  return Math.round((secondCount / firstCount) * 100 * 100) / 100; // 2 decimal places
 }

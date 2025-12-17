@@ -513,6 +513,27 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     }
   });
 
+  /**
+   * DELETE /api/monitoring/alerts/:id
+   * Delete a single alert by ID
+   */
+  fastify.delete('/alerts/:id', async (request: FastifyRequest<{ Params: AlertParams }>, reply: FastifyReply) => {
+    try {
+      const db = getDatabase();
+      const stmt = db.prepare('DELETE FROM alerts WHERE id = ?');
+      const result = stmt.run(request.params.id);
+      
+      if (result.changes === 0) {
+        return reply.status(404).send({ error: 'Alert not found' });
+      }
+
+      return reply.send({ success: true });
+    } catch (error) {
+      request.log.error(error, 'Error deleting alert');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
   // ============================================================================
   // Email Hit API (Requirements: 3.1, 3.2, 3.3, 3.4)
   // ============================================================================

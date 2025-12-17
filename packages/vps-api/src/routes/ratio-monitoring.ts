@@ -218,4 +218,24 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
       }
     }
   );
+
+  // Delete ratio alert
+  fastify.delete(
+    '/alerts/:id',
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      try {
+        const db = getDatabase();
+        const stmt = db.prepare('DELETE FROM ratio_alerts WHERE id = ?');
+        const result = stmt.run(request.params.id);
+        
+        if (result.changes === 0) {
+          return reply.status(404).send({ error: 'Alert not found' });
+        }
+        return reply.send({ success: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        return reply.status(500).send({ error: message });
+      }
+    }
+  );
 }

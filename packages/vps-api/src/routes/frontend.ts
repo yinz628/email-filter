@@ -479,92 +479,154 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     <!-- Monitoring Tab -->
     <div id="monitoring-tab" class="tab-content hidden">
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;">📡 信号监控规则</h2>
-          <div style="display:flex;gap:10px;">
-            <button class="btn btn-secondary" onclick="triggerHeartbeat()">💓 手动心跳检查</button>
-            <button class="btn btn-primary" onclick="showModal('add-monitoring-rule-modal')">+ 添加监控规则</button>
+      <!-- 🔔 告警历史 - 放在最上面 -->
+      <div class="card collapsible-card">
+        <div class="card-header" onclick="toggleCard('alerts-card')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="collapse-icon" id="alerts-card-icon">▼</span>
+            <h2 style="margin:0;border:none;padding:0;">🔔 告警历史</h2>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="alert-rule-filter" onchange="filterAlerts()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="">全部规则</option>
+            </select>
+            <select id="alert-rows-limit" onchange="loadMonitoringAlerts()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="10">10条</option>
+              <option value="20" selected>20条</option>
+              <option value="50">50条</option>
+              <option value="100">100条</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="loadMonitoringAlerts()">🔄 刷新</button>
           </div>
         </div>
-        <p style="color:#666;margin-bottom:15px">监控重点邮件信号的健康状态。当信号异常时自动告警。</p>
-        <div class="filter-bar">
-          <select id="monitoring-tag-filter" onchange="loadMonitoringRules()">
-            <option value="">全部标签</option>
-          </select>
+        <div class="card-body" id="alerts-card-body" style="margin-top:15px;">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>规则</th>
+                <th>状态变化</th>
+                <th>间隔</th>
+                <th>发送状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="monitoring-alerts-table"></tbody>
+          </table>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>商户</th>
-              <th>规则名称</th>
-              <th>标签</th>
-              <th>主题匹配</th>
-              <th>预期间隔</th>
-              <th>死亡阈值</th>
-              <th>状态</th>
-              <th>启用</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="monitoring-rules-table"></tbody>
-        </table>
       </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;">📊 信号状态</h2>
-          <button class="btn btn-secondary" onclick="loadMonitoringStatus()">🔄 刷新</button>
-        </div>
-        <p style="color:#666;margin-bottom:15px">实时显示所有监控信号的健康状态。状态按 DEAD > WEAK > ACTIVE 排序。</p>
-        <table>
-          <thead>
-            <tr>
-              <th>状态</th>
-              <th>商户 / 规则</th>
-              <th>最后出现</th>
-              <th>间隔</th>
-              <th>24h</th>
-              <th>12h</th>
-              <th>1h</th>
-            </tr>
-          </thead>
-          <tbody id="monitoring-status-table"></tbody>
-        </table>
-      </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;">🔔 告警历史</h2>
-          <button class="btn btn-secondary" onclick="loadMonitoringAlerts()">🔄 刷新</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>类型</th>
-              <th>规则</th>
-              <th>状态变化</th>
-              <th>间隔</th>
-              <th>发送状态</th>
-            </tr>
-          </thead>
-          <tbody id="monitoring-alerts-table"></tbody>
-        </table>
-      </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;">📈 漏斗监控</h2>
-          <div style="display:flex;gap:10px;">
-            <button class="btn btn-secondary" onclick="checkRatioMonitors()">🔄 检查比例</button>
-            <button class="btn btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加漏斗监控</button>
+
+      <!-- 📡 信号监控规则 -->
+      <div class="card collapsible-card">
+        <div class="card-header" onclick="toggleCard('rules-card')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="collapse-icon" id="rules-card-icon">▼</span>
+            <h2 style="margin:0;border:none;padding:0;">📡 信号监控规则</h2>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="rules-rows-limit" onchange="loadMonitoringRules()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="10">10条</option>
+              <option value="20" selected>20条</option>
+              <option value="50">50条</option>
+              <option value="0">全部</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="triggerHeartbeat()">💓 心跳检查</button>
+            <button class="btn btn-sm btn-primary" onclick="showModal('add-monitoring-rule-modal')">+ 添加</button>
           </div>
         </div>
-        <p style="color:#666;margin-bottom:15px">监控邮件流程的转化漏斗。支持多步骤，当任一步骤比例低于阈值时触发告警。</p>
-        <div class="filter-bar">
-          <select id="ratio-tag-filter" onchange="loadRatioMonitors()">
-            <option value="">全部标签</option>
-          </select>
+        <div class="card-body" id="rules-card-body" style="margin-top:15px;">
+          <p style="color:#666;margin-bottom:15px">监控重点邮件信号的健康状态。当信号异常时自动告警。</p>
+          <div class="filter-bar">
+            <select id="monitoring-tag-filter" onchange="loadMonitoringRules()">
+              <option value="">全部标签</option>
+            </select>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>商户</th>
+                <th>规则名称</th>
+                <th>标签</th>
+                <th>主题匹配</th>
+                <th>预期间隔</th>
+                <th>死亡阈值</th>
+                <th>状态</th>
+                <th>启用</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="monitoring-rules-table"></tbody>
+          </table>
         </div>
-        <div id="ratio-monitors-container"></div>
+      </div>
+
+      <!-- 📊 信号状态 -->
+      <div class="card collapsible-card">
+        <div class="card-header" onclick="toggleCard('status-card')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="collapse-icon" id="status-card-icon">▼</span>
+            <h2 style="margin:0;border:none;padding:0;">📊 信号状态</h2>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="status-rule-filter" onchange="filterStatus()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="">全部规则</option>
+            </select>
+            <select id="status-rows-limit" onchange="loadMonitoringStatus()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="10">10条</option>
+              <option value="20" selected>20条</option>
+              <option value="50">50条</option>
+              <option value="0">全部</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="loadMonitoringStatus()">🔄 刷新</button>
+          </div>
+        </div>
+        <div class="card-body" id="status-card-body" style="margin-top:15px;">
+          <p style="color:#666;margin-bottom:15px">实时显示所有监控信号的健康状态。状态按 DEAD > WEAK > ACTIVE 排序。</p>
+          <table>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>商户 / 规则</th>
+                <th>最后出现</th>
+                <th>间隔</th>
+                <th>24h</th>
+                <th>12h</th>
+                <th>1h</th>
+              </tr>
+            </thead>
+            <tbody id="monitoring-status-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 📈 漏斗监控 -->
+      <div class="card collapsible-card">
+        <div class="card-header" onclick="toggleCard('funnel-card')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="collapse-icon" id="funnel-card-icon">▼</span>
+            <h2 style="margin:0;border:none;padding:0;">📈 漏斗监控</h2>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="funnel-rows-limit" onchange="loadRatioMonitors()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="5">5条</option>
+              <option value="10" selected>10条</option>
+              <option value="20">20条</option>
+              <option value="0">全部</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="checkRatioMonitors()">🔄 检查比例</button>
+            <button class="btn btn-sm btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加</button>
+          </div>
+        </div>
+        <div class="card-body" id="funnel-card-body" style="margin-top:15px;">
+          <p style="color:#666;margin-bottom:15px">监控邮件流程的转化漏斗。支持多步骤，当任一步骤比例低于阈值时触发告警。</p>
+          <div class="filter-bar">
+            <select id="ratio-tag-filter" onchange="loadRatioMonitors()">
+              <option value="">全部标签</option>
+            </select>
+          </div>
+          <div id="ratio-monitors-container"></div>
+        </div>
       </div>
     </div>
 
@@ -1054,6 +1116,21 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
     function hideModal(id) { document.getElementById(id).classList.add('hidden'); }
+    
+    // Card collapse functionality
+    const cardStates = { 'alerts-card': true, 'rules-card': true, 'status-card': true, 'funnel-card': true };
+    function toggleCard(cardId) {
+      cardStates[cardId] = !cardStates[cardId];
+      const body = document.getElementById(cardId + '-body');
+      const icon = document.getElementById(cardId + '-icon');
+      if (cardStates[cardId]) {
+        body.style.display = 'block';
+        icon.textContent = '▼';
+      } else {
+        body.style.display = 'none';
+        icon.textContent = '▶';
+      }
+    }
     
     // Close modal when clicking outside
     document.querySelectorAll('.modal').forEach(modal => {
@@ -2798,7 +2875,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999">暂无监控规则</td></tr>';
         return;
       }
-      tbody.innerHTML = monitoringRules.map(r => {
+      const limit = parseInt(document.getElementById('rules-rows-limit')?.value || '20', 10);
+      const displayRules = limit > 0 ? monitoringRules.slice(0, limit) : monitoringRules;
+      tbody.innerHTML = displayRules.map(r => {
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const tagsHtml = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
         return '<tr>' +
@@ -2817,18 +2896,41 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '</td>' +
         '</tr>';
       }).join('');
+      if (limit > 0 && monitoringRules.length > limit) {
+        tbody.innerHTML += '<tr><td colspan="9" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + monitoringRules.length + ' 条</td></tr>';
+      }
     }
 
+    let allStatuses = [];
+    
     async function loadMonitoringStatus() {
       if (!apiToken) return;
       try {
         const res = await fetch('/api/monitoring/status', { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
-        renderMonitoringStatus(data.statuses || []);
+        allStatuses = data.statuses || [];
+        updateStatusRuleFilter();
+        renderMonitoringStatus(allStatuses);
       } catch (e) {
         console.error('加载监控状态失败', e);
       }
+    }
+    
+    function updateStatusRuleFilter() {
+      const select = document.getElementById('status-rule-filter');
+      if (!select) return;
+      const currentValue = select.value;
+      const options = ['<option value="">全部规则</option>'];
+      allStatuses.forEach(s => {
+        const label = (s.rule?.merchant || '') + ' / ' + (s.rule?.name || '');
+        options.push('<option value="' + s.ruleId + '"' + (s.ruleId === currentValue ? ' selected' : '') + '>' + escapeHtml(label) + '</option>');
+      });
+      select.innerHTML = options.join('');
+    }
+    
+    function filterStatus() {
+      renderMonitoringStatus(allStatuses);
     }
 
     function renderMonitoringStatus(statuses) {
@@ -2837,7 +2939,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无状态数据</td></tr>';
         return;
       }
-      tbody.innerHTML = statuses.map(s => {
+      
+      const ruleFilter = document.getElementById('status-rule-filter')?.value || '';
+      const limit = parseInt(document.getElementById('status-rows-limit')?.value || '20', 10);
+      
+      let filtered = statuses;
+      if (ruleFilter) {
+        filtered = statuses.filter(s => s.ruleId === ruleFilter);
+      }
+      const displayStatuses = limit > 0 ? filtered.slice(0, limit) : filtered;
+      
+      tbody.innerHTML = displayStatuses.map(s => {
         const stateIcon = s.state === 'ACTIVE' ? '🟢' : (s.state === 'WEAK' ? '🟡' : '🔴');
         const stateClass = s.state === 'ACTIVE' ? 'status-enabled' : (s.state === 'WEAK' ? 'category-dynamic' : 'status-disabled');
         const lastSeen = s.lastSeenAt ? formatTimeAgo(new Date(s.lastSeenAt)) : '从未';
@@ -2858,6 +2970,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + s.count1h + '</td>' +
         '</tr>';
       }).join('');
+      
+      if (limit > 0 && filtered.length > limit) {
+        tbody.innerHTML += '<tr><td colspan="7" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + filtered.length + ' 条</td></tr>';
+      }
     }
 
     function formatTimeAgo(date) {
@@ -2868,13 +2984,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       return Math.floor(diff / 1440) + ' 天前';
     }
 
+    let allAlerts = [];
+    
     async function loadMonitoringAlerts() {
       if (!apiToken) return;
       try {
+        const limit = parseInt(document.getElementById('alert-rows-limit')?.value || '20', 10);
         // Load both signal alerts and ratio alerts
         const [signalRes, ratioRes] = await Promise.all([
-          fetch('/api/monitoring/alerts?limit=50', { headers: getHeaders() }),
-          fetch('/api/monitoring/ratio/alerts?limit=50', { headers: getHeaders() })
+          fetch('/api/monitoring/alerts?limit=' + (limit * 2), { headers: getHeaders() }),
+          fetch('/api/monitoring/ratio/alerts?limit=' + (limit * 2), { headers: getHeaders() })
         ]);
         
         let signalAlerts = [];
@@ -2891,23 +3010,57 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
         
         // Merge and sort by createdAt descending
-        const allAlerts = [...signalAlerts, ...ratioAlerts].sort((a, b) => 
+        allAlerts = [...signalAlerts, ...ratioAlerts].sort((a, b) => 
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        ).slice(0, 50);
+        );
         
+        updateAlertRuleFilter();
         renderMonitoringAlerts(allAlerts);
       } catch (e) {
         console.error('加载告警历史失败', e);
       }
     }
+    
+    function updateAlertRuleFilter() {
+      const select = document.getElementById('alert-rule-filter');
+      if (!select) return;
+      const currentValue = select.value;
+      const ruleMap = new Map();
+      allAlerts.forEach(a => {
+        if (a.source === 'signal' && a.rule) {
+          ruleMap.set(a.ruleId, a.rule.merchant + ' / ' + a.rule.name);
+        } else if (a.source === 'ratio') {
+          ruleMap.set(a.monitorId, a.message?.split(':')[0]?.replace(/[\\[\\]]/g, '') || a.monitorId);
+        }
+      });
+      const options = ['<option value="">全部规则</option>'];
+      ruleMap.forEach((label, id) => {
+        options.push('<option value="' + id + '"' + (id === currentValue ? ' selected' : '') + '>' + escapeHtml(label) + '</option>');
+      });
+      select.innerHTML = options.join('');
+    }
+    
+    function filterAlerts() {
+      renderMonitoringAlerts(allAlerts);
+    }
 
     function renderMonitoringAlerts(alerts) {
       const tbody = document.getElementById('monitoring-alerts-table');
       if (alerts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无告警记录</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无告警记录</td></tr>';
         return;
       }
-      tbody.innerHTML = alerts.map(a => {
+      
+      const ruleFilter = document.getElementById('alert-rule-filter')?.value || '';
+      const limit = parseInt(document.getElementById('alert-rows-limit')?.value || '20', 10);
+      
+      let filtered = alerts;
+      if (ruleFilter) {
+        filtered = alerts.filter(a => (a.source === 'signal' ? a.ruleId : a.monitorId) === ruleFilter);
+      }
+      const displayAlerts = filtered.slice(0, limit);
+      
+      tbody.innerHTML = displayAlerts.map(a => {
         let typeIcon, typeText;
         switch (a.alertType) {
           case 'SIGNAL_RECOVERED':
@@ -2936,6 +3089,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           nameCol = escapeHtml(a.rule?.name || a.message || a.ruleId);
         }
         
+        const deleteBtn = '<button class="btn btn-sm btn-danger" onclick="deleteAlert(\\'' + a.id + '\\', \\'' + a.source + '\\')">删除</button>';
+        
         return '<tr>' +
           '<td>' + time + '</td>' +
           '<td>' + typeIcon + ' ' + typeText + '</td>' +
@@ -2943,8 +3098,32 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + a.previousState + ' → ' + a.currentState + '</td>' +
           '<td>' + infoCol + '</td>' +
           '<td>' + sentStatus + '</td>' +
+          '<td>' + deleteBtn + '</td>' +
         '</tr>';
       }).join('');
+      
+      if (filtered.length > limit) {
+        tbody.innerHTML += '<tr><td colspan="7" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + filtered.length + ' 条</td></tr>';
+      }
+    }
+    
+    async function deleteAlert(id, source) {
+      if (!confirm('确定要删除这条告警记录吗？')) return;
+      try {
+        const url = source === 'ratio' ? '/api/monitoring/ratio/alerts/' + id : '/api/monitoring/alerts/' + id;
+        const res = await fetch(url, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          showAlert('删除成功');
+          loadMonitoringAlerts();
+        } else {
+          showAlert('删除失败', 'error');
+        }
+      } catch (e) {
+        showAlert('删除失败', 'error');
+      }
     }
 
     // Add monitoring rule form
@@ -3166,7 +3345,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         container.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">暂无漏斗监控</div>';
         return;
       }
-      container.innerHTML = ratioMonitors.map(r => {
+      const limit = parseInt(document.getElementById('funnel-rows-limit')?.value || '10', 10);
+      const displayMonitors = limit > 0 ? ratioMonitors.slice(0, limit) : ratioMonitors;
+      let html = displayMonitors.map(r => {
         const status = ratioStatuses.find(s => s.monitorId === r.id);
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const stateIcon = status?.state === 'HEALTHY' ? '🟢' : '🔴';
@@ -3227,6 +3408,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           funnelHtml +
         '</div>';
       }).join('');
+      
+      if (limit > 0 && ratioMonitors.length > limit) {
+        html += '<div style="text-align:center;color:#999;font-size:12px;padding:10px;">显示 ' + limit + ' / ' + ratioMonitors.length + ' 条</div>';
+      }
+      container.innerHTML = html;
     }
 
     // Funnel step management

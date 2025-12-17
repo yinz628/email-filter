@@ -102,6 +102,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('logs')">日志</button>
       <button class="tab" onclick="showTab('stats')">统计信息</button>
       <button class="tab" onclick="showTab('campaign')">营销分析</button>
+      <button class="tab" onclick="showTab('monitoring')">📡 信号监控</button>
       <button class="tab" onclick="showTab('settings')">设置</button>
     </div>
 
@@ -476,6 +477,75 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Monitoring Tab -->
+    <div id="monitoring-tab" class="tab-content hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">📡 信号监控规则</h2>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-secondary" onclick="triggerHeartbeat()">💓 手动心跳检查</button>
+            <button class="btn btn-primary" onclick="showModal('add-monitoring-rule-modal')">+ 添加监控规则</button>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">监控重点邮件信号的健康状态。当信号异常时自动告警。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>商户</th>
+              <th>规则名称</th>
+              <th>主题匹配</th>
+              <th>预期间隔</th>
+              <th>死亡阈值</th>
+              <th>状态</th>
+              <th>启用</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="monitoring-rules-table"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">📊 信号状态</h2>
+          <button class="btn btn-secondary" onclick="loadMonitoringStatus()">🔄 刷新</button>
+        </div>
+        <p style="color:#666;margin-bottom:15px">实时显示所有监控信号的健康状态。状态按 DEAD > WEAK > ACTIVE 排序。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>状态</th>
+              <th>商户 / 规则</th>
+              <th>最后出现</th>
+              <th>间隔</th>
+              <th>24h</th>
+              <th>12h</th>
+              <th>1h</th>
+            </tr>
+          </thead>
+          <tbody id="monitoring-status-table"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">🔔 告警历史</h2>
+          <button class="btn btn-secondary" onclick="loadMonitoringAlerts()">🔄 刷新</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>类型</th>
+              <th>规则</th>
+              <th>状态变化</th>
+              <th>间隔</th>
+              <th>发送状态</th>
+            </tr>
+          </thead>
+          <tbody id="monitoring-alerts-table"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content hidden">
       <div class="card">
@@ -719,6 +789,80 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Add Monitoring Rule Modal -->
+  <div id="add-monitoring-rule-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>添加监控规则</h3>
+        <button class="modal-close" onclick="hideModal('add-monitoring-rule-modal')">&times;</button>
+      </div>
+      <form id="add-monitoring-rule-form">
+        <div class="form-group">
+          <label>商户标识 *</label>
+          <input type="text" id="monitoring-merchant" required placeholder="例如：amazon.com">
+        </div>
+        <div class="form-group">
+          <label>规则名称 *</label>
+          <input type="text" id="monitoring-name" required placeholder="例如：Amazon订单确认">
+        </div>
+        <div class="form-group">
+          <label>主题匹配模式 *</label>
+          <input type="text" id="monitoring-pattern" required placeholder="正则表达式，例如：Your Amazon.com order">
+          <p style="color:#888;font-size:12px;margin-top:5px">支持正则表达式匹配邮件主题</p>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>预期间隔（分钟）*</label>
+            <input type="number" id="monitoring-interval" required min="1" value="1440" placeholder="1440">
+            <p style="color:#888;font-size:12px;margin-top:5px">信号正常出现的间隔，1440=1天</p>
+          </div>
+          <div class="form-group">
+            <label>死亡阈值（分钟）*</label>
+            <input type="number" id="monitoring-dead-after" required min="1" value="4320" placeholder="4320">
+            <p style="color:#888;font-size:12px;margin-top:5px">超过此时间判定为DEAD，4320=3天</p>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-success">创建</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit Monitoring Rule Modal -->
+  <div id="edit-monitoring-rule-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>编辑监控规则</h3>
+        <button class="modal-close" onclick="hideModal('edit-monitoring-rule-modal')">&times;</button>
+      </div>
+      <form id="edit-monitoring-rule-form">
+        <input type="hidden" id="edit-monitoring-id">
+        <div class="form-group">
+          <label>商户标识 *</label>
+          <input type="text" id="edit-monitoring-merchant" required>
+        </div>
+        <div class="form-group">
+          <label>规则名称 *</label>
+          <input type="text" id="edit-monitoring-name" required>
+        </div>
+        <div class="form-group">
+          <label>主题匹配模式 *</label>
+          <input type="text" id="edit-monitoring-pattern" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>预期间隔（分钟）*</label>
+            <input type="number" id="edit-monitoring-interval" required min="1">
+          </div>
+          <div class="form-group">
+            <label>死亡阈值（分钟）*</label>
+            <input type="number" id="edit-monitoring-dead-after" required min="1">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
   <script>
     let apiToken = localStorage.getItem('apiToken') || '';
     let workers = [];
@@ -742,6 +886,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'logs') loadLogs();
       if (name === 'stats') loadStats();
       if (name === 'campaign') loadCampaignAnalytics();
+      if (name === 'monitoring') loadMonitoringData();
       if (name === 'settings') loadSettings();
     }
 
@@ -2374,6 +2519,255 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       } catch (e) {
         showAlert('计算失败', 'error');
+      }
+    }
+
+    // ==================== Monitoring Functions ====================
+    let monitoringRules = [];
+
+    async function loadMonitoringData() {
+      await Promise.all([loadMonitoringRules(), loadMonitoringStatus(), loadMonitoringAlerts()]);
+    }
+
+    async function loadMonitoringRules() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/monitoring/rules', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        monitoringRules = data.rules || [];
+        renderMonitoringRules();
+      } catch (e) {
+        showAlert('加载监控规则失败', 'error');
+      }
+    }
+
+    function renderMonitoringRules() {
+      const tbody = document.getElementById('monitoring-rules-table');
+      if (monitoringRules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">暂无监控规则</td></tr>';
+        return;
+      }
+      tbody.innerHTML = monitoringRules.map(r => {
+        const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
+        return '<tr>' +
+          '<td>' + escapeHtml(r.merchant) + '</td>' +
+          '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
+          '<td><code style="font-size:11px;">' + escapeHtml(r.subjectPattern) + '</code></td>' +
+          '<td>' + r.expectedIntervalMinutes + ' 分钟</td>' +
+          '<td>' + r.deadAfterMinutes + ' 分钟</td>' +
+          '<td id="rule-state-' + r.id + '">-</td>' +
+          '<td>' + enabledStatus + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="editMonitoringRule(\\'' + r.id + '\\')">编辑</button>' +
+            '<button class="btn btn-sm btn-' + (r.enabled ? 'warning' : 'success') + '" onclick="toggleMonitoringRule(\\'' + r.id + '\\')">' + (r.enabled ? '禁用' : '启用') + '</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteMonitoringRule(\\'' + r.id + '\\')">删除</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    async function loadMonitoringStatus() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/monitoring/status', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderMonitoringStatus(data.statuses || []);
+      } catch (e) {
+        console.error('加载监控状态失败', e);
+      }
+    }
+
+    function renderMonitoringStatus(statuses) {
+      const tbody = document.getElementById('monitoring-status-table');
+      if (statuses.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无状态数据</td></tr>';
+        return;
+      }
+      tbody.innerHTML = statuses.map(s => {
+        const stateIcon = s.state === 'ACTIVE' ? '🟢' : (s.state === 'WEAK' ? '🟡' : '🔴');
+        const stateClass = s.state === 'ACTIVE' ? 'status-enabled' : (s.state === 'WEAK' ? 'category-dynamic' : 'status-disabled');
+        const lastSeen = s.lastSeenAt ? formatTimeAgo(new Date(s.lastSeenAt)) : '从未';
+        
+        // Update rule state in rules table
+        const ruleStateEl = document.getElementById('rule-state-' + s.ruleId);
+        if (ruleStateEl) {
+          ruleStateEl.innerHTML = '<span class="status ' + stateClass + '">' + stateIcon + ' ' + s.state + '</span>';
+        }
+        
+        return '<tr>' +
+          '<td><span class="status ' + stateClass + '">' + stateIcon + ' ' + s.state + '</span></td>' +
+          '<td><strong>' + escapeHtml(s.rule?.merchant || '-') + '</strong> / ' + escapeHtml(s.rule?.name || '-') + '</td>' +
+          '<td>' + lastSeen + '</td>' +
+          '<td>' + s.gapMinutes + ' 分钟</td>' +
+          '<td>' + s.count24h + '</td>' +
+          '<td>' + s.count12h + '</td>' +
+          '<td>' + s.count1h + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function formatTimeAgo(date) {
+      const now = new Date();
+      const diff = Math.floor((now - date) / 1000 / 60);
+      if (diff < 60) return diff + ' 分钟前';
+      if (diff < 1440) return Math.floor(diff / 60) + ' 小时前';
+      return Math.floor(diff / 1440) + ' 天前';
+    }
+
+    async function loadMonitoringAlerts() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/monitoring/alerts?limit=50', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderMonitoringAlerts(data.alerts || []);
+      } catch (e) {
+        console.error('加载告警历史失败', e);
+      }
+    }
+
+    function renderMonitoringAlerts(alerts) {
+      const tbody = document.getElementById('monitoring-alerts-table');
+      if (alerts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无告警记录</td></tr>';
+        return;
+      }
+      tbody.innerHTML = alerts.map(a => {
+        const typeIcon = a.alertType === 'SIGNAL_RECOVERED' ? '✅' : (a.alertType === 'FREQUENCY_DOWN' ? '⚠️' : '🚨');
+        const typeText = a.alertType === 'SIGNAL_RECOVERED' ? '恢复' : (a.alertType === 'FREQUENCY_DOWN' ? '频率下降' : '信号消失');
+        const sentStatus = a.sentAt ? '<span class="status status-enabled">已发送</span>' : '<span class="status status-disabled">未发送</span>';
+        const time = new Date(a.createdAt).toLocaleString('zh-CN');
+        return '<tr>' +
+          '<td>' + time + '</td>' +
+          '<td>' + typeIcon + ' ' + typeText + '</td>' +
+          '<td>' + escapeHtml(a.rule?.name || a.ruleId) + '</td>' +
+          '<td>' + a.previousState + ' → ' + a.currentState + '</td>' +
+          '<td>' + a.gapMinutes + ' 分钟</td>' +
+          '<td>' + sentStatus + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    // Add monitoring rule form
+    document.getElementById('add-monitoring-rule-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        merchant: document.getElementById('monitoring-merchant').value,
+        name: document.getElementById('monitoring-name').value,
+        subjectPattern: document.getElementById('monitoring-pattern').value,
+        expectedIntervalMinutes: parseInt(document.getElementById('monitoring-interval').value),
+        deadAfterMinutes: parseInt(document.getElementById('monitoring-dead-after').value),
+        enabled: true
+      };
+      try {
+        const res = await fetch('/api/monitoring/rules', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          hideModal('add-monitoring-rule-modal');
+          document.getElementById('add-monitoring-rule-form').reset();
+          showAlert('监控规则创建成功');
+          loadMonitoringData();
+        } else {
+          const err = await res.json();
+          showAlert(err.error || '创建失败', 'error');
+        }
+      } catch (e) {
+        showAlert('创建失败', 'error');
+      }
+    });
+
+    // Edit monitoring rule
+    function editMonitoringRule(id) {
+      const rule = monitoringRules.find(r => r.id === id);
+      if (!rule) return;
+      document.getElementById('edit-monitoring-id').value = rule.id;
+      document.getElementById('edit-monitoring-merchant').value = rule.merchant;
+      document.getElementById('edit-monitoring-name').value = rule.name;
+      document.getElementById('edit-monitoring-pattern').value = rule.subjectPattern;
+      document.getElementById('edit-monitoring-interval').value = rule.expectedIntervalMinutes;
+      document.getElementById('edit-monitoring-dead-after').value = rule.deadAfterMinutes;
+      showModal('edit-monitoring-rule-modal');
+    }
+
+    document.getElementById('edit-monitoring-rule-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('edit-monitoring-id').value;
+      const data = {
+        merchant: document.getElementById('edit-monitoring-merchant').value,
+        name: document.getElementById('edit-monitoring-name').value,
+        subjectPattern: document.getElementById('edit-monitoring-pattern').value,
+        expectedIntervalMinutes: parseInt(document.getElementById('edit-monitoring-interval').value),
+        deadAfterMinutes: parseInt(document.getElementById('edit-monitoring-dead-after').value)
+      };
+      try {
+        const res = await fetch('/api/monitoring/rules/' + id, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          hideModal('edit-monitoring-rule-modal');
+          showAlert('监控规则更新成功');
+          loadMonitoringData();
+        } else {
+          const err = await res.json();
+          showAlert(err.error || '更新失败', 'error');
+        }
+      } catch (e) {
+        showAlert('更新失败', 'error');
+      }
+    });
+
+    async function toggleMonitoringRule(id) {
+      try {
+        const res = await fetch('/api/monitoring/rules/' + id + '/toggle', {
+          method: 'PATCH',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          loadMonitoringData();
+        }
+      } catch (e) {
+        showAlert('操作失败', 'error');
+      }
+    }
+
+    async function deleteMonitoringRule(id) {
+      if (!confirm('确定要删除这个监控规则吗？')) return;
+      try {
+        const res = await fetch('/api/monitoring/rules/' + id, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          showAlert('删除成功');
+          loadMonitoringData();
+        }
+      } catch (e) {
+        showAlert('删除失败', 'error');
+      }
+    }
+
+    async function triggerHeartbeat() {
+      try {
+        const res = await fetch('/api/monitoring/heartbeat', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('心跳检查完成，检查了 ' + data.result.rulesChecked + ' 条规则，' + data.result.alertsTriggered + ' 条告警');
+          loadMonitoringData();
+        } else {
+          showAlert('心跳检查失败', 'error');
+        }
+      } catch (e) {
+        showAlert('心跳检查失败', 'error');
       }
     }
 

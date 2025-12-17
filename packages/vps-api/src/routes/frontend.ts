@@ -526,6 +526,61 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Edit Rule Modal -->
+  <div id="edit-rule-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>编辑过滤规则</h3>
+        <button class="modal-close" onclick="hideModal('edit-rule-modal')">&times;</button>
+      </div>
+      <form id="edit-rule-form">
+        <input type="hidden" id="edit-rule-id">
+        <div class="form-group">
+          <label>关联 Worker</label>
+          <select id="edit-rule-worker">
+            <option value="">全局规则（适用于所有 Worker）</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>规则类型 *</label>
+            <select id="edit-rule-category" required>
+              <option value="blacklist">黑名单（拦截）</option>
+              <option value="whitelist">白名单（放行）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>匹配字段 *</label>
+            <select id="edit-rule-match-type" required>
+              <option value="sender">发件人</option>
+              <option value="subject">主题</option>
+              <option value="domain">发件域名</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>匹配模式 *</label>
+          <select id="edit-rule-match-mode" required>
+            <option value="contains">包含</option>
+            <option value="exact">精确匹配</option>
+            <option value="startsWith">开头匹配</option>
+            <option value="endsWith">结尾匹配</option>
+            <option value="regex">正则表达式</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>规则内容 *</label>
+          <input type="text" id="edit-rule-pattern" required placeholder="要匹配的内容">
+        </div>
+        <div class="form-group">
+          <label>标签（可选，用逗号分隔）</label>
+          <input type="text" id="edit-rule-tags" placeholder="例如：营销,广告,垃圾">
+        </div>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
   <script>
     let apiToken = localStorage.getItem('apiToken') || '';
     let workers = [];
@@ -765,7 +820,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const res = await fetch(url, { headers: getHeaders() });
         const data = await res.json();
-        renderRules(data.rules || []);
+        currentRules = data.rules || [];
+        renderRules(currentRules);
       } catch (e) { showAlert('加载规则失败', 'error'); }
     }
 
@@ -788,6 +844,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + escapeHtml(r.pattern) + '</td><td>' + tagsHtml + '</td><td>' + escapeHtml(worker) + '</td>' +
           '<td style="font-size:12px;color:#666">' + lastHit + '</td><td>' + status + '</td>' +
           '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick=\\'editRule("' + r.id + '")\\'>编辑</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleRule(\\'' + r.id + '\\')">切换</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteRule(\\'' + r.id + '\\')">删除</button>' +
           '</td></tr>';
@@ -849,6 +906,66 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         loadRules();
       } catch (e) { showAlert('删除失败', 'error'); }
     }
+
+    let currentRules = [];
+    
+    async function editRule(id) {
+      const rule = currentRules.find(r => r.id === id);
+      if (!rule) {
+        // Fetch rule from API if not in cache
+        try {
+          const res = await fetch('/api/rules/' + id, { headers: getHeaders() });
+          if (!res.ok) { showAlert('获取规则失败', 'error'); return; }
+          const data = await res.json();
+          showEditRuleModal(data);
+        } catch (e) { showAlert('获取规则失败', 'error'); }
+        return;
+      }
+      showEditRuleModal(rule);
+    }
+
+    function showEditRuleModal(rule) {
+      document.getElementById('edit-rule-id').value = rule.id;
+      document.getElementById('edit-rule-worker').value = rule.workerId || '';
+      document.getElementById('edit-rule-category').value = rule.category;
+      document.getElementById('edit-rule-match-type').value = rule.matchType;
+      document.getElementById('edit-rule-match-mode').value = rule.matchMode;
+      document.getElementById('edit-rule-pattern').value = rule.pattern;
+      document.getElementById('edit-rule-tags').value = rule.tags ? rule.tags.join(', ') : '';
+      
+      // Update worker select options
+      const workerSelect = document.getElementById('edit-rule-worker');
+      workerSelect.innerHTML = '<option value="">全局规则（适用于所有 Worker）</option>' + 
+        workers.map(w => '<option value="' + w.id + '"' + (w.id === rule.workerId ? ' selected' : '') + '>' + escapeHtml(w.name) + '</option>').join('');
+      
+      showModal('edit-rule-modal');
+    }
+
+    document.getElementById('edit-rule-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('edit-rule-id').value;
+      const tagsInput = document.getElementById('edit-rule-tags').value.trim();
+      const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+      const body = {
+        workerId: document.getElementById('edit-rule-worker').value || null,
+        category: document.getElementById('edit-rule-category').value,
+        matchType: document.getElementById('edit-rule-match-type').value,
+        matchMode: document.getElementById('edit-rule-match-mode').value,
+        pattern: document.getElementById('edit-rule-pattern').value,
+        tags: tags
+      };
+      try {
+        const res = await fetch('/api/rules/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });
+        if (res.ok) {
+          hideModal('edit-rule-modal');
+          showAlert('规则更新成功');
+          loadRules();
+        } else {
+          const data = await res.json();
+          showAlert(data.message || '更新失败', 'error');
+        }
+      } catch (e) { showAlert('更新失败', 'error'); }
+    });
 
     // Dynamic Rules
     async function loadDynamicConfig() {

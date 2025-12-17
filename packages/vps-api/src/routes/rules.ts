@@ -90,6 +90,13 @@ function validateUpdateRule(body: unknown): { valid: boolean; error?: string; da
   if (data.enabled !== undefined) {
     updateData.enabled = Boolean(data.enabled);
   }
+  if (data.tags !== undefined) {
+    if (Array.isArray(data.tags)) {
+      updateData.tags = data.tags.filter((t): t is string => typeof t === 'string');
+    } else {
+      updateData.tags = [];
+    }
+  }
 
   return { valid: true, data: updateData };
 }
@@ -250,7 +257,14 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const ruleRepository = new RuleRepository(db);
 
-      const rule = ruleRepository.update(request.params.id, validation.data || {});
+      // Extract workerId from request body
+      const body = request.body as Record<string, unknown>;
+      const updateData = { ...validation.data } as any;
+      if (body.workerId !== undefined) {
+        updateData.workerId = body.workerId || null;
+      }
+
+      const rule = ruleRepository.update(request.params.id, updateData);
       if (!rule) {
         return reply.status(404).send({ error: 'Rule not found' });
       }

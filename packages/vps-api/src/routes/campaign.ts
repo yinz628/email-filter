@@ -1145,4 +1145,35 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  /**
+   * POST /api/campaign/merchants/:id/cleanup-old-user-paths
+   * Clean up old user path data for a merchant (keeps first entry for stats)
+   * 清理商户的老用户详细路径数据（保留统计）
+   */
+  fastify.post('/merchants/:id/cleanup-old-user-paths', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const result = service.cleanupAllOldUserPaths(request.params.id);
+
+      return reply.send({
+        message: 'Old user path data cleaned up',
+        merchantId: request.params.id,
+        ...result,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error cleaning up old user paths');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

@@ -2170,6 +2170,70 @@ export class CampaignAnalyticsService {
   }
 
   /**
+   * Clean up old user path data for a merchant
+   * 清理商户的老用户路径数据（保留统计信息）
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Number of paths deleted
+   */
+  cleanupOldUserPaths(merchantId: string): {
+    pathsDeleted: number;
+    oldUsersAffected: number;
+  } {
+    // Get count of old users before cleanup
+    const oldUserCount = this.db.prepare(`
+      SELECT COUNT(DISTINCT recipient) as count
+      FROM recipient_paths
+      WHERE merchant_id = ? AND (is_new_user = 0 OR is_new_user IS NULL)
+    `).get(merchantId) as { count: number };
+
+    // Delete paths for old users (is_new_user = 0 or NULL)
+    // Keep the first entry for each old user to maintain basic stats
+    const result = this.db.prepare(`
+      DELETE FROM recipient_paths
+      WHERE merchant_id = ? 
+        AND (is_new_user = 0 OR is_new_user IS NULL)
+        AND sequence_order > 0
+    `).run(merchantId);
+
+    return {
+      pathsDeleted: result.changes,
+      oldUsersAffected: oldUserCount.count,
+    };
+  }
+
+  /**
+   * Clean up all old user path data for a merchant (complete cleanup)
+   * 完全清理商户的老用户路径数据
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Number of paths deleted
+   */
+  cleanupAllOldUserPaths(merchantId: string): {
+    pathsDeleted: number;
+    oldUsersAffected: number;
+  } {
+    // Get count of old users before cleanup
+    const oldUserCount = this.db.prepare(`
+      SELECT COUNT(DISTINCT recipient) as count
+      FROM recipient_paths
+      WHERE merchant_id = ? AND (is_new_user = 0 OR is_new_user IS NULL)
+    `).get(merchantId) as { count: number };
+
+    // Delete all paths for old users
+    const result = this.db.prepare(`
+      DELETE FROM recipient_paths
+      WHERE merchant_id = ? 
+        AND (is_new_user = 0 OR is_new_user IS NULL)
+    `).run(merchantId);
+
+    return {
+      pathsDeleted: result.changes,
+      oldUsersAffected: oldUserCount.count,
+    };
+  }
+
+  /**
    * Check if merchant should record data (selective recording)
    * 检查商户是否应该记录数据
    * 

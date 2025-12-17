@@ -2182,7 +2182,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Old User Stats Section
       if (data.oldUserStats && data.oldUserStats.length > 0) {
         html += '<div style="background:#fce4ec;border:1px solid #f48fb1;border-radius:8px;padding:15px;margin-bottom:15px;">';
-        html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#c2185b;">👤 老用户活动统计 <span style="font-weight:normal;font-size:12px;color:#999;">(' + data.oldUserStats.length + '个活动)</span></h3>';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+        html += '<h3 style="margin:0;font-size:14px;color:#c2185b;">👤 老用户活动统计 <span style="font-weight:normal;font-size:12px;color:#999;">(' + data.oldUserStats.length + '个活动)</span></h3>';
+        html += '<button class="btn btn-sm btn-danger" onclick="cleanupOldUserPaths(\\''+merchantId+'\\')">🗑️ 清理老用户路径</button>';
+        html += '</div>';
         html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
         html += '<tr style="background:#f8bbd9;"><th style="padding:6px;text-align:left;">活动主题</th><th style="padding:6px;text-align:right;">老用户数</th><th style="padding:6px;text-align:right;">覆盖率</th></tr>';
         const initialCount = 10;
@@ -2200,6 +2203,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           html += '<button id="old-user-toggle-btn" class="btn btn-sm btn-secondary" onclick="toggleOldUserStats()">显示更多 (' + (data.oldUserStats.length - initialCount) + ')</button>';
           html += '</div>';
         }
+        html += '<p style="color:#888;font-size:11px;margin-top:10px;">💡 清理老用户路径可释放存储空间，但会保留老用户活动统计数据</p>';
         html += '</div>';
       }
       
@@ -2216,6 +2220,26 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       });
       if (btn) {
         btn.textContent = oldUserStatsExpanded ? '收起' : '显示更多 (' + hiddenRows.length + ')';
+      }
+    }
+
+    async function cleanupOldUserPaths(merchantId) {
+      if (!confirm('确定要清理该商户的老用户路径数据吗？\\n\\n此操作将删除老用户的详细路径记录，但会保留老用户活动统计数据。\\n此操作不可恢复！')) return;
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/cleanup-old-user-paths', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert('清理完成！删除了 ' + data.pathsDeleted + ' 条路径记录，影响 ' + data.oldUsersAffected + ' 个老用户', 'success');
+          // Refresh the path analysis view
+          showPathAnalysis(merchantId, '');
+        } else {
+          showAlert(data.error || '清理失败', 'error');
+        }
+      } catch (e) {
+        showAlert('清理失败: ' + e.message, 'error');
       }
     }
 

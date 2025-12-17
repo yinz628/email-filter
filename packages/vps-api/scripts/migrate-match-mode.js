@@ -4,8 +4,7 @@
  * Run: node packages/vps-api/scripts/migrate-match-mode.js
  */
 
-const Database = require('better-sqlite3');
-const path = require('path');
+import Database from 'better-sqlite3';
 
 // Database path - adjust if needed
 const dbPath = process.env.DB_PATH || '/var/lib/email-filter/filter.db';

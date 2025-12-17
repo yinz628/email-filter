@@ -12,6 +12,7 @@ import {
   frontendRoutes,
   logsRoutes,
   watchRoutes,
+  campaignRoutes,
 } from './routes/index.js';
 
 // Create Fastify instance
@@ -65,6 +66,7 @@ await fastify.register(forwardRoutes, { prefix: '/api/forward' });
 await fastify.register(workerRoutes, { prefix: '/api/workers' });
 await fastify.register(logsRoutes, { prefix: '/api/logs' });
 await fastify.register(watchRoutes, { prefix: '/api/watch' });
+await fastify.register(campaignRoutes, { prefix: '/api/campaign' });
 
 // Start server
 async function start() {

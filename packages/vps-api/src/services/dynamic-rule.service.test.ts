@@ -30,7 +30,7 @@ class TestRuleRepository {
   constructor(private db: SqlJsDatabase) {}
 
   private rowToRule(row: any[]): FilterRule {
-    // Schema: id, worker_id, category, match_type, match_mode, pattern, enabled, created_at, updated_at, last_hit_at
+    // Schema: id, worker_id, category, match_type, match_mode, pattern, tags, enabled, created_at, updated_at, last_hit_at
     return {
       id: row[0] as string,
       // row[1] is worker_id (skipped for FilterRule)
@@ -38,10 +38,11 @@ class TestRuleRepository {
       matchType: row[3] as MatchType,
       matchMode: row[4] as MatchMode,
       pattern: row[5] as string,
-      enabled: row[6] === 1,
-      createdAt: new Date(row[7] as string),
-      updatedAt: new Date(row[8] as string),
-      lastHitAt: row[9] ? new Date(row[9] as string) : undefined,
+      // row[6] is tags (skipped for FilterRule)
+      enabled: row[7] === 1,
+      createdAt: new Date(row[8] as string),
+      updatedAt: new Date(row[9] as string),
+      lastHitAt: row[10] ? new Date(row[10] as string) : undefined,
     };
   }
 

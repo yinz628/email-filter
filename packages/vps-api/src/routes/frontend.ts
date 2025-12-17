@@ -99,6 +99,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('dynamic')">动态规则</button>
       <button class="tab" onclick="showTab('logs')">日志</button>
       <button class="tab" onclick="showTab('stats')">统计信息</button>
+      <button class="tab" onclick="showTab('campaign')">营销分析</button>
       <button class="tab" onclick="showTab('settings')">设置</button>
     </div>
 

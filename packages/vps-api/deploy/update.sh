@@ -1,12 +1,15 @@
 #!/bin/bash
 # Email Filter VPS API Update Script
 # VPS API 更新脚本
-# 用法: ./update.sh 或 bash update.sh
+# 用法: ./update.sh [分支名]
+# 示例: ./update.sh main
+#       ./update.sh feature/campaign-analytics
 
 set -e
 
 PROJECT_DIR="/opt/email-filter"
 SERVICE_NAME="email-filter-api"
+BRANCH="${1:-}"
 
 echo "=========================================="
 echo "  Email Filter VPS API 更新脚本"
@@ -15,6 +18,14 @@ echo "=========================================="
 # 切换到项目目录
 cd "$PROJECT_DIR"
 echo "📁 工作目录: $PROJECT_DIR"
+
+# 如果指定了分支，先切换
+if [ -n "$BRANCH" ]; then
+  echo ""
+  echo "🔀 切换到分支: $BRANCH"
+  git fetch origin
+  git checkout "$BRANCH"
+fi
 
 # 拉取最新代码
 echo ""
@@ -41,6 +52,11 @@ echo ""
 echo "🗄️ 运行数据库迁移..."
 cd packages/vps-api
 npx tsx src/db/migrate.ts
+
+# 运行 campaign analytics 迁移
+echo ""
+echo "🗄️ 运行 Campaign Analytics 数据库迁移..."
+npx tsx src/db/migrate-campaign.ts
 cd "$PROJECT_DIR"
 
 # 重启服务

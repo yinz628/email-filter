@@ -23,6 +23,8 @@ export interface Env {
   DEBUG_LOGGING: string;
   /** Send email binding for forwarding */
   SEB: SendEmail;
+  /** VPS API base URL for campaign tracking (optional, derived from VPS_API_URL if not set) */
+  VPS_API_BASE_URL?: string;
 }
 
 /** Debug logger - only logs when DEBUG_LOGGING is enabled */
@@ -49,6 +51,14 @@ interface FilterDecision {
   reason?: string;
 }
 
+/** Campaign tracking payload sent to VPS API */
+interface CampaignTrackPayload {
+  sender: string;
+  subject: string;
+  recipient: string;
+  receivedAt: string;
+}
+
 /**
  * Extract sender email from the "from" header
  * Handles formats like "Name <email@example.com>" or plain "email@example.com"
@@ -56,6 +66,79 @@ interface FilterDecision {
 function extractEmail(from: string): string {
   const match = from.match(/<([^>]+)>/);
   return match ? match[1] : from;
+}
+
+/**
+ * Get the VPS API base URL for campaign tracking
+ * Derives from VPS_API_URL by removing the /api/webhook/email path
+ */
+function getVpsApiBaseUrl(env: Env): string | null {
+  if (env.VPS_API_BASE_URL) {
+    return env.VPS_API_BASE_URL;
+  }
+  
+  if (!env.VPS_API_URL) {
+    return null;
+  }
+  
+  // Try to derive base URL from VPS_API_URL
+  // e.g., "https://example.com/api/webhook/email" -> "https://example.com"
+  try {
+    const url = new URL(env.VPS_API_URL);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Track email for campaign analytics
+ * Sends email metadata to VPS API for campaign tracking
+ * This is fire-and-forget - errors are logged but don't block email flow
+ * 
+ * Requirements: 8.1, 8.3
+ */
+export async function trackCampaignEmail(
+  payload: CampaignTrackPayload,
+  env: Env
+): Promise<void> {
+  const baseUrl = getVpsApiBaseUrl(env);
+  if (!baseUrl) {
+    debugLog(env, '[DEBUG] Campaign tracking skipped: VPS API base URL not configured');
+    return;
+  }
+
+  const trackUrl = `${baseUrl}/api/campaign/track`;
+
+  try {
+    debugLog(env, `[DEBUG] Tracking campaign email: ${trackUrl}`);
+    debugLog(env, `[DEBUG] Campaign payload: ${JSON.stringify(payload)}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout (shorter than filter decision)
+
+    const response = await fetch(trackUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Campaign tracking API returned ${response.status}: ${errorText}`);
+    } else {
+      debugLog(env, '[DEBUG] Campaign tracking successful');
+    }
+  } catch (error) {
+    // Log error but don't throw - campaign tracking should never block email flow
+    console.error('Campaign tracking error (non-blocking):', error);
+  }
 }
 
 /**
@@ -192,6 +275,7 @@ export default {
     const to = message.to;
     const subject = message.headers.get('subject') || '';
     const messageId = message.headers.get('message-id') || crypto.randomUUID();
+    const receivedAt = new Date().toISOString();
 
     debugLog(env, `[DEBUG] ========== Email Received ==========`);
     debugLog(env, `[DEBUG] From: ${from}`);
@@ -208,6 +292,17 @@ export default {
       timestamp: Date.now(),
       workerName: env.WORKER_NAME,
     };
+
+    // Track email for campaign analytics asynchronously (fire-and-forget)
+    // Uses ctx.waitUntil to ensure the tracking completes even after response is sent
+    // Requirements: 8.1, 8.3
+    const campaignPayload: CampaignTrackPayload = {
+      sender: from,
+      subject,
+      recipient: to,
+      receivedAt,
+    };
+    ctx.waitUntil(trackCampaignEmail(campaignPayload, env));
 
     // Get filter decision from VPS API
     const decision = await getFilterDecision(payload, env);

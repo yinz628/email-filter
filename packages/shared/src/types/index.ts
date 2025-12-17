@@ -21,3 +21,6 @@ export * from './watch.js';
 
 // API types
 export * from './api.js';
+
+// Campaign analytics types
+export * from './campaign.js';

@@ -346,11 +346,18 @@ export class RatioMonitorService {
           ? `比例告警: ${monitor.name}`
           : `比例恢复: ${monitor.name}`;
 
-      await sendTelegramMessage(telegramConfig, {
+      const result = await sendTelegramMessage(telegramConfig, {
         title,
         body: alert.message,
         alertType: alert.alertType,
       });
+
+      // Mark alert as sent if Telegram message was successful
+      if (result.success) {
+        this.ratioAlertRepo.markAsSent(alert.id);
+      } else {
+        console.error('Telegram send failed:', result.error);
+      }
     } catch (error) {
       console.error('Telegram notification error:', error);
     }

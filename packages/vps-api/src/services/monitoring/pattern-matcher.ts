@@ -1,11 +1,16 @@
 /**
  * Pattern Matcher Service for Monitoring Module
  * 
- * Provides regex pattern matching for email subjects against monitoring rules.
- * Handles regex compilation errors gracefully.
+ * Provides pattern matching for email subjects against monitoring rules.
+ * Supports both contains matching (default) and regex matching.
  * 
  * Requirements: 1.5
  */
+
+/**
+ * Match mode for pattern matching
+ */
+export type MatchMode = 'contains' | 'regex';
 
 /**
  * Result of a pattern match operation
@@ -24,22 +29,31 @@ export interface PatternValidationResult {
 }
 
 /**
- * Match a subject against a regex pattern
+ * Match a subject against a pattern
  * 
- * @param pattern - The regex pattern string
+ * @param pattern - The pattern string
  * @param subject - The email subject to match
+ * @param mode - Match mode: 'contains' (default) or 'regex'
  * @returns PatternMatchResult with matched status and optional error
  */
-export function matchSubject(pattern: string, subject: string): PatternMatchResult {
+export function matchSubject(pattern: string, subject: string, mode: MatchMode = 'contains'): PatternMatchResult {
   try {
-    const regex = new RegExp(pattern, 'i'); // Case-insensitive matching
-    return {
-      matched: regex.test(subject),
-    };
+    if (mode === 'contains') {
+      // Case-insensitive contains matching
+      return {
+        matched: subject.toLowerCase().includes(pattern.toLowerCase()),
+      };
+    } else {
+      // Regex matching
+      const regex = new RegExp(pattern, 'i'); // Case-insensitive matching
+      return {
+        matched: regex.test(subject),
+      };
+    }
   } catch (error) {
     return {
       matched: false,
-      error: error instanceof Error ? error.message : 'Invalid regex pattern',
+      error: error instanceof Error ? error.message : 'Invalid pattern',
     };
   }
 }
@@ -85,10 +99,10 @@ export function findMatchingPattern(patterns: string[], subject: string): string
  */
 export class PatternMatcherService {
   /**
-   * Match a subject against a regex pattern
+   * Match a subject against a pattern
    */
-  matchSubject(pattern: string, subject: string): PatternMatchResult {
-    return matchSubject(pattern, subject);
+  matchSubject(pattern: string, subject: string, mode: MatchMode = 'contains'): PatternMatchResult {
+    return matchSubject(pattern, subject, mode);
   }
 
   /**
@@ -101,8 +115,8 @@ export class PatternMatcherService {
   /**
    * Find the first matching pattern from a list
    */
-  findMatchingPattern(patterns: string[], subject: string): string | null {
-    return findMatchingPattern(patterns, subject);
+  findMatchingPattern(patterns: string[], subject: string, mode: MatchMode = 'contains'): string | null {
+    return findMatchingPattern(patterns, subject, mode);
   }
 
   /**

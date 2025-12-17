@@ -4,6 +4,7 @@ import type {
   CreateMonitoringRuleDTO,
   UpdateMonitoringRuleDTO,
   MonitoringRuleFilter,
+  SubjectMatchMode,
 } from '@email-filter/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -12,6 +13,7 @@ interface MonitoringRuleRow {
   merchant: string;
   name: string;
   subject_pattern: string;
+  match_mode: string;
   expected_interval_minutes: number;
   dead_after_minutes: number;
   tags: string;
@@ -41,6 +43,7 @@ export class MonitoringRuleRepository {
       merchant: row.merchant,
       name: row.name,
       subjectPattern: row.subject_pattern,
+      matchMode: (row.match_mode as SubjectMatchMode) || 'contains',
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
       tags,
@@ -58,14 +61,15 @@ export class MonitoringRuleRepository {
     const now = new Date().toISOString();
     const enabled = dto.enabled !== undefined ? dto.enabled : true;
     const tags = dto.tags || [];
+    const matchMode = dto.matchMode || 'contains';
 
     const stmt = this.db.prepare(`
       INSERT INTO monitoring_rules (
-        id, merchant, name, subject_pattern, 
+        id, merchant, name, subject_pattern, match_mode,
         expected_interval_minutes, dead_after_minutes, 
         tags, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -73,6 +77,7 @@ export class MonitoringRuleRepository {
       dto.merchant,
       dto.name,
       dto.subjectPattern,
+      matchMode,
       dto.expectedIntervalMinutes,
       dto.deadAfterMinutes,
       JSON.stringify(tags),
@@ -93,6 +98,7 @@ export class MonitoringRuleRepository {
       merchant: dto.merchant,
       name: dto.name,
       subjectPattern: dto.subjectPattern,
+      matchMode,
       expectedIntervalMinutes: dto.expectedIntervalMinutes,
       deadAfterMinutes: dto.deadAfterMinutes,
       tags,
@@ -175,6 +181,10 @@ export class MonitoringRuleRepository {
     if (dto.subjectPattern !== undefined) {
       updates.push('subject_pattern = ?');
       params.push(dto.subjectPattern);
+    }
+    if (dto.matchMode !== undefined) {
+      updates.push('match_mode = ?');
+      params.push(dto.matchMode);
     }
     if (dto.expectedIntervalMinutes !== undefined) {
       updates.push('expected_interval_minutes = ?');

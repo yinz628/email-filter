@@ -93,7 +93,7 @@ export class HitProcessor {
    *
    * Matches based on:
    * - Merchant (from sender domain)
-   * - Subject pattern (regex match)
+   * - Subject pattern (contains or regex match based on rule's matchMode)
    *
    * Requirements: 1.5, 3.1
    *
@@ -105,8 +105,8 @@ export class HitProcessor {
     const matchedRules: MonitoringRule[] = [];
 
     for (const rule of enabledRules) {
-      // Match subject against the rule's pattern
-      const matchResult = matchSubject(rule.subjectPattern, email.subject);
+      // Match subject against the rule's pattern using the rule's matchMode
+      const matchResult = matchSubject(rule.subjectPattern, email.subject, rule.matchMode || 'contains');
 
       if (matchResult.matched) {
         // Optionally verify merchant matches sender domain

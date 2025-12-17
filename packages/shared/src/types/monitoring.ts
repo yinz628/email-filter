@@ -45,13 +45,19 @@ export type AlertChannelType = 'webhook' | 'email';
 // ============================================================================
 
 /**
+ * Match mode for subject pattern matching
+ */
+export type SubjectMatchMode = 'contains' | 'regex';
+
+/**
  * Monitoring rule defining a signal to track
  */
 export interface MonitoringRule {
   id: string;
   merchant: string;                    // Merchant domain or identifier
   name: string;                        // Rule name for display
-  subjectPattern: string;              // Subject matching pattern (regex)
+  subjectPattern: string;              // Subject matching pattern
+  matchMode: SubjectMatchMode;         // Match mode: 'contains' or 'regex'
   expectedIntervalMinutes: number;     // Expected appearance interval (minutes)
   deadAfterMinutes: number;            // Death threshold (minutes)
   tags: string[];                      // Tags for categorization
@@ -67,6 +73,7 @@ export interface CreateMonitoringRuleDTO {
   merchant: string;
   name: string;
   subjectPattern: string;
+  matchMode?: SubjectMatchMode;        // Default: 'contains'
   expectedIntervalMinutes: number;
   deadAfterMinutes: number;
   tags?: string[];
@@ -81,6 +88,7 @@ export interface UpdateMonitoringRuleDTO {
   merchant?: string;
   name?: string;
   subjectPattern?: string;
+  matchMode?: SubjectMatchMode;
   expectedIntervalMinutes?: number;
   deadAfterMinutes?: number;
   tags?: string[];

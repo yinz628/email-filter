@@ -914,9 +914,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="text" id="monitoring-name" required placeholder="例如：Amazon订单确认">
         </div>
         <div class="form-group">
-          <label>主题匹配模式 *</label>
-          <input type="text" id="monitoring-pattern" required placeholder="正则表达式，例如：Your Amazon.com order">
-          <p style="color:#888;font-size:12px;margin-top:5px">支持正则表达式匹配邮件主题</p>
+          <label>主题匹配内容 *</label>
+          <input type="text" id="monitoring-pattern" required placeholder="例如：Your Amazon.com order">
+        </div>
+        <div class="form-group">
+          <label>匹配模式</label>
+          <select id="monitoring-match-mode">
+            <option value="contains" selected>包含匹配</option>
+            <option value="regex">正则表达式</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">包含匹配：主题包含指定文本即匹配；正则表达式：使用正则语法匹配</p>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -957,8 +964,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="text" id="edit-monitoring-name" required>
         </div>
         <div class="form-group">
-          <label>主题匹配模式 *</label>
+          <label>主题匹配内容 *</label>
           <input type="text" id="edit-monitoring-pattern" required>
+        </div>
+        <div class="form-group">
+          <label>匹配模式</label>
+          <select id="edit-monitoring-match-mode">
+            <option value="contains">包含匹配</option>
+            <option value="regex">正则表达式</option>
+          </select>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -2878,11 +2892,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tbody.innerHTML = displayRules.map(r => {
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const tagsHtml = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
+        const matchModeText = r.matchMode === 'regex' ? '正则' : '包含';
         return '<tr>' +
           '<td>' + escapeHtml(r.merchant) + '</td>' +
           '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
           '<td>' + (tagsHtml || '-') + '</td>' +
-          '<td><code style="font-size:11px;">' + escapeHtml(r.subjectPattern) + '</code></td>' +
+          '<td><code style="font-size:11px;">' + escapeHtml(r.subjectPattern) + '</code> <span class="tag">' + matchModeText + '</span></td>' +
           '<td>' + r.expectedIntervalMinutes + ' 分钟</td>' +
           '<td>' + r.deadAfterMinutes + ' 分钟</td>' +
           '<td id="rule-state-' + r.id + '">-</td>' +
@@ -3205,6 +3220,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         merchant: document.getElementById('monitoring-merchant').value,
         name: document.getElementById('monitoring-name').value,
         subjectPattern: document.getElementById('monitoring-pattern').value,
+        matchMode: document.getElementById('monitoring-match-mode').value,
         expectedIntervalMinutes: expectedIntervalMinutes,
         deadAfterMinutes: deadAfterMinutes,
         tags: tags,
@@ -3238,6 +3254,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-monitoring-merchant').value = rule.merchant;
       document.getElementById('edit-monitoring-name').value = rule.name;
       document.getElementById('edit-monitoring-pattern').value = rule.subjectPattern;
+      document.getElementById('edit-monitoring-match-mode').value = rule.matchMode || 'contains';
       document.getElementById('edit-monitoring-interval').value = rule.expectedIntervalMinutes;
       document.getElementById('edit-monitoring-dead-after').value = rule.deadAfterMinutes;
       document.getElementById('edit-monitoring-tags').value = (rule.tags || []).join(', ');
@@ -3265,6 +3282,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         merchant: document.getElementById('edit-monitoring-merchant').value,
         name: document.getElementById('edit-monitoring-name').value,
         subjectPattern: document.getElementById('edit-monitoring-pattern').value,
+        matchMode: document.getElementById('edit-monitoring-match-mode').value,
         expectedIntervalMinutes: expectedIntervalMinutes,
         deadAfterMinutes: deadAfterMinutes,
         tags: tags

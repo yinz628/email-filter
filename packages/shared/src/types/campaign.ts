@@ -241,6 +241,86 @@ export interface ValuableCampaignsAnalysis {
 }
 
 // ============================================
+// Root Campaign and New/Old User Types (第一层级和新老用户)
+// ============================================
+
+/**
+ * Root Campaign - 第一层级活动
+ * 用于确定新用户的起点
+ */
+export interface RootCampaign {
+  campaignId: string;
+  subject: string;
+  isConfirmed: boolean; // 是否人工确认
+  isCandidate: boolean; // 是否系统候选
+  candidateReason?: string; // 候选原因 (关键词匹配等)
+  newUserCount: number; // 通过此活动进入的新用户数
+  confirmedAt?: Date;
+}
+
+/**
+ * Root Campaign 设置 DTO
+ */
+export interface SetRootCampaignDTO {
+  campaignId: string;
+  isRoot: boolean;
+}
+
+/**
+ * 新老用户统计
+ */
+export interface UserTypeStats {
+  merchantId: string;
+  totalRecipients: number;
+  newUsers: number; // 收到 Root Campaign 的用户
+  oldUsers: number; // 未收到 Root Campaign 的用户
+  newUserPercentage: number;
+}
+
+/**
+ * 活动覆盖率统计 (基于新用户)
+ */
+export interface CampaignCoverage {
+  campaignId: string;
+  subject: string;
+  tag: CampaignTag;
+  isValuable: boolean;
+  level: number;
+  newUserCount: number; // 新用户中收到此活动的数量
+  newUserCoverage: number; // 新用户覆盖率 (%)
+  oldUserCount: number; // 老用户中收到此活动的数量
+  oldUserCoverage: number; // 老用户覆盖率 (%)
+  totalCount: number;
+}
+
+/**
+ * 活动层级表 (基于新用户路径)
+ */
+export interface CampaignLevelStats {
+  campaignId: string;
+  subject: string;
+  tag: CampaignTag;
+  isValuable: boolean;
+  level: number;
+  isRoot: boolean;
+  userCount: number;
+  coverage: number; // 基于新用户基准
+}
+
+/**
+ * 完整路径分析结果
+ */
+export interface PathAnalysisResult {
+  merchantId: string;
+  rootCampaigns: RootCampaign[];
+  userStats: UserTypeStats;
+  levelStats: CampaignLevelStats[];
+  transitions: CampaignTransition[];
+  valuableAnalysis: ValuableCampaignPath[];
+  oldUserStats: CampaignCoverage[]; // 老用户统计
+}
+
+// ============================================
 // Flow Analysis Types
 // ============================================
 
@@ -391,6 +471,9 @@ export interface CampaignRow {
   tag_note: string | null;
   is_valuable: number; // Deprecated, computed from tag
   valuable_note: string | null; // Deprecated, use tag_note
+  is_root: number; // 是否为第一层级活动
+  is_root_candidate: number; // 是否为系统候选
+  root_candidate_reason: string | null; // 候选原因
   total_emails: number;
   unique_recipients: number;
   first_seen_at: string;
@@ -419,6 +502,8 @@ export interface RecipientPathRow {
   campaign_id: string;
   sequence_order: number;
   first_received_at: string;
+  is_new_user: number; // 是否为新用户 (收到 Root Campaign)
+  first_root_campaign_id: string | null; // 第一个收到的 Root Campaign
 }
 
 // ============================================
@@ -463,3 +548,21 @@ export function toCampaign(row: CampaignRow): Campaign {
     updatedAt: new Date(row.updated_at),
   };
 }
+
+/**
+ * Root Campaign 关键词列表 (用于自动候选)
+ */
+export const ROOT_CAMPAIGN_KEYWORDS = [
+  'welcome',
+  'onboarding',
+  'confirm',
+  'verify',
+  'activate',
+  'get started',
+  'first',
+  '欢迎',
+  '确认',
+  '验证',
+  '激活',
+  '开始',
+];

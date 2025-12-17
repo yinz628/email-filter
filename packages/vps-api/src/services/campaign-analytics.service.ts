@@ -39,8 +39,14 @@ import type {
   ValuableCampaignsAnalysis,
   PredecessorInfo,
   SuccessorInfo,
+  RootCampaign,
+  SetRootCampaignDTO,
+  UserTypeStats,
+  CampaignCoverage,
+  CampaignLevelStats,
+  PathAnalysisResult,
 } from '@email-filter/shared';
-import { toMerchant, toCampaign } from '@email-filter/shared';
+import { toMerchant, toCampaign, ROOT_CAMPAIGN_KEYWORDS } from '@email-filter/shared';
 
 /**
  * Extract domain from email address
@@ -1308,7 +1314,7 @@ export class CampaignAnalyticsService {
    * @param merchantId - Merchant ID
    * @returns Map of campaignId to level
    */
-  private calculateDAGLevels(merchantId: string): Map<string, number> {
+  calculateDAGLevels(merchantId: string): Map<string, number> {
     const transitions = this.getCampaignTransitions(merchantId);
     
     // Build adjacency list and in-degree count
@@ -1372,5 +1378,457 @@ export class CampaignAnalyticsService {
     }
 
     return levels;
+  }
+
+  // ============================================
+  // Root Campaign Management (第一层级活动管理)
+  // ============================================
+
+  /**
+   * Get root campaigns for a merchant
+   * Returns both confirmed and candidate root campaigns
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Array of RootCampaign
+   */
+  getRootCampaigns(merchantId: string): RootCampaign[] {
+    // Get campaigns marked as root or candidate
+    const stmt = this.db.prepare(`
+      SELECT 
+        c.id,
+        c.subject,
+        c.is_root,
+        c.is_root_candidate,
+        c.root_candidate_reason,
+        c.updated_at,
+        COUNT(DISTINCT rp.recipient) as new_user_count
+      FROM campaigns c
+      LEFT JOIN recipient_paths rp ON c.id = rp.first_root_campaign_id
+      WHERE c.merchant_id = ? AND (c.is_root = 1 OR c.is_root_candidate = 1)
+      GROUP BY c.id
+      ORDER BY c.is_root DESC, new_user_count DESC
+    `);
+
+    const rows = stmt.all(merchantId) as Array<{
+      id: string;
+      subject: string;
+      is_root: number;
+      is_root_candidate: number;
+      root_candidate_reason: string | null;
+      updated_at: string;
+      new_user_count: number;
+    }>;
+
+    return rows.map(row => ({
+      campaignId: row.id,
+      subject: row.subject,
+      isConfirmed: row.is_root === 1,
+      isCandidate: row.is_root_candidate === 1,
+      candidateReason: row.root_candidate_reason ?? undefined,
+      newUserCount: row.new_user_count,
+      confirmedAt: row.is_root === 1 ? new Date(row.updated_at) : undefined,
+    }));
+  }
+
+  /**
+   * Auto-detect root campaign candidates based on keywords
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Number of candidates detected
+   */
+  detectRootCampaignCandidates(merchantId: string): number {
+    const campaigns = this.getCampaigns({ merchantId, limit: 1000 });
+    let count = 0;
+
+    for (const campaign of campaigns) {
+      const subjectLower = campaign.subject.toLowerCase();
+      
+      for (const keyword of ROOT_CAMPAIGN_KEYWORDS) {
+        if (subjectLower.includes(keyword.toLowerCase())) {
+          // Mark as candidate
+          this.db.prepare(`
+            UPDATE campaigns 
+            SET is_root_candidate = 1, root_candidate_reason = ?
+            WHERE id = ? AND is_root = 0
+          `).run(`关键词匹配: ${keyword}`, campaign.id);
+          count++;
+          break;
+        }
+      }
+    }
+
+    return count;
+  }
+
+  /**
+   * Set or unset a campaign as root campaign
+   * 
+   * @param data - SetRootCampaignDTO
+   * @returns Updated campaign or null
+   */
+  setRootCampaign(data: SetRootCampaignDTO): Campaign | null {
+    const now = new Date().toISOString();
+    
+    const stmt = this.db.prepare(`
+      UPDATE campaigns
+      SET is_root = ?, updated_at = ?
+      WHERE id = ?
+    `);
+
+    const result = stmt.run(data.isRoot ? 1 : 0, now, data.campaignId);
+    
+    if (result.changes === 0) {
+      return null;
+    }
+
+    // If setting as root, recalculate new users
+    if (data.isRoot) {
+      this.recalculateNewUsers(data.campaignId);
+    }
+
+    const row = this.db.prepare('SELECT * FROM campaigns WHERE id = ?')
+      .get(data.campaignId) as CampaignRow;
+    return row ? toCampaign(row) : null;
+  }
+
+  /**
+   * Recalculate new users based on root campaign
+   * 
+   * @param rootCampaignId - Root campaign ID
+   */
+  private recalculateNewUsers(rootCampaignId: string): void {
+    // Get merchant ID for this campaign
+    const campaign = this.db.prepare('SELECT merchant_id FROM campaigns WHERE id = ?')
+      .get(rootCampaignId) as { merchant_id: string } | undefined;
+    
+    if (!campaign) return;
+
+    const merchantId = campaign.merchant_id;
+
+    // Get all recipients who received this root campaign
+    const recipientsStmt = this.db.prepare(`
+      SELECT DISTINCT recipient 
+      FROM recipient_paths 
+      WHERE merchant_id = ? AND campaign_id = ?
+    `);
+    const recipients = recipientsStmt.all(merchantId, rootCampaignId) as Array<{ recipient: string }>;
+
+    // Mark these recipients as new users
+    const updateStmt = this.db.prepare(`
+      UPDATE recipient_paths
+      SET is_new_user = 1, first_root_campaign_id = ?
+      WHERE merchant_id = ? AND recipient = ? AND first_root_campaign_id IS NULL
+    `);
+
+    for (const { recipient } of recipients) {
+      updateStmt.run(rootCampaignId, merchantId, recipient);
+    }
+  }
+
+  /**
+   * Recalculate all new users for a merchant based on confirmed root campaigns
+   * 
+   * @param merchantId - Merchant ID
+   */
+  recalculateAllNewUsers(merchantId: string): void {
+    // Reset all new user flags
+    this.db.prepare(`
+      UPDATE recipient_paths
+      SET is_new_user = 0, first_root_campaign_id = NULL
+      WHERE merchant_id = ?
+    `).run(merchantId);
+
+    // Get all confirmed root campaigns
+    const rootCampaigns = this.db.prepare(`
+      SELECT id FROM campaigns WHERE merchant_id = ? AND is_root = 1
+    `).all(merchantId) as Array<{ id: string }>;
+
+    // For each recipient, find their first root campaign (by sequence order)
+    const recipientsStmt = this.db.prepare(`
+      SELECT DISTINCT recipient FROM recipient_paths WHERE merchant_id = ?
+    `);
+    const recipients = recipientsStmt.all(merchantId) as Array<{ recipient: string }>;
+
+    const rootCampaignIds = new Set(rootCampaigns.map(r => r.id));
+
+    for (const { recipient } of recipients) {
+      // Get this recipient's path
+      const pathStmt = this.db.prepare(`
+        SELECT campaign_id, sequence_order
+        FROM recipient_paths
+        WHERE merchant_id = ? AND recipient = ?
+        ORDER BY sequence_order ASC
+      `);
+      const path = pathStmt.all(merchantId, recipient) as Array<{
+        campaign_id: string;
+        sequence_order: number;
+      }>;
+
+      // Find first root campaign in path
+      for (const entry of path) {
+        if (rootCampaignIds.has(entry.campaign_id)) {
+          // Mark as new user
+          this.db.prepare(`
+            UPDATE recipient_paths
+            SET is_new_user = 1, first_root_campaign_id = ?
+            WHERE merchant_id = ? AND recipient = ?
+          `).run(entry.campaign_id, merchantId, recipient);
+          break;
+        }
+      }
+    }
+  }
+
+  // ============================================
+  // New/Old User Statistics (新老用户统计)
+  // ============================================
+
+  /**
+   * Get user type statistics for a merchant
+   * 
+   * @param merchantId - Merchant ID
+   * @returns UserTypeStats
+   */
+  getUserTypeStats(merchantId: string): UserTypeStats {
+    const stmt = this.db.prepare(`
+      SELECT 
+        COUNT(DISTINCT recipient) as total,
+        SUM(CASE WHEN is_new_user = 1 THEN 1 ELSE 0 END) as new_users
+      FROM (
+        SELECT recipient, MAX(is_new_user) as is_new_user
+        FROM recipient_paths
+        WHERE merchant_id = ?
+        GROUP BY recipient
+      )
+    `);
+
+    const result = stmt.get(merchantId) as { total: number; new_users: number };
+    const total = result.total || 0;
+    const newUsers = result.new_users || 0;
+    const oldUsers = total - newUsers;
+
+    return {
+      merchantId,
+      totalRecipients: total,
+      newUsers,
+      oldUsers,
+      newUserPercentage: total > 0 ? (newUsers / total) * 100 : 0,
+    };
+  }
+
+  /**
+   * Get campaign coverage statistics
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Array of CampaignCoverage
+   */
+  getCampaignCoverage(merchantId: string): CampaignCoverage[] {
+    const userStats = this.getUserTypeStats(merchantId);
+    const levels = this.calculateDAGLevels(merchantId);
+
+    const stmt = this.db.prepare(`
+      SELECT 
+        c.id,
+        c.subject,
+        c.tag,
+        c.is_valuable,
+        COUNT(DISTINCT CASE WHEN rp.is_new_user = 1 THEN rp.recipient END) as new_user_count,
+        COUNT(DISTINCT CASE WHEN rp.is_new_user = 0 OR rp.is_new_user IS NULL THEN rp.recipient END) as old_user_count,
+        COUNT(DISTINCT rp.recipient) as total_count
+      FROM campaigns c
+      LEFT JOIN recipient_paths rp ON c.id = rp.campaign_id
+      WHERE c.merchant_id = ?
+      GROUP BY c.id
+      ORDER BY new_user_count DESC
+    `);
+
+    const rows = stmt.all(merchantId) as Array<{
+      id: string;
+      subject: string;
+      tag: number;
+      is_valuable: number;
+      new_user_count: number;
+      old_user_count: number;
+      total_count: number;
+    }>;
+
+    return rows.map(row => {
+      const tag = (row.tag ?? 0) as CampaignTag;
+      return {
+        campaignId: row.id,
+        subject: row.subject,
+        tag,
+        isValuable: tag === 1 || tag === 2,
+        level: levels.get(row.id) || 1,
+        newUserCount: row.new_user_count,
+        newUserCoverage: userStats.newUsers > 0 
+          ? (row.new_user_count / userStats.newUsers) * 100 
+          : 0,
+        oldUserCount: row.old_user_count,
+        oldUserCoverage: userStats.oldUsers > 0 
+          ? (row.old_user_count / userStats.oldUsers) * 100 
+          : 0,
+        totalCount: row.total_count,
+      };
+    });
+  }
+
+  // ============================================
+  // New User Path Analysis (新用户路径分析)
+  // ============================================
+
+  /**
+   * Get campaign transitions for new users only
+   * 
+   * @param merchantId - Merchant ID
+   * @returns CampaignTransitionsResult
+   */
+  getNewUserTransitions(merchantId: string): CampaignTransitionsResult {
+    // Get paths for new users only
+    const pathsStmt = this.db.prepare(`
+      SELECT 
+        rp.recipient,
+        rp.campaign_id,
+        rp.sequence_order,
+        c.subject,
+        c.is_valuable
+      FROM recipient_paths rp
+      JOIN campaigns c ON rp.campaign_id = c.id
+      WHERE rp.merchant_id = ? AND rp.is_new_user = 1
+      ORDER BY rp.recipient, rp.sequence_order ASC
+    `);
+
+    const rows = pathsStmt.all(merchantId) as Array<{
+      recipient: string;
+      campaign_id: string;
+      sequence_order: number;
+      subject: string;
+      is_valuable: number;
+    }>;
+
+    // Group by recipient
+    const recipientPaths = new Map<string, Array<{
+      campaignId: string;
+      subject: string;
+      isValuable: boolean;
+    }>>();
+
+    for (const row of rows) {
+      if (!recipientPaths.has(row.recipient)) {
+        recipientPaths.set(row.recipient, []);
+      }
+      recipientPaths.get(row.recipient)!.push({
+        campaignId: row.campaign_id,
+        subject: row.subject,
+        isValuable: row.is_valuable === 1,
+      });
+    }
+
+    const totalRecipients = recipientPaths.size;
+
+    // Extract transitions
+    const transitionMap = new Map<string, {
+      fromCampaignId: string;
+      fromSubject: string;
+      fromIsValuable: boolean;
+      toCampaignId: string;
+      toSubject: string;
+      toIsValuable: boolean;
+      users: Set<string>;
+    }>();
+
+    for (const [recipient, path] of recipientPaths) {
+      for (let i = 0; i < path.length - 1; i++) {
+        const from = path[i];
+        const to = path[i + 1];
+        const key = `${from.campaignId}:${to.campaignId}`;
+
+        if (!transitionMap.has(key)) {
+          transitionMap.set(key, {
+            fromCampaignId: from.campaignId,
+            fromSubject: from.subject,
+            fromIsValuable: from.isValuable,
+            toCampaignId: to.campaignId,
+            toSubject: to.subject,
+            toIsValuable: to.isValuable,
+            users: new Set(),
+          });
+        }
+        transitionMap.get(key)!.users.add(recipient);
+      }
+    }
+
+    // Convert to result array
+    const transitions: CampaignTransition[] = Array.from(transitionMap.values())
+      .map(t => ({
+        fromCampaignId: t.fromCampaignId,
+        fromSubject: t.fromSubject,
+        fromIsValuable: t.fromIsValuable,
+        toCampaignId: t.toCampaignId,
+        toSubject: t.toSubject,
+        toIsValuable: t.toIsValuable,
+        userCount: t.users.size,
+        transitionRatio: totalRecipients > 0 ? (t.users.size / totalRecipients) * 100 : 0,
+      }))
+      .sort((a, b) => b.userCount - a.userCount);
+
+    return {
+      merchantId,
+      totalRecipients,
+      transitions,
+    };
+  }
+
+  /**
+   * Get complete path analysis result
+   * Combines all analysis methods into a single comprehensive result
+   * 
+   * @param merchantId - Merchant ID
+   * @returns PathAnalysisResult
+   */
+  getPathAnalysis(merchantId: string): PathAnalysisResult {
+    const rootCampaigns = this.getRootCampaigns(merchantId);
+    const userStats = this.getUserTypeStats(merchantId);
+    const coverage = this.getCampaignCoverage(merchantId);
+    const levels = this.calculateDAGLevels(merchantId);
+    
+    // Get transitions for new users
+    const newUserTransitions = this.getNewUserTransitions(merchantId);
+    
+    // Get valuable campaigns analysis
+    const valuableAnalysis = this.getValuableCampaignsAnalysis(merchantId);
+
+    // Build level stats
+    const levelStats: CampaignLevelStats[] = coverage.map(c => ({
+      campaignId: c.campaignId,
+      subject: c.subject,
+      tag: c.tag,
+      isValuable: c.isValuable,
+      level: c.level,
+      isRoot: rootCampaigns.some(r => r.campaignId === c.campaignId && r.isConfirmed),
+      userCount: c.newUserCount,
+      coverage: c.newUserCoverage,
+    }));
+
+    // Sort by level, then by coverage
+    levelStats.sort((a, b) => {
+      if (a.level !== b.level) return a.level - b.level;
+      return b.coverage - a.coverage;
+    });
+
+    // Old user stats (campaigns with old users)
+    const oldUserStats = coverage
+      .filter(c => c.oldUserCount > 0)
+      .sort((a, b) => b.oldUserCount - a.oldUserCount);
+
+    return {
+      merchantId,
+      rootCampaigns,
+      userStats,
+      levelStats,
+      transitions: newUserTransitions.transitions,
+      valuableAnalysis: valuableAnalysis.valuableCampaigns,
+      oldUserStats,
+    };
   }
 }

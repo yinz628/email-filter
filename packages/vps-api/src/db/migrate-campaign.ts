@@ -169,5 +169,44 @@ try {
   console.log('tag column migration skipped (may already exist).');
 }
 
+// Migration: Add root campaign columns to campaigns table
+try {
+  const columns = db.prepare("PRAGMA table_info(campaigns)").all() as Array<{ name: string }>;
+  const hasIsRootColumn = columns.some(col => col.name === 'is_root');
+  
+  if (!hasIsRootColumn) {
+    console.log('Adding root campaign columns to campaigns table...');
+    db.exec(`
+      ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0;
+      ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0;
+      ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT;
+    `);
+    console.log('Root campaign columns added.');
+  } else {
+    console.log('Root campaign columns already exist.');
+  }
+} catch (e) {
+  console.log('Root campaign columns migration skipped (may already exist).');
+}
+
+// Migration: Add new user tracking columns to recipient_paths table
+try {
+  const columns = db.prepare("PRAGMA table_info(recipient_paths)").all() as Array<{ name: string }>;
+  const hasIsNewUserColumn = columns.some(col => col.name === 'is_new_user');
+  
+  if (!hasIsNewUserColumn) {
+    console.log('Adding new user tracking columns to recipient_paths table...');
+    db.exec(`
+      ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0;
+      ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT;
+    `);
+    console.log('New user tracking columns added.');
+  } else {
+    console.log('New user tracking columns already exist.');
+  }
+} catch (e) {
+  console.log('New user tracking columns migration skipped (may already exist).');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

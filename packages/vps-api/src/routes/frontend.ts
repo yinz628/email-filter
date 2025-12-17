@@ -1567,9 +1567,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + createdAt + '</td>' +
           '<td class="actions">' +
             '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">活动</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="showMerchantFlow(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">路径</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="showTransitions(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">转移</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="showValuableAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">价值</button>' +
+            '<button class="btn btn-sm btn-success" onclick="showPathAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">分析</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="showRootCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">Root</button>' +
           '</td></tr>';
       }).join('');
     }
@@ -1865,6 +1864,249 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       });
       
       container.innerHTML = html;
+    }
+
+    // ============================================
+    // Path Analysis Views (完整路径分析)
+    // ============================================
+
+    async function showPathAnalysis(merchantId, domain) {
+      document.getElementById('flow-title').textContent = '完整路径分析 - ' + domain;
+      document.getElementById('campaign-flow-section').style.display = 'block';
+      document.getElementById('campaigns-section').style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/path-analysis', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderPathAnalysis(data);
+      } catch (e) {
+        document.getElementById('flow-container').innerHTML = '<p style="color:#999;text-align:center;">加载失败或暂无数据</p>';
+      }
+    }
+
+    function renderPathAnalysis(data) {
+      const container = document.getElementById('flow-container');
+      let html = '';
+      
+      // User Stats Section
+      html += '<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#1565c0;">📊 用户统计</h3>';
+      html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#1565c0;">' + data.userStats.totalRecipients + '</div><div style="font-size:11px;color:#666;">总收件人</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#28a745;">' + data.userStats.newUsers + '</div><div style="font-size:11px;color:#666;">新用户</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#ff9800;">' + data.userStats.oldUsers + '</div><div style="font-size:11px;color:#666;">老用户</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#9c27b0;">' + data.userStats.newUserPercentage.toFixed(1) + '%</div><div style="font-size:11px;color:#666;">新用户比例</div></div>';
+      html += '</div></div>';
+      
+      // Root Campaigns Section
+      html += '<div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#e65100;">🎯 第一层级活动 (Root Campaign)</h3>';
+      if (data.rootCampaigns && data.rootCampaigns.length > 0) {
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+        html += '<tr style="background:#fff8e1;"><th style="padding:6px;text-align:left;">活动主题</th><th style="padding:6px;text-align:center;">状态</th><th style="padding:6px;text-align:right;">新用户数</th></tr>';
+        data.rootCampaigns.forEach(rc => {
+          const status = rc.isConfirmed ? '<span style="color:#28a745;">✓ 已确认</span>' : '<span style="color:#ff9800;">候选</span>';
+          html += '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;">' + escapeHtml(rc.subject.substring(0, 50)) + '</td><td style="padding:6px;text-align:center;">' + status + '</td><td style="padding:6px;text-align:right;">' + rc.newUserCount + '</td></tr>';
+        });
+        html += '</table>';
+      } else {
+        html += '<p style="color:#999;font-size:12px;">暂无第一层级活动。请在活动列表中设置 Root Campaign。</p>';
+      }
+      html += '</div>';
+      
+      // Level Stats Section
+      html += '<div style="background:#f3e5f5;border:1px solid #ce93d8;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#7b1fa2;">📈 活动层级统计 (基于新用户)</h3>';
+      if (data.levelStats && data.levelStats.length > 0) {
+        // Group by level
+        const levelGroups = {};
+        data.levelStats.forEach(ls => {
+          if (!levelGroups[ls.level]) levelGroups[ls.level] = [];
+          levelGroups[ls.level].push(ls);
+        });
+        
+        Object.keys(levelGroups).sort((a, b) => a - b).forEach(level => {
+          html += '<div style="margin-bottom:10px;"><strong style="font-size:12px;">第 ' + level + ' 层:</strong>';
+          html += '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">';
+          levelGroups[level].slice(0, 5).forEach(ls => {
+            const bgColor = ls.isValuable ? '#d4edda' : (ls.isRoot ? '#fff3e0' : '#f8f9fa');
+            const borderColor = ls.isValuable ? '#28a745' : (ls.isRoot ? '#ff9800' : '#ddd');
+            html += '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:4px;padding:4px 8px;font-size:11px;">';
+            html += escapeHtml(ls.subject.substring(0, 30)) + ' <span style="color:#666;">(' + ls.userCount + '人, ' + ls.coverage.toFixed(1) + '%)</span>';
+            html += '</div>';
+          });
+          if (levelGroups[level].length > 5) {
+            html += '<div style="color:#999;font-size:11px;padding:4px;">+' + (levelGroups[level].length - 5) + ' 更多</div>';
+          }
+          html += '</div></div>';
+        });
+      } else {
+        html += '<p style="color:#999;font-size:12px;">暂无层级数据</p>';
+      }
+      html += '</div>';
+      
+      // Transitions Section (New Users Only)
+      html += '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#2e7d32;">🔄 新用户转移路径</h3>';
+      if (data.transitions && data.transitions.length > 0) {
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+        html += '<tr style="background:#c8e6c9;"><th style="padding:6px;text-align:left;">来源</th><th style="padding:6px;text-align:center;">→</th><th style="padding:6px;text-align:left;">目标</th><th style="padding:6px;text-align:right;">人数</th><th style="padding:6px;text-align:right;">比例</th></tr>';
+        data.transitions.slice(0, 20).forEach(t => {
+          html += '<tr style="border-bottom:1px solid #eee;">';
+          html += '<td style="padding:6px;">' + escapeHtml(t.fromSubject.substring(0, 25)) + '</td>';
+          html += '<td style="padding:6px;text-align:center;color:#999;">→</td>';
+          html += '<td style="padding:6px;">' + escapeHtml(t.toSubject.substring(0, 25)) + '</td>';
+          html += '<td style="padding:6px;text-align:right;font-weight:bold;">' + t.userCount + '</td>';
+          html += '<td style="padding:6px;text-align:right;color:#666;">' + t.transitionRatio.toFixed(1) + '%</td>';
+          html += '</tr>';
+        });
+        html += '</table>';
+        if (data.transitions.length > 20) {
+          html += '<p style="color:#999;font-size:11px;text-align:center;margin-top:5px;">显示前 20 条</p>';
+        }
+      } else {
+        html += '<p style="color:#999;font-size:12px;">暂无转移数据</p>';
+      }
+      html += '</div>';
+      
+      // Old User Stats Section
+      if (data.oldUserStats && data.oldUserStats.length > 0) {
+        html += '<div style="background:#fce4ec;border:1px solid #f48fb1;border-radius:8px;padding:15px;margin-bottom:15px;">';
+        html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#c2185b;">👤 老用户活动统计</h3>';
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+        html += '<tr style="background:#f8bbd9;"><th style="padding:6px;text-align:left;">活动主题</th><th style="padding:6px;text-align:right;">老用户数</th><th style="padding:6px;text-align:right;">覆盖率</th></tr>';
+        data.oldUserStats.slice(0, 10).forEach(os => {
+          html += '<tr style="border-bottom:1px solid #eee;">';
+          html += '<td style="padding:6px;">' + escapeHtml(os.subject.substring(0, 40)) + '</td>';
+          html += '<td style="padding:6px;text-align:right;">' + os.oldUserCount + '</td>';
+          html += '<td style="padding:6px;text-align:right;">' + os.oldUserCoverage.toFixed(1) + '%</td>';
+          html += '</tr>';
+        });
+        html += '</table>';
+        html += '</div>';
+      }
+      
+      container.innerHTML = html;
+    }
+
+    // Root Campaign Management
+    async function showRootCampaigns(merchantId, domain) {
+      document.getElementById('flow-title').textContent = 'Root Campaign 管理 - ' + domain;
+      document.getElementById('campaign-flow-section').style.display = 'block';
+      document.getElementById('campaigns-section').style.display = 'none';
+      
+      try {
+        const [rootRes, campaignsRes] = await Promise.all([
+          fetch('/api/campaign/merchants/' + merchantId + '/root-campaigns', { headers: getHeaders() }),
+          fetch('/api/campaign/campaigns?merchantId=' + merchantId + '&limit=100', { headers: getHeaders() })
+        ]);
+        
+        const rootData = await rootRes.json();
+        const campaignsData = await campaignsRes.json();
+        renderRootCampaignManager(merchantId, rootData, campaignsData);
+      } catch (e) {
+        document.getElementById('flow-container').innerHTML = '<p style="color:#999;text-align:center;">加载失败</p>';
+      }
+    }
+
+    function renderRootCampaignManager(merchantId, rootData, campaignsData) {
+      const container = document.getElementById('flow-container');
+      const rootIds = new Set((rootData.rootCampaigns || []).filter(r => r.isConfirmed).map(r => r.campaignId));
+      const candidateIds = new Set((rootData.rootCampaigns || []).filter(r => r.isCandidate && !r.isConfirmed).map(r => r.campaignId));
+      
+      let html = '<div style="margin-bottom:15px;">';
+      html += '<button class="btn btn-primary btn-sm" onclick="detectRootCandidates(\\'' + merchantId + '\\')">🔍 自动检测候选</button>';
+      html += '<button class="btn btn-secondary btn-sm" style="margin-left:10px;" onclick="recalculateUsers(\\'' + merchantId + '\\')">🔄 重新计算用户</button>';
+      html += '</div>';
+      
+      html += '<div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#e65100;">已确认的 Root Campaign</h3>';
+      if (rootIds.size > 0) {
+        (rootData.rootCampaigns || []).filter(r => r.isConfirmed).forEach(rc => {
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:4px;margin-bottom:5px;">';
+          html += '<span style="font-size:12px;">' + escapeHtml(rc.subject.substring(0, 50)) + ' <span style="color:#666;">(' + rc.newUserCount + ' 新用户)</span></span>';
+          html += '<button class="btn btn-sm btn-danger" onclick="setRootCampaign(\\'' + rc.campaignId + '\\', false, \\'' + merchantId + '\\')">移除</button>';
+          html += '</div>';
+        });
+      } else {
+        html += '<p style="color:#999;font-size:12px;">暂无已确认的 Root Campaign</p>';
+      }
+      html += '</div>';
+      
+      html += '<div style="background:#f8f9fa;border:1px solid #ddd;border-radius:8px;padding:15px;">';
+      html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#333;">所有活动</h3>';
+      html += '<p style="color:#666;font-size:11px;margin-bottom:10px;">点击"设为 Root"将活动标记为第一层级活动</p>';
+      
+      (campaignsData.campaigns || []).slice(0, 30).forEach(c => {
+        const isRoot = rootIds.has(c.id);
+        const isCandidate = candidateIds.has(c.id);
+        const bgColor = isRoot ? '#fff3e0' : (isCandidate ? '#fffde7' : '#fff');
+        const badge = isRoot ? '<span style="background:#ff9800;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:5px;">ROOT</span>' : (isCandidate ? '<span style="background:#ffc107;color:#333;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:5px;">候选</span>' : '');
+        
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:' + bgColor + ';border-radius:4px;margin-bottom:5px;border:1px solid #eee;">';
+        html += '<span style="font-size:12px;">' + escapeHtml(c.subject.substring(0, 45)) + badge + '</span>';
+        if (!isRoot) {
+          html += '<button class="btn btn-sm btn-success" onclick="setRootCampaign(\\'' + c.id + '\\', true, \\'' + merchantId + '\\')">设为 Root</button>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+      
+      container.innerHTML = html;
+    }
+
+    async function setRootCampaign(campaignId, isRoot, merchantId) {
+      try {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/root', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ isRoot })
+        });
+        if (res.ok) {
+          showAlert(isRoot ? '已设为 Root Campaign' : '已移除 Root 标记');
+          showRootCampaigns(merchantId, '');
+        } else {
+          showAlert('操作失败', 'error');
+        }
+      } catch (e) {
+        showAlert('操作失败', 'error');
+      }
+    }
+
+    async function detectRootCandidates(merchantId) {
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/detect-root-candidates', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('检测到 ' + data.candidatesDetected + ' 个候选活动');
+          showRootCampaigns(merchantId, '');
+        } else {
+          showAlert('检测失败', 'error');
+        }
+      } catch (e) {
+        showAlert('检测失败', 'error');
+      }
+    }
+
+    async function recalculateUsers(merchantId) {
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/recalculate-users', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('重新计算完成: ' + data.userStats.newUsers + ' 新用户, ' + data.userStats.oldUsers + ' 老用户');
+        } else {
+          showAlert('计算失败', 'error');
+        }
+      } catch (e) {
+        showAlert('计算失败', 'error');
+      }
     }
 
     // Init

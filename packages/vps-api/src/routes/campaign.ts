@@ -784,4 +784,243 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  // ============================================
+  // Root Campaign Routes (第一层级活动管理)
+  // ============================================
+
+  /**
+   * GET /api/campaign/merchants/:id/root-campaigns
+   * Get root campaigns for a merchant
+   */
+  fastify.get('/merchants/:id/root-campaigns', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const rootCampaigns = service.getRootCampaigns(request.params.id);
+
+      return reply.send({
+        merchantId: request.params.id,
+        rootCampaigns,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching root campaigns');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/merchants/:id/detect-root-candidates
+   * Auto-detect root campaign candidates based on keywords
+   */
+  fastify.post('/merchants/:id/detect-root-candidates', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const count = service.detectRootCampaignCandidates(request.params.id);
+
+      return reply.send({
+        merchantId: request.params.id,
+        candidatesDetected: count,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error detecting root campaign candidates');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/campaigns/:id/root
+   * Set or unset a campaign as root campaign
+   */
+  fastify.post('/campaigns/:id/root', async (
+    request: FastifyRequest<{ Params: CampaignParams }>,
+    reply: FastifyReply
+  ) => {
+    const body = request.body as Record<string, unknown>;
+    
+    if (typeof body?.isRoot !== 'boolean') {
+      return reply.status(400).send({ error: 'Invalid request', message: 'isRoot must be a boolean' });
+    }
+
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const campaign = service.setRootCampaign({
+        campaignId: request.params.id,
+        isRoot: body.isRoot,
+      });
+
+      if (!campaign) {
+        return reply.status(404).send({ error: 'Campaign not found' });
+      }
+
+      return reply.send(campaign);
+    } catch (error) {
+      request.log.error(error, 'Error setting root campaign');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/merchants/:id/recalculate-users
+   * Recalculate new/old users based on confirmed root campaigns
+   */
+  fastify.post('/merchants/:id/recalculate-users', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      service.recalculateAllNewUsers(request.params.id);
+      const userStats = service.getUserTypeStats(request.params.id);
+
+      return reply.send({
+        merchantId: request.params.id,
+        message: 'User types recalculated',
+        userStats,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error recalculating users');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  // ============================================
+  // User Statistics Routes (新老用户统计)
+  // ============================================
+
+  /**
+   * GET /api/campaign/merchants/:id/user-stats
+   * Get new/old user statistics
+   */
+  fastify.get('/merchants/:id/user-stats', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const userStats = service.getUserTypeStats(request.params.id);
+
+      return reply.send(userStats);
+    } catch (error) {
+      request.log.error(error, 'Error fetching user stats');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/merchants/:id/coverage
+   * Get campaign coverage statistics
+   */
+  fastify.get('/merchants/:id/coverage', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const coverage = service.getCampaignCoverage(request.params.id);
+
+      return reply.send({
+        merchantId: request.params.id,
+        coverage,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching campaign coverage');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/merchants/:id/new-user-transitions
+   * Get campaign transitions for new users only
+   */
+  fastify.get('/merchants/:id/new-user-transitions', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const transitions = service.getNewUserTransitions(request.params.id);
+
+      return reply.send(transitions);
+    } catch (error) {
+      request.log.error(error, 'Error fetching new user transitions');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/merchants/:id/path-analysis
+   * Get complete path analysis (综合路径分析)
+   * Returns all analysis data in one request
+   */
+  fastify.get('/merchants/:id/path-analysis', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const analysis = service.getPathAnalysis(request.params.id);
+
+      return reply.send(analysis);
+    } catch (error) {
+      request.log.error(error, 'Error fetching path analysis');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

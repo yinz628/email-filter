@@ -94,13 +94,14 @@ CREATE TABLE IF NOT EXISTS alert_channels (
 -- Ratio Monitoring Tables
 -- ============================================
 
--- 比例监控规则表
+-- 比例监控规则表（漏斗监控）
 CREATE TABLE IF NOT EXISTS ratio_monitors (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   tag TEXT NOT NULL,
   first_rule_id TEXT NOT NULL,
   second_rule_id TEXT NOT NULL,
+  steps TEXT NOT NULL DEFAULT '[]',
   threshold_percent REAL NOT NULL,
   time_window TEXT NOT NULL DEFAULT '24h',
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -120,6 +121,7 @@ CREATE TABLE IF NOT EXISTS ratio_states (
   first_count INTEGER NOT NULL DEFAULT 0,
   second_count INTEGER NOT NULL DEFAULT 0,
   current_ratio REAL NOT NULL DEFAULT 0,
+  steps_data TEXT NOT NULL DEFAULT '[]',
   updated_at TEXT NOT NULL,
   FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
 );

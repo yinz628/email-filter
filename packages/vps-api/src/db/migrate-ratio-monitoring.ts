@@ -15,10 +15,34 @@ try {
 
   if (tableExists) {
     console.log('Ratio monitoring tables already exist');
+    
+    // Check if steps column exists
+    const ratioTableInfo = db.prepare("PRAGMA table_info(ratio_monitors)").all() as { name: string }[];
+    const hasStepsColumn = ratioTableInfo.some(col => col.name === 'steps');
+    
+    if (!hasStepsColumn) {
+      console.log('Adding steps column to ratio_monitors table...');
+      db.exec("ALTER TABLE ratio_monitors ADD COLUMN steps TEXT NOT NULL DEFAULT '[]'");
+      console.log('Steps column added successfully!');
+    } else {
+      console.log('Steps column already exists in ratio_monitors table');
+    }
+    
+    // Check if steps_data column exists in ratio_states
+    const stateTableInfo = db.prepare("PRAGMA table_info(ratio_states)").all() as { name: string }[];
+    const hasStepsDataColumn = stateTableInfo.some(col => col.name === 'steps_data');
+    
+    if (!hasStepsDataColumn) {
+      console.log('Adding steps_data column to ratio_states table...');
+      db.exec("ALTER TABLE ratio_states ADD COLUMN steps_data TEXT NOT NULL DEFAULT '[]'");
+      console.log('Steps_data column added successfully!');
+    } else {
+      console.log('Steps_data column already exists in ratio_states table');
+    }
   } else {
     console.log('Creating ratio monitoring tables...');
 
-    // Create ratio_monitors table
+    // Create ratio_monitors table with steps support
     db.exec(`
       CREATE TABLE IF NOT EXISTS ratio_monitors (
         id TEXT PRIMARY KEY,
@@ -26,6 +50,7 @@ try {
         tag TEXT NOT NULL,
         first_rule_id TEXT NOT NULL,
         second_rule_id TEXT NOT NULL,
+        steps TEXT NOT NULL DEFAULT '[]',
         threshold_percent REAL NOT NULL,
         time_window TEXT NOT NULL DEFAULT '24h',
         enabled INTEGER NOT NULL DEFAULT 1,
@@ -39,7 +64,7 @@ try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ratio_monitors_tag ON ratio_monitors(tag)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ratio_monitors_enabled ON ratio_monitors(enabled)`);
 
-    // Create ratio_states table
+    // Create ratio_states table with steps_data support
     db.exec(`
       CREATE TABLE IF NOT EXISTS ratio_states (
         monitor_id TEXT PRIMARY KEY,
@@ -47,6 +72,7 @@ try {
         first_count INTEGER NOT NULL DEFAULT 0,
         second_count INTEGER NOT NULL DEFAULT 0,
         current_ratio REAL NOT NULL DEFAULT 0,
+        steps_data TEXT NOT NULL DEFAULT '[]',
         updated_at TEXT NOT NULL,
         FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
       )

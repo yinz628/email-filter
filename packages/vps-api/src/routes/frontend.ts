@@ -552,35 +552,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;">📈 比例监控</h2>
+          <h2 style="margin:0;border:none;padding:0;">📈 漏斗监控</h2>
           <div style="display:flex;gap:10px;">
             <button class="btn btn-secondary" onclick="checkRatioMonitors()">🔄 检查比例</button>
-            <button class="btn btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加比例监控</button>
+            <button class="btn btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加漏斗监控</button>
           </div>
         </div>
-        <p style="color:#666;margin-bottom:15px">监控同一标签下两个规则的邮件数量比例。当比例低于阈值时触发告警。</p>
+        <p style="color:#666;margin-bottom:15px">监控邮件流程的转化漏斗。支持多步骤，当任一步骤比例低于阈值时触发告警。</p>
         <div class="filter-bar">
           <select id="ratio-tag-filter" onchange="loadRatioMonitors()">
             <option value="">全部标签</option>
           </select>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>标签</th>
-              <th>第一封邮件</th>
-              <th>第二封邮件</th>
-              <th>时间窗口</th>
-              <th>阈值</th>
-              <th>当前比例</th>
-              <th>状态</th>
-              <th>启用</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="ratio-monitors-table"></tbody>
-        </table>
+        <div id="ratio-monitors-container"></div>
       </div>
     </div>
 
@@ -3010,36 +2994,71 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     function renderRatioMonitors() {
-      const tbody = document.getElementById('ratio-monitors-table');
+      const container = document.getElementById('ratio-monitors-container');
       if (ratioMonitors.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#999">暂无比例监控</td></tr>';
+        container.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">暂无漏斗监控</div>';
         return;
       }
-      tbody.innerHTML = ratioMonitors.map(r => {
+      container.innerHTML = ratioMonitors.map(r => {
         const status = ratioStatuses.find(s => s.monitorId === r.id);
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const stateIcon = status?.state === 'HEALTHY' ? '🟢' : '🔴';
         const stateClass = status?.state === 'HEALTHY' ? 'status-enabled' : 'status-disabled';
-        const currentRatio = status ? status.currentRatio.toFixed(1) + '%' : '-';
-        const firstRuleName = status?.firstRuleName || '未知';
-        const secondRuleName = status?.secondRuleName || '未知';
         const timeWindowText = r.timeWindow === '1h' ? '1小时' : (r.timeWindow === '12h' ? '12小时' : '24小时');
-        return '<tr>' +
-          '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
-          '<td><span class="tag">' + escapeHtml(r.tag) + '</span></td>' +
-          '<td>' + escapeHtml(firstRuleName) + ' (' + (status?.firstCount || 0) + ')</td>' +
-          '<td>' + escapeHtml(secondRuleName) + ' (' + (status?.secondCount || 0) + ')</td>' +
-          '<td>' + timeWindowText + '</td>' +
-          '<td>' + r.thresholdPercent + '%</td>' +
-          '<td><strong>' + currentRatio + '</strong></td>' +
-          '<td><span class="status ' + stateClass + '">' + stateIcon + ' ' + (status?.state || '-') + '</span></td>' +
-          '<td>' + enabledStatus + '</td>' +
-          '<td class="actions">' +
-            '<button class="btn btn-sm btn-primary" onclick="editRatioMonitor(\\'' + r.id + '\\')">编辑</button>' +
-            '<button class="btn btn-sm btn-' + (r.enabled ? 'warning' : 'success') + '" onclick="toggleRatioMonitor(\\'' + r.id + '\\')">' + (r.enabled ? '禁用' : '启用') + '</button>' +
-            '<button class="btn btn-sm btn-danger" onclick="deleteRatioMonitor(\\'' + r.id + '\\')">删除</button>' +
-          '</td>' +
-        '</tr>';
+        
+        // Build funnel visualization
+        const funnelSteps = status?.funnelSteps || [];
+        let funnelHtml = '<div style="display:flex;flex-direction:column;gap:8px;margin:15px 0;">';
+        
+        if (funnelSteps.length > 0) {
+          const maxCount = Math.max(...funnelSteps.map(s => s.count), 1);
+          funnelSteps.forEach((step, idx) => {
+            const widthPercent = Math.max(20, (step.count / maxCount) * 100);
+            const stepStateIcon = step.state === 'HEALTHY' ? '🟢' : '🔴';
+            const bgColor = step.state === 'HEALTHY' ? '#d4edda' : '#f8d7da';
+            const borderColor = step.state === 'HEALTHY' ? '#28a745' : '#dc3545';
+            funnelHtml += '<div style="display:flex;align-items:center;gap:10px;">' +
+              '<div style="width:30px;text-align:center;font-weight:bold;color:#666;">' + step.order + '</div>' +
+              '<div style="flex:1;position:relative;">' +
+                '<div style="width:' + widthPercent + '%;background:' + bgColor + ';border:2px solid ' + borderColor + ';border-radius:4px;padding:8px 12px;transition:width 0.3s;">' +
+                  '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                    '<span style="font-weight:500;">' + escapeHtml(step.ruleName) + '</span>' +
+                    '<span style="font-size:13px;">' +
+                      '<strong>' + step.count + '</strong> 封' +
+                      (idx > 0 ? ' | 转化率: <strong>' + step.ratioToPrevious.toFixed(1) + '%</strong>' : '') +
+                      ' ' + stepStateIcon +
+                    '</span>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+            // Add arrow between steps
+            if (idx < funnelSteps.length - 1) {
+              funnelHtml += '<div style="margin-left:30px;padding-left:20px;color:#999;">↓</div>';
+            }
+          });
+        } else {
+          funnelHtml += '<div style="color:#999;text-align:center;">暂无数据</div>';
+        }
+        funnelHtml += '</div>';
+        
+        return '<div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+            '<div>' +
+              '<strong style="font-size:16px;">' + escapeHtml(r.name) + '</strong>' +
+              ' <span class="tag">' + escapeHtml(r.tag) + '</span>' +
+              ' <span class="status ' + stateClass + '">' + stateIcon + ' ' + (status?.state || '-') + '</span>' +
+              ' ' + enabledStatus +
+            '</div>' +
+            '<div class="actions">' +
+              '<span style="color:#666;font-size:12px;margin-right:10px;">时间窗口: ' + timeWindowText + ' | 阈值: ' + r.thresholdPercent + '%</span>' +
+              '<button class="btn btn-sm btn-primary" onclick="editRatioMonitor(\\'' + r.id + '\\')">编辑</button>' +
+              '<button class="btn btn-sm btn-' + (r.enabled ? 'warning' : 'success') + '" onclick="toggleRatioMonitor(\\'' + r.id + '\\')">' + (r.enabled ? '禁用' : '启用') + '</button>' +
+              '<button class="btn btn-sm btn-danger" onclick="deleteRatioMonitor(\\'' + r.id + '\\')">删除</button>' +
+            '</div>' +
+          '</div>' +
+          funnelHtml +
+        '</div>';
       }).join('');
     }
 

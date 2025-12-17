@@ -395,15 +395,25 @@ export type RatioState = 'HEALTHY' | 'LOW';
 export type RatioTimeWindow = '1h' | '12h' | '24h';
 
 /**
- * Ratio monitor - monitors the ratio between two rules' email counts
- * within the same tag group
+ * Funnel step definition
+ */
+export interface FunnelStep {
+  ruleId: string;                      // Monitoring rule ID
+  order: number;                       // Step order (1, 2, 3...)
+  thresholdPercent: number;            // Alert when ratio to previous step < threshold
+}
+
+/**
+ * Ratio monitor - monitors the ratio between rules' email counts
+ * Supports multi-step funnel monitoring
  */
 export interface RatioMonitor {
   id: string;
   name: string;                        // Monitor name for display
   tag: string;                         // Tag to group rules
-  firstRuleId: string;                 // First rule (denominator)
-  secondRuleId: string;                // Second rule (numerator)
+  firstRuleId: string;                 // First rule (step 1, denominator)
+  secondRuleId: string;                // Second rule (step 2, numerator)
+  steps: FunnelStep[];                 // Additional steps for funnel (step 3+)
   thresholdPercent: number;            // Alert when ratio < threshold (e.g., 80 = 80%)
   timeWindow: RatioTimeWindow;         // Time window for calculation
   enabled: boolean;
@@ -419,6 +429,7 @@ export interface CreateRatioMonitorDTO {
   tag: string;
   firstRuleId: string;
   secondRuleId: string;
+  steps?: FunnelStep[];                // Optional additional steps
   thresholdPercent: number;
   timeWindow: RatioTimeWindow;
   enabled?: boolean;
@@ -432,13 +443,27 @@ export interface UpdateRatioMonitorDTO {
   tag?: string;
   firstRuleId?: string;
   secondRuleId?: string;
+  steps?: FunnelStep[];
   thresholdPercent?: number;
   timeWindow?: RatioTimeWindow;
   enabled?: boolean;
 }
 
 /**
- * Current status of a ratio monitor
+ * Step status in funnel
+ */
+export interface FunnelStepStatus {
+  order: number;
+  ruleId: string;
+  ruleName: string;
+  count: number;
+  ratioToFirst: number;                // Ratio compared to first step (%)
+  ratioToPrevious: number;             // Ratio compared to previous step (%)
+  state: RatioState;                   // HEALTHY or LOW based on threshold
+}
+
+/**
+ * Current status of a ratio monitor (funnel view)
  */
 export interface RatioStatus {
   monitorId: string;
@@ -449,6 +474,7 @@ export interface RatioStatus {
   firstCount: number;                  // Count of first rule emails
   secondCount: number;                 // Count of second rule emails
   currentRatio: number;                // Current ratio (secondCount / firstCount * 100)
+  funnelSteps: FunnelStepStatus[];     // All steps with their status
   updatedAt: Date;
 }
 
@@ -461,6 +487,7 @@ export interface RatioStateRecord {
   firstCount: number;
   secondCount: number;
   currentRatio: number;
+  stepsData: string;                   // JSON string of step counts
   updatedAt: string;
 }
 

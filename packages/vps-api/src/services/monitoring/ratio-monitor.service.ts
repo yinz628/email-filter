@@ -7,6 +7,7 @@ import type {
   RatioState,
   AlertType,
   CreateAlertDTO,
+  FunnelStepStatus,
 } from '@email-filter/shared';
 import { calculateRatio, calculateRatioState } from '@email-filter/shared';
 import { RatioMonitorRepository } from '../../db/ratio-monitor-repository.js';
@@ -107,15 +108,73 @@ export class RatioMonitorService {
     const firstRule = this.ruleRepo.getById(monitor.firstRuleId);
     const secondRule = this.ruleRepo.getById(monitor.secondRuleId);
 
+    // Build funnel steps status
+    const funnelSteps: FunnelStepStatus[] = [];
+    const firstCount = state?.firstCount || 0;
+    const secondCount = state?.secondCount || 0;
+
+    // Step 1 (first rule)
+    funnelSteps.push({
+      order: 1,
+      ruleId: monitor.firstRuleId,
+      ruleName: firstRule?.name || 'Unknown',
+      count: firstCount,
+      ratioToFirst: 100,
+      ratioToPrevious: 100,
+      state: 'HEALTHY',
+    });
+
+    // Step 2 (second rule)
+    const step2Ratio = calculateRatio(firstCount, secondCount);
+    funnelSteps.push({
+      order: 2,
+      ruleId: monitor.secondRuleId,
+      ruleName: secondRule?.name || 'Unknown',
+      count: secondCount,
+      ratioToFirst: step2Ratio,
+      ratioToPrevious: step2Ratio,
+      state: calculateRatioState(step2Ratio, monitor.thresholdPercent),
+    });
+
+    // Additional steps (step 3+)
+    let stepsData: { ruleId: string; count: number }[] = [];
+    try {
+      stepsData = JSON.parse(state?.stepsData || '[]');
+    } catch {
+      stepsData = [];
+    }
+
+    let prevCount = secondCount;
+    for (const step of monitor.steps || []) {
+      const stepRule = this.ruleRepo.getById(step.ruleId);
+      const stepData = stepsData.find((s) => s.ruleId === step.ruleId);
+      const stepCount = stepData?.count || 0;
+      const ratioToFirst = calculateRatio(firstCount, stepCount);
+      const ratioToPrevious = calculateRatio(prevCount, stepCount);
+
+      funnelSteps.push({
+        order: step.order,
+        ruleId: step.ruleId,
+        ruleName: stepRule?.name || 'Unknown',
+        count: stepCount,
+        ratioToFirst,
+        ratioToPrevious,
+        state: calculateRatioState(ratioToPrevious, step.thresholdPercent),
+      });
+
+      prevCount = stepCount;
+    }
+
     return {
       monitorId: monitor.id,
       monitor,
       state: (state?.state as RatioState) || 'HEALTHY',
       firstRuleName: firstRule?.name || 'Unknown',
       secondRuleName: secondRule?.name || 'Unknown',
-      firstCount: state?.firstCount || 0,
-      secondCount: state?.secondCount || 0,
+      firstCount,
+      secondCount,
       currentRatio: state?.currentRatio || 0,
+      funnelSteps,
       updatedAt: state ? new Date(state.updatedAt) : new Date(),
     };
   }
@@ -151,27 +210,53 @@ export class RatioMonitorService {
     const firstCount = this.getCountByTimeWindow(firstStatus, monitor.timeWindow);
     const secondCount = this.getCountByTimeWindow(secondStatus, monitor.timeWindow);
 
-    // Calculate ratio
+    // Calculate ratio for step 1->2
     const currentRatio = calculateRatio(firstCount, secondCount);
-    const newState = calculateRatioState(currentRatio, monitor.thresholdPercent);
+
+    // Collect additional steps data
+    const stepsData: { ruleId: string; count: number }[] = [];
+    let overallState: RatioState = calculateRatioState(currentRatio, monitor.thresholdPercent);
+
+    // Check additional steps
+    for (const step of monitor.steps || []) {
+      const stepStatus = this.stateRepo.getByRuleId(step.ruleId);
+      const stepCount = this.getCountByTimeWindow(stepStatus, monitor.timeWindow);
+      stepsData.push({ ruleId: step.ruleId, count: stepCount });
+
+      // Calculate ratio to first step
+      const stepRatio = calculateRatio(firstCount, stepCount);
+      const stepState = calculateRatioState(stepRatio, step.thresholdPercent);
+
+      // If any step is LOW, overall state is LOW
+      if (stepState === 'LOW') {
+        overallState = 'LOW';
+      }
+    }
 
     // Get previous state
     const previousStateRecord = this.ratioRepo.getState(monitor.id);
     const previousState: RatioState = (previousStateRecord?.state as RatioState) || 'HEALTHY';
 
-    // Update state
-    this.ratioRepo.updateState(monitor.id, newState, firstCount, secondCount, currentRatio);
+    // Update state with steps data
+    this.ratioRepo.updateState(
+      monitor.id,
+      overallState,
+      firstCount,
+      secondCount,
+      currentRatio,
+      JSON.stringify(stepsData)
+    );
 
     // Check if alert should be triggered
-    if (previousState !== newState) {
-      const alertType: AlertType = newState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
+    if (previousState !== overallState) {
+      const alertType: AlertType = overallState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
       const message = this.buildAlertMessage(monitor, alertType, firstCount, secondCount, currentRatio);
 
       const alertDto: CreateAlertDTO = {
         ruleId: monitor.id, // Using monitor ID as rule ID for ratio alerts
         alertType,
         previousState: previousState === 'HEALTHY' ? 'ACTIVE' : 'WEAK',
-        currentState: newState === 'HEALTHY' ? 'ACTIVE' : 'WEAK',
+        currentState: overallState === 'HEALTHY' ? 'ACTIVE' : 'WEAK',
         gapMinutes: 0,
         count1h: firstCount,
         count12h: secondCount,

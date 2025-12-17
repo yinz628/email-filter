@@ -2089,7 +2089,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         Object.keys(levelGroups).sort((a, b) => a - b).forEach(level => {
           const campaigns = levelGroups[level].slice(0, 5);
           campaigns.forEach((ls, idx) => {
-            const bgColor = ls.isValuable ? '#d4edda' : (ls.isRoot ? '#fff3e0' : 'transparent');
+            const bgColor = ls.isRoot ? '#fff3e0' : (ls.isValuable ? '#d4edda' : '#fff');
             html += '<tr style="border-bottom:1px solid #eee;background:' + bgColor + ';">';
             if (idx === 0) {
               html += '<td style="padding:6px;text-align:center;font-weight:bold;vertical-align:top;" rowspan="' + campaigns.length + '">第 ' + level + ' 层</td>';

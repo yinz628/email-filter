@@ -15,3 +15,4 @@ export { watchRoutes } from './watch.js';
 export { campaignRoutes } from './campaign.js';
 export { monitoringRoutes } from './monitoring.js';
 export { ratioMonitoringRoutes } from './ratio-monitoring.js';
+export { telegramRoutes } from './telegram.js';

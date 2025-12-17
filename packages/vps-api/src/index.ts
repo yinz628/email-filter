@@ -15,6 +15,7 @@ import {
   campaignRoutes,
   monitoringRoutes,
   ratioMonitoringRoutes,
+  telegramRoutes,
 } from './routes/index.js';
 import { SchedulerService } from './services/monitoring/index.js';
 
@@ -72,6 +73,7 @@ await fastify.register(watchRoutes, { prefix: '/api/watch' });
 await fastify.register(campaignRoutes, { prefix: '/api/campaign' });
 await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
 await fastify.register(ratioMonitoringRoutes, { prefix: '/api/monitoring/ratio' });
+await fastify.register(telegramRoutes, { prefix: '/api/telegram' });
 
 // Scheduler instance
 let scheduler: SchedulerService | null = null;

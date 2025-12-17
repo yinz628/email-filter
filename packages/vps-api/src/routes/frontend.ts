@@ -586,6 +586,32 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <button class="btn btn-primary" onclick="saveForwardConfig()">保存</button>
       </div>
+      <div class="card">
+        <h2>🤖 Telegram 通知</h2>
+        <p style="color:#666;margin-bottom:15px">配置 Telegram Bot 接收告警通知。<a href="https://t.me/BotFather" target="_blank" style="color:#4a90d9;">创建 Bot</a></p>
+        <div class="form-group">
+          <label>Bot Token</label>
+          <input type="password" id="telegram-bot-token" placeholder="从 @BotFather 获取的 Token">
+          <p style="color:#888;font-size:12px;margin-top:5px">格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz</p>
+        </div>
+        <div class="form-group">
+          <label>Chat ID</label>
+          <input type="text" id="telegram-chat-id" placeholder="你的 Chat ID 或群组 ID">
+          <p style="color:#888;font-size:12px;margin-top:5px">发送消息给 @userinfobot 获取你的 Chat ID</p>
+        </div>
+        <div class="form-group">
+          <label>启用通知</label>
+          <select id="telegram-enabled">
+            <option value="false">禁用</option>
+            <option value="true">启用</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-primary" onclick="saveTelegramConfig()">保存配置</button>
+          <button class="btn btn-secondary" onclick="testTelegramConfig()">发送测试消息</button>
+        </div>
+        <div id="telegram-status" style="margin-top:10px;"></div>
+      </div>
     </div>
   </div>
 
@@ -1822,6 +1848,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     // Settings
     function loadSettings() {
       document.getElementById('api-token').value = apiToken;
+      loadTelegramConfig();
     }
 
     function saveToken() {
@@ -1842,6 +1869,71 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         });
         showAlert('保存成功');
       } catch (e) { showAlert('保存失败', 'error'); }
+    }
+
+    // Telegram Configuration
+    async function loadTelegramConfig() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/telegram/config', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.hasToken) {
+            document.getElementById('telegram-bot-token').placeholder = '已配置 (输入新值覆盖)';
+          }
+          document.getElementById('telegram-chat-id').value = data.chatId || '';
+          document.getElementById('telegram-enabled').value = data.enabled ? 'true' : 'false';
+        }
+      } catch (e) {
+        console.error('Failed to load Telegram config', e);
+      }
+    }
+
+    async function saveTelegramConfig() {
+      const botToken = document.getElementById('telegram-bot-token').value;
+      const chatId = document.getElementById('telegram-chat-id').value;
+      const enabled = document.getElementById('telegram-enabled').value === 'true';
+      
+      try {
+        const body = { chatId, enabled };
+        if (botToken) body.botToken = botToken;
+        
+        const res = await fetch('/api/telegram/config', {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify(body)
+        });
+        if (res.ok) {
+          showAlert('Telegram 配置已保存');
+          document.getElementById('telegram-bot-token').value = '';
+          loadTelegramConfig();
+        } else {
+          const data = await res.json();
+          showAlert(data.error || '保存失败', 'error');
+        }
+      } catch (e) {
+        showAlert('保存失败', 'error');
+      }
+    }
+
+    async function testTelegramConfig() {
+      const statusEl = document.getElementById('telegram-status');
+      statusEl.innerHTML = '<span style="color:#666;">发送中...</span>';
+      try {
+        const res = await fetch('/api/telegram/test', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.success) {
+          statusEl.innerHTML = '<span style="color:#27ae60;">✅ 测试消息发送成功！</span>';
+        } else {
+          statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 发送失败: ' + escapeHtml(data.error || '未知错误') + '</span>';
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 发送失败</span>';
+      }
     }
 
     // Campaign Analytics

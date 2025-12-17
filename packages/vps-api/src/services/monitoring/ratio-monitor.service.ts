@@ -11,11 +11,16 @@ import { calculateRatio, calculateRatioState } from '@email-filter/shared';
 import { RatioMonitorRepository } from '../../db/ratio-monitor-repository.js';
 import { MonitoringRuleRepository } from '../../db/monitoring-rule-repository.js';
 import { SignalStateRepository } from '../../db/signal-state-repository.js';
+import { ConfigRepository } from '../../db/config-repository.js';
 import {
   RatioAlertRepository,
   type RatioAlertType,
   type RatioAlert,
 } from '../../db/ratio-alert-repository.js';
+import {
+  sendTelegramMessage,
+  type TelegramConfig,
+} from './telegram.service.js';
 
 /**
  * Service for ratio monitoring operations
@@ -300,7 +305,7 @@ export class RatioMonitorService {
       const alertType: RatioAlertType = overallState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
       const message = this.buildAlertMessage(monitor, alertType, firstCount, secondCount, currentRatio);
 
-      this.ratioAlertRepo.create({
+      const alert = this.ratioAlertRepo.create({
         monitorId: monitor.id,
         alertType,
         previousState,
@@ -310,10 +315,45 @@ export class RatioMonitorService {
         currentRatio,
         message,
       });
+
+      // Send Telegram notification
+      this.sendTelegramNotification(monitor, alert).catch((err) => {
+        console.error('Failed to send Telegram notification:', err);
+      });
+
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * Send Telegram notification for ratio alert
+   */
+  private async sendTelegramNotification(monitor: RatioMonitor, alert: RatioAlert): Promise<void> {
+    try {
+      const configRepo = new ConfigRepository(
+        this.ratioRepo['db'] as import('better-sqlite3').Database
+      );
+      const telegramConfig = configRepo.getJson<TelegramConfig>('telegram_config');
+
+      if (!telegramConfig || !telegramConfig.enabled) {
+        return;
+      }
+
+      const title =
+        alert.alertType === 'RATIO_LOW'
+          ? `比例告警: ${monitor.name}`
+          : `比例恢复: ${monitor.name}`;
+
+      await sendTelegramMessage(telegramConfig, {
+        title,
+        body: alert.message,
+        alertType: alert.alertType,
+      });
+    } catch (error) {
+      console.error('Telegram notification error:', error);
+    }
   }
 
   /**

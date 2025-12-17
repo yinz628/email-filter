@@ -2072,21 +2072,27 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           levelGroups[ls.level].push(ls);
         });
         
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+        html += '<tr style="background:#e1bee7;"><th style="padding:6px;text-align:center;width:60px;">层级</th><th style="padding:6px;text-align:left;">活动主题</th><th style="padding:6px;text-align:right;width:80px;">人数</th><th style="padding:6px;text-align:right;width:80px;">覆盖率</th></tr>';
+        
         Object.keys(levelGroups).sort((a, b) => a - b).forEach(level => {
-          html += '<div style="margin-bottom:10px;"><strong style="font-size:12px;">第 ' + level + ' 层:</strong>';
-          html += '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">';
-          levelGroups[level].slice(0, 5).forEach(ls => {
-            const bgColor = ls.isValuable ? '#d4edda' : (ls.isRoot ? '#fff3e0' : '#f8f9fa');
-            const borderColor = ls.isValuable ? '#28a745' : (ls.isRoot ? '#ff9800' : '#ddd');
-            html += '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:4px;padding:4px 8px;font-size:11px;">';
-            html += escapeHtml(ls.subject.substring(0, 30)) + ' <span style="color:#666;">(' + ls.userCount + '人, ' + ls.coverage.toFixed(1) + '%)</span>';
-            html += '</div>';
+          const campaigns = levelGroups[level].slice(0, 5);
+          campaigns.forEach((ls, idx) => {
+            const bgColor = ls.isValuable ? '#d4edda' : (ls.isRoot ? '#fff3e0' : 'transparent');
+            html += '<tr style="border-bottom:1px solid #eee;background:' + bgColor + ';">';
+            if (idx === 0) {
+              html += '<td style="padding:6px;text-align:center;font-weight:bold;vertical-align:top;" rowspan="' + campaigns.length + '">第 ' + level + ' 层</td>';
+            }
+            html += '<td style="padding:6px;">' + escapeHtml(ls.subject.substring(0, 40)) + (ls.isRoot ? ' 🎯' : '') + (ls.isValuable ? ' ⭐' : '') + '</td>';
+            html += '<td style="padding:6px;text-align:right;font-weight:bold;">' + ls.userCount + '</td>';
+            html += '<td style="padding:6px;text-align:right;color:#666;">' + ls.coverage.toFixed(1) + '%</td>';
+            html += '</tr>';
           });
           if (levelGroups[level].length > 5) {
-            html += '<div style="color:#999;font-size:11px;padding:4px;">+' + (levelGroups[level].length - 5) + ' 更多</div>';
+            html += '<tr style="border-bottom:1px solid #eee;"><td></td><td colspan="3" style="padding:6px;color:#999;font-size:11px;">+' + (levelGroups[level].length - 5) + ' 更多活动</td></tr>';
           }
-          html += '</div></div>';
         });
+        html += '</table>';
       } else {
         html += '<p style="color:#999;font-size:12px;">暂无层级数据</p>';
       }

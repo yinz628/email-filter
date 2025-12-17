@@ -381,6 +381,35 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
       </div>
       <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">🗄️ 数据管理</h2>
+          <button class="btn btn-sm btn-secondary" onclick="loadDataStats()">🔄 刷新统计</button>
+        </div>
+        <div id="data-stats-container" style="margin-bottom:15px;">
+          <div class="stats-grid">
+            <div class="stat-card" style="background:#e8f5e9;"><div class="stat-value" id="stat-active-data" style="color:#2e7d32;">-</div><div class="stat-label">分析中商户</div></div>
+            <div class="stat-card" style="background:#fff3e0;"><div class="stat-value" id="stat-pending-data" style="color:#e65100;">-</div><div class="stat-label">等待分析</div></div>
+            <div class="stat-card" style="background:#ffebee;"><div class="stat-value" id="stat-ignored-data" style="color:#c62828;">-</div><div class="stat-label">已忽略</div></div>
+            <div class="stat-card" style="background:#e3f2fd;"><div class="stat-value" id="stat-total-paths" style="color:#1565c0;">-</div><div class="stat-label">路径记录</div></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-danger" onclick="cleanupIgnoredData()">🗑️ 清理已忽略商户数据</button>
+          <div style="display:flex;gap:5px;align-items:center;">
+            <select id="pending-cleanup-days" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="7">7天前</option>
+              <option value="14">14天前</option>
+              <option value="30" selected>30天前</option>
+              <option value="60">60天前</option>
+            </select>
+            <button class="btn btn-warning" onclick="cleanupPendingData()">🗑️ 清理旧待分析数据</button>
+          </div>
+        </div>
+        <p style="color:#888;font-size:12px;margin-top:10px;">
+          💡 提示：已忽略的商户不会记录详细营销数据，仅统计邮件数量。清理操作不可恢复，请谨慎操作。
+        </p>
+      </div>
+      <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
           <h2 style="margin:0;border:none;padding:0;">商户列表</h2>
           <div style="display:flex;gap:10px;align-items:center;">
@@ -1539,6 +1568,66 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function loadCampaignAnalytics() {
       await loadMerchants();
+      await loadDataStats();
+    }
+
+    async function loadDataStats() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/campaign/data-stats', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('stat-active-data').textContent = data.activeMerchants;
+          document.getElementById('stat-pending-data').textContent = data.pendingMerchants;
+          document.getElementById('stat-ignored-data').textContent = data.ignoredMerchants;
+          document.getElementById('stat-total-paths').textContent = data.totalPaths;
+        }
+      } catch (e) {
+        console.error('Failed to load data stats', e);
+      }
+    }
+
+    async function cleanupIgnoredData() {
+      if (!confirm('确定要清理所有已忽略商户的数据吗？此操作不可恢复！')) return;
+      try {
+        const res = await fetch('/api/campaign/cleanup-ignored', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('清理完成: 删除 ' + data.merchantsDeleted + ' 个商户, ' + data.campaignsDeleted + ' 个活动, ' + data.emailsDeleted + ' 封邮件, ' + data.pathsDeleted + ' 条路径');
+          await loadMerchants();
+          await loadDataStats();
+        } else {
+          showAlert('清理失败', 'error');
+        }
+      } catch (e) {
+        showAlert('清理失败', 'error');
+      }
+    }
+
+    async function cleanupPendingData() {
+      const days = parseInt(document.getElementById('pending-cleanup-days').value) || 30;
+      if (!confirm('确定要清理 ' + days + ' 天前的待分析商户数据吗？此操作不可恢复！')) return;
+      try {
+        const res = await fetch('/api/campaign/cleanup-pending', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ days })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('清理完成: 删除 ' + data.merchantsDeleted + ' 个商户, ' + data.campaignsDeleted + ' 个活动, ' + data.emailsDeleted + ' 封邮件, ' + data.pathsDeleted + ' 条路径');
+          await loadMerchants();
+          await loadDataStats();
+        } else {
+          showAlert('清理失败', 'error');
+        }
+      } catch (e) {
+        showAlert('清理失败', 'error');
+      }
     }
 
     async function loadMerchants() {

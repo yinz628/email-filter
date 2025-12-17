@@ -1951,4 +1951,269 @@ export class CampaignAnalyticsService {
 
     return levels;
   }
+
+  // ============================================
+  // Data Management Methods (数据管理)
+  // ============================================
+
+  /**
+   * Get data statistics for all merchants
+   * 统计各类数据占用情况
+   */
+  getDataStatistics(): {
+    totalMerchants: number;
+    activeMerchants: number;
+    pendingMerchants: number;
+    ignoredMerchants: number;
+    totalCampaigns: number;
+    totalEmails: number;
+    totalPaths: number;
+    byStatus: {
+      status: string;
+      merchants: number;
+      campaigns: number;
+      emails: number;
+      paths: number;
+    }[];
+  } {
+    // Get merchant counts by status
+    const merchantStats = this.db.prepare(`
+      SELECT 
+        COALESCE(analysis_status, 'pending') as status,
+        COUNT(*) as merchant_count
+      FROM merchants
+      GROUP BY COALESCE(analysis_status, 'pending')
+    `).all() as Array<{ status: string; merchant_count: number }>;
+
+    // Get detailed stats by status
+    const detailedStats = this.db.prepare(`
+      SELECT 
+        COALESCE(m.analysis_status, 'pending') as status,
+        COUNT(DISTINCT m.id) as merchants,
+        COUNT(DISTINCT c.id) as campaigns,
+        COALESCE(SUM(c.total_emails), 0) as emails,
+        (SELECT COUNT(*) FROM recipient_paths rp 
+         JOIN campaigns c2 ON rp.campaign_id = c2.id 
+         WHERE c2.merchant_id IN (
+           SELECT id FROM merchants WHERE COALESCE(analysis_status, 'pending') = COALESCE(m.analysis_status, 'pending')
+         )) as paths
+      FROM merchants m
+      LEFT JOIN campaigns c ON m.id = c.merchant_id
+      GROUP BY COALESCE(m.analysis_status, 'pending')
+    `).all() as Array<{ status: string; merchants: number; campaigns: number; emails: number; paths: number }>;
+
+    // Get totals
+    const totals = this.db.prepare(`
+      SELECT 
+        (SELECT COUNT(*) FROM merchants) as total_merchants,
+        (SELECT COUNT(*) FROM campaigns) as total_campaigns,
+        (SELECT COUNT(*) FROM campaign_emails) as total_emails,
+        (SELECT COUNT(*) FROM recipient_paths) as total_paths
+    `).get() as { total_merchants: number; total_campaigns: number; total_emails: number; total_paths: number };
+
+    const statusCounts = {
+      active: 0,
+      pending: 0,
+      ignored: 0,
+    };
+    merchantStats.forEach(s => {
+      if (s.status in statusCounts) {
+        statusCounts[s.status as keyof typeof statusCounts] = s.merchant_count;
+      }
+    });
+
+    return {
+      totalMerchants: totals.total_merchants,
+      activeMerchants: statusCounts.active,
+      pendingMerchants: statusCounts.pending,
+      ignoredMerchants: statusCounts.ignored,
+      totalCampaigns: totals.total_campaigns,
+      totalEmails: totals.total_emails,
+      totalPaths: totals.total_paths,
+      byStatus: detailedStats,
+    };
+  }
+
+  /**
+   * Clean up data for ignored merchants
+   * 清理已忽略商户的营销数据
+   * 
+   * @returns Number of records deleted
+   */
+  cleanupIgnoredMerchantData(): {
+    merchantsDeleted: number;
+    campaignsDeleted: number;
+    emailsDeleted: number;
+    pathsDeleted: number;
+  } {
+    // Get ignored merchant IDs
+    const ignoredMerchants = this.db.prepare(`
+      SELECT id FROM merchants WHERE analysis_status = 'ignored'
+    `).all() as Array<{ id: string }>;
+
+    if (ignoredMerchants.length === 0) {
+      return { merchantsDeleted: 0, campaignsDeleted: 0, emailsDeleted: 0, pathsDeleted: 0 };
+    }
+
+    const merchantIds = ignoredMerchants.map(m => m.id);
+    const placeholders = merchantIds.map(() => '?').join(',');
+
+    // Delete recipient paths
+    const pathsResult = this.db.prepare(`
+      DELETE FROM recipient_paths WHERE merchant_id IN (${placeholders})
+    `).run(...merchantIds);
+
+    // Get campaign IDs for these merchants
+    const campaigns = this.db.prepare(`
+      SELECT id FROM campaigns WHERE merchant_id IN (${placeholders})
+    `).all(...merchantIds) as Array<{ id: string }>;
+
+    let emailsDeleted = 0;
+    if (campaigns.length > 0) {
+      const campaignIds = campaigns.map(c => c.id);
+      const campaignPlaceholders = campaignIds.map(() => '?').join(',');
+      
+      // Delete campaign emails
+      const emailsResult = this.db.prepare(`
+        DELETE FROM campaign_emails WHERE campaign_id IN (${campaignPlaceholders})
+      `).run(...campaignIds);
+      emailsDeleted = emailsResult.changes;
+    }
+
+    // Delete campaigns
+    const campaignsResult = this.db.prepare(`
+      DELETE FROM campaigns WHERE merchant_id IN (${placeholders})
+    `).run(...merchantIds);
+
+    // Delete merchants
+    const merchantsResult = this.db.prepare(`
+      DELETE FROM merchants WHERE id IN (${placeholders})
+    `).run(...merchantIds);
+
+    return {
+      merchantsDeleted: merchantsResult.changes,
+      campaignsDeleted: campaignsResult.changes,
+      emailsDeleted,
+      pathsDeleted: pathsResult.changes,
+    };
+  }
+
+  /**
+   * Clean up data for pending merchants older than specified days
+   * 清理超过指定天数的待分析商户数据
+   * 
+   * @param days - Number of days to keep pending data
+   * @returns Number of records deleted
+   */
+  cleanupOldPendingData(days: number): {
+    merchantsDeleted: number;
+    campaignsDeleted: number;
+    emailsDeleted: number;
+    pathsDeleted: number;
+  } {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffStr = cutoffDate.toISOString();
+
+    // Get old pending merchant IDs
+    const oldPendingMerchants = this.db.prepare(`
+      SELECT id FROM merchants 
+      WHERE (analysis_status = 'pending' OR analysis_status IS NULL)
+      AND created_at < ?
+    `).all(cutoffStr) as Array<{ id: string }>;
+
+    if (oldPendingMerchants.length === 0) {
+      return { merchantsDeleted: 0, campaignsDeleted: 0, emailsDeleted: 0, pathsDeleted: 0 };
+    }
+
+    const merchantIds = oldPendingMerchants.map(m => m.id);
+    const placeholders = merchantIds.map(() => '?').join(',');
+
+    // Delete recipient paths
+    const pathsResult = this.db.prepare(`
+      DELETE FROM recipient_paths WHERE merchant_id IN (${placeholders})
+    `).run(...merchantIds);
+
+    // Get campaign IDs for these merchants
+    const campaigns = this.db.prepare(`
+      SELECT id FROM campaigns WHERE merchant_id IN (${placeholders})
+    `).all(...merchantIds) as Array<{ id: string }>;
+
+    let emailsDeleted = 0;
+    if (campaigns.length > 0) {
+      const campaignIds = campaigns.map(c => c.id);
+      const campaignPlaceholders = campaignIds.map(() => '?').join(',');
+      
+      // Delete campaign emails
+      const emailsResult = this.db.prepare(`
+        DELETE FROM campaign_emails WHERE campaign_id IN (${campaignPlaceholders})
+      `).run(...campaignIds);
+      emailsDeleted = emailsResult.changes;
+    }
+
+    // Delete campaigns
+    const campaignsResult = this.db.prepare(`
+      DELETE FROM campaigns WHERE merchant_id IN (${placeholders})
+    `).run(...merchantIds);
+
+    // Delete merchants
+    const merchantsResult = this.db.prepare(`
+      DELETE FROM merchants WHERE id IN (${placeholders})
+    `).run(...merchantIds);
+
+    return {
+      merchantsDeleted: merchantsResult.changes,
+      campaignsDeleted: campaignsResult.changes,
+      emailsDeleted,
+      pathsDeleted: pathsResult.changes,
+    };
+  }
+
+  /**
+   * Check if merchant should record data (selective recording)
+   * 检查商户是否应该记录数据
+   * 
+   * @param merchantId - Merchant ID
+   * @returns true if data should be recorded
+   */
+  shouldRecordData(merchantId: string): boolean {
+    const merchant = this.db.prepare(`
+      SELECT analysis_status FROM merchants WHERE id = ?
+    `).get(merchantId) as { analysis_status: string | null } | undefined;
+
+    if (!merchant) return true; // New merchant, record by default
+    
+    // Don't record for ignored merchants
+    return merchant.analysis_status !== 'ignored';
+  }
+
+  /**
+   * Track email with selective recording
+   * 选择性记录邮件（忽略的商户不记录详细数据）
+   * 
+   * @param data - Email tracking data
+   * @param skipIgnored - If true, skip recording for ignored merchants
+   * @returns TrackResult or null if skipped
+   */
+  trackEmailSelective(data: TrackEmailDTO, skipIgnored: boolean = true): TrackResult | null {
+    const domain = extractDomain(data.sender);
+    if (!domain) {
+      throw new Error('Invalid sender email address');
+    }
+
+    // Check if merchant exists and is ignored
+    const existingMerchant = this.getMerchantByDomain(domain);
+    if (existingMerchant && skipIgnored && existingMerchant.analysisStatus === 'ignored') {
+      // Only update email count, don't record detailed data
+      const now = new Date().toISOString();
+      this.db.prepare(`
+        UPDATE merchants SET total_emails = total_emails + 1, updated_at = ? WHERE id = ?
+      `).run(now, existingMerchant.id);
+      
+      return null; // Indicate data was not fully recorded
+    }
+
+    // Use normal tracking for non-ignored merchants
+    return this.trackEmail(data);
+  }
 }

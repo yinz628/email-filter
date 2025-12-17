@@ -1065,4 +1065,84 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  // ============================================
+  // Data Management Routes (数据管理)
+  // ============================================
+
+  /**
+   * GET /api/campaign/data-stats
+   * Get data statistics for all merchants
+   */
+  fastify.get('/data-stats', async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const stats = service.getDataStatistics();
+
+      return reply.send(stats);
+    } catch (error) {
+      request.log.error(error, 'Error fetching data statistics');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/cleanup-ignored
+   * Clean up data for ignored merchants
+   */
+  fastify.post('/cleanup-ignored', async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const result = service.cleanupIgnoredMerchantData();
+
+      return reply.send({
+        message: 'Cleanup completed',
+        ...result,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error cleaning up ignored merchant data');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/cleanup-pending
+   * Clean up old pending merchant data
+   */
+  fastify.post('/cleanup-pending', async (
+    request: FastifyRequest<{ Body: { days?: number } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const body = request.body as { days?: number } | undefined;
+      const days = body?.days || 30; // Default 30 days
+
+      if (days < 1) {
+        return reply.status(400).send({ error: 'Invalid request', message: 'days must be at least 1' });
+      }
+
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const result = service.cleanupOldPendingData(days);
+
+      return reply.send({
+        message: `Cleaned up pending data older than ${days} days`,
+        ...result,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error cleaning up pending merchant data');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

@@ -364,6 +364,75 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Campaign Analytics Tab -->
+    <div id="campaign-tab" class="tab-content hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
+          <button class="btn btn-secondary" onclick="loadMerchants()">🔄 刷新</button>
+        </div>
+        <div class="stats-grid" id="campaign-stats-container">
+          <div class="stat-card"><div class="stat-value" id="stat-merchants">-</div><div class="stat-label">商户数量</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-campaigns">-</div><div class="stat-label">营销活动</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-valuable">-</div><div class="stat-label">有价值活动</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-campaign-emails">-</div><div class="stat-label">追踪邮件</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>商户列表</h2>
+        <p style="color:#666;margin-bottom:15px">基于发件人域名自动识别的商户</p>
+        <div id="merchants-empty" style="text-align:center;color:#999;padding:40px;">
+          暂无数据。当邮件被处理时，系统会自动追踪营销活动。
+        </div>
+        <table id="merchants-table-container" style="display:none;">
+          <thead>
+            <tr>
+              <th>商户域名</th>
+              <th>显示名称</th>
+              <th>营销活动数</th>
+              <th>邮件总数</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="merchants-table"></tbody>
+        </table>
+      </div>
+      <div id="campaigns-section" class="card" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;" id="campaigns-title">营销活动</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="campaign-valuable-filter" onchange="loadCampaigns(currentMerchantId)" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部活动</option>
+              <option value="true">有价值</option>
+              <option value="false">未标记</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="hideCampaigns()">返回商户列表</button>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>邮件主题</th>
+              <th>邮件数</th>
+              <th>收件人数</th>
+              <th>价值标记</th>
+              <th>首次出现</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="campaigns-table"></tbody>
+        </table>
+      </div>
+      <div id="campaign-flow-section" class="card" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;" id="flow-title">活动路径分析</h2>
+          <button class="btn btn-sm btn-secondary" onclick="hideFlow()">返回</button>
+        </div>
+        <div id="flow-container" style="min-height:200px;"></div>
+      </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content hidden">
       <div class="card">
@@ -629,6 +698,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'dynamic') loadDynamicConfig();
       if (name === 'logs') loadLogs();
       if (name === 'stats') loadStats();
+      if (name === 'campaign') loadCampaignAnalytics();
       if (name === 'settings') loadSettings();
     }
 
@@ -1448,6 +1518,212 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         });
         showAlert('保存成功');
       } catch (e) { showAlert('保存失败', 'error'); }
+    }
+
+    // Campaign Analytics
+    let currentMerchantId = null;
+    let merchantsData = [];
+    let campaignsData = [];
+
+    async function loadCampaignAnalytics() {
+      await loadMerchants();
+    }
+
+    async function loadMerchants() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/campaign/merchants', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        merchantsData = data.merchants || [];
+        renderMerchants();
+        updateCampaignStats();
+      } catch (e) {
+        console.error('Error loading merchants:', e);
+      }
+    }
+
+    function renderMerchants() {
+      const tbody = document.getElementById('merchants-table');
+      const emptyDiv = document.getElementById('merchants-empty');
+      const tableContainer = document.getElementById('merchants-table-container');
+      
+      if (merchantsData.length === 0) {
+        emptyDiv.style.display = 'block';
+        tableContainer.style.display = 'none';
+        return;
+      }
+      
+      emptyDiv.style.display = 'none';
+      tableContainer.style.display = 'table';
+      
+      tbody.innerHTML = merchantsData.map(m => {
+        const createdAt = new Date(m.createdAt).toLocaleDateString('zh-CN');
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
+          '<td>' + escapeHtml(m.displayName || '-') + '</td>' +
+          '<td>' + m.totalCampaigns + '</td>' +
+          '<td>' + m.totalEmails + '</td>' +
+          '<td>' + createdAt + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">查看活动</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="showMerchantFlow(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">路径分析</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    async function updateCampaignStats() {
+      let totalCampaigns = 0;
+      let totalEmails = 0;
+      let valuableCount = 0;
+      
+      merchantsData.forEach(m => {
+        totalCampaigns += m.totalCampaigns || 0;
+        totalEmails += m.totalEmails || 0;
+      });
+      
+      document.getElementById('stat-merchants').textContent = merchantsData.length;
+      document.getElementById('stat-campaigns').textContent = totalCampaigns;
+      document.getElementById('stat-campaign-emails').textContent = totalEmails;
+      
+      // Get valuable count from all campaigns
+      try {
+        const res = await fetch('/api/campaign/campaigns?valuable=true', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          valuableCount = (data.campaigns || []).length;
+        }
+      } catch (e) {}
+      document.getElementById('stat-valuable').textContent = valuableCount;
+    }
+
+    async function showCampaigns(merchantId, domain) {
+      currentMerchantId = merchantId;
+      document.getElementById('campaigns-title').textContent = '营销活动 - ' + domain;
+      document.getElementById('campaigns-section').style.display = 'block';
+      document.getElementById('campaign-flow-section').style.display = 'none';
+      await loadCampaigns(merchantId);
+    }
+
+    function hideCampaigns() {
+      document.getElementById('campaigns-section').style.display = 'none';
+      currentMerchantId = null;
+    }
+
+    async function loadCampaigns(merchantId) {
+      if (!apiToken || !merchantId) return;
+      const valuable = document.getElementById('campaign-valuable-filter').value;
+      let url = '/api/campaign/campaigns?merchantId=' + merchantId;
+      if (valuable) url += '&valuable=' + valuable;
+      
+      try {
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        campaignsData = data.campaigns || [];
+        renderCampaigns();
+      } catch (e) {
+        console.error('Error loading campaigns:', e);
+      }
+    }
+
+    function renderCampaigns() {
+      const tbody = document.getElementById('campaigns-table');
+      if (campaignsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999">暂无营销活动</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = campaignsData.map(c => {
+        const firstSeen = new Date(c.firstSeenAt).toLocaleDateString('zh-CN');
+        const valuableStatus = c.isValuable 
+          ? '<span class="status status-enabled">✓ 有价值</span>' 
+          : '<span class="status status-disabled">未标记</span>';
+        const subjectDisplay = '<span class="text-truncate" title="' + escapeHtml(c.subject) + '">' + escapeHtml(c.subject) + '</span>';
+        return '<tr>' +
+          '<td>' + subjectDisplay + '</td>' +
+          '<td>' + c.totalEmails + '</td>' +
+          '<td>' + c.uniqueRecipients + '</td>' +
+          '<td>' + valuableStatus + '</td>' +
+          '<td>' + firstSeen + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm ' + (c.isValuable ? 'btn-secondary' : 'btn-success') + '" onclick="toggleValuable(\\'' + c.id + '\\', ' + !c.isValuable + ')">' + (c.isValuable ? '取消标记' : '标记有价值') + '</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    async function toggleValuable(campaignId, valuable) {
+      try {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/valuable', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ valuable })
+        });
+        if (res.ok) {
+          showAlert(valuable ? '已标记为有价值' : '已取消标记');
+          await loadCampaigns(currentMerchantId);
+          await updateCampaignStats();
+        } else {
+          showAlert('操作失败', 'error');
+        }
+      } catch (e) {
+        showAlert('操作失败', 'error');
+      }
+    }
+
+    async function showMerchantFlow(merchantId, domain) {
+      document.getElementById('flow-title').textContent = '活动路径分析 - ' + domain;
+      document.getElementById('campaign-flow-section').style.display = 'block';
+      document.getElementById('campaigns-section').style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/flow', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderFlow(data);
+      } catch (e) {
+        document.getElementById('flow-container').innerHTML = '<p style="color:#999;text-align:center;">加载失败或暂无数据</p>';
+      }
+    }
+
+    function hideFlow() {
+      document.getElementById('campaign-flow-section').style.display = 'none';
+    }
+
+    function renderFlow(flowData) {
+      const container = document.getElementById('flow-container');
+      if (!flowData.nodes || flowData.nodes.length === 0) {
+        container.innerHTML = '<p style="color:#999;text-align:center;">暂无路径数据</p>';
+        return;
+      }
+      
+      // Group nodes by level
+      const levels = {};
+      flowData.nodes.forEach(node => {
+        if (!levels[node.level]) levels[node.level] = [];
+        levels[node.level].push(node);
+      });
+      
+      let html = '<div style="overflow-x:auto;">';
+      html += '<div style="display:flex;gap:20px;padding:20px;min-width:fit-content;">';
+      
+      Object.keys(levels).sort((a, b) => a - b).forEach(level => {
+        html += '<div style="min-width:200px;">';
+        html += '<div style="font-weight:bold;margin-bottom:10px;color:#666;">第 ' + level + ' 层</div>';
+        levels[level].forEach(node => {
+          const bgColor = node.isValuable ? '#d4edda' : '#f8f9fa';
+          const borderColor = node.isValuable ? '#28a745' : '#ddd';
+          html += '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:6px;padding:10px;margin-bottom:8px;">';
+          html += '<div style="font-size:12px;word-break:break-all;" title="' + escapeHtml(node.subject) + '">' + escapeHtml(node.subject.substring(0, 50)) + (node.subject.length > 50 ? '...' : '') + '</div>';
+          html += '<div style="font-size:11px;color:#666;margin-top:4px;">' + node.recipientCount + ' 人 (' + node.percentage.toFixed(1) + '%)</div>';
+          if (node.isValuable) html += '<div style="font-size:10px;color:#28a745;margin-top:2px;">✓ 有价值</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+      
+      html += '</div></div>';
+      container.innerHTML = html;
     }
 
     // Init

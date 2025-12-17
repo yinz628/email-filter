@@ -23,20 +23,26 @@ interface RatioMonitorQuery {
 }
 
 /**
+ * Helper to get service instance (lazy initialization)
+ */
+function getService(): RatioMonitorService {
+  const db = getDatabase();
+  return new RatioMonitorService(db);
+}
+
+/**
  * Register ratio monitoring routes
  */
 export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Apply auth middleware to all routes
   fastify.addHook('preHandler', authMiddleware);
 
-  const db = getDatabase();
-  const service = new RatioMonitorService(db);
-
   // Get all ratio monitors
   fastify.get(
     '/',
     async (request: FastifyRequest<{ Querystring: RatioMonitorQuery }>, reply: FastifyReply) => {
       try {
+        const service = getService();
         const { tag, enabled } = request.query;
         const filter: { tag?: string; enabled?: boolean } = {};
 
@@ -58,6 +64,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
     '/status',
     async (request: FastifyRequest<{ Querystring: RatioMonitorQuery }>, reply: FastifyReply) => {
       try {
+        const service = getService();
         const { tag, enabled } = request.query;
         const filter: { tag?: string; enabled?: boolean } = {};
 
@@ -76,6 +83,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
   // Get all tags
   fastify.get('/tags', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
+      const service = getService();
       const tags = service.getAllTags();
       return reply.send({ tags });
     } catch (error) {
@@ -89,6 +97,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
     '/:id',
     async (request: FastifyRequest<{ Params: RatioMonitorParams }>, reply: FastifyReply) => {
       try {
+        const service = getService();
         const monitor = service.getById(request.params.id);
         if (!monitor) {
           return reply.status(404).send({ error: 'Ratio monitor not found' });
@@ -106,6 +115,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
     '/',
     async (request: FastifyRequest<{ Body: CreateRatioMonitorDTO }>, reply: FastifyReply) => {
       try {
+        const service = getService();
         const body = request.body;
 
         // Validate required fields
@@ -139,6 +149,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
       reply: FastifyReply
     ) => {
       try {
+        const service = getService();
         const body = request.body;
 
         if (body.thresholdPercent !== undefined && (body.thresholdPercent < 0 || body.thresholdPercent > 100)) {
@@ -167,6 +178,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
     '/:id',
     async (request: FastifyRequest<{ Params: RatioMonitorParams }>, reply: FastifyReply) => {
       try {
+        const service = getService();
         const deleted = service.delete(request.params.id);
         if (!deleted) {
           return reply.status(404).send({ error: 'Ratio monitor not found' });
@@ -182,6 +194,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
   // Check all ratio monitors (manual trigger)
   fastify.post('/check', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
+      const service = getService();
       const result = service.checkAll();
       return reply.send(result);
     } catch (error) {

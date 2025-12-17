@@ -21,6 +21,8 @@ import type {
 } from '@email-filter/shared';
 import { determineAlertType } from '@email-filter/shared';
 import { AlertRepository } from '../../db/alert-repository.js';
+import { ConfigRepository } from '../../db/config-repository.js';
+import { sendTelegramMessage, type TelegramConfig } from './telegram.service.js';
 
 /**
  * State icons for display formatting
@@ -49,9 +51,11 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
  */
 export class AlertService {
   private alertRepo: AlertRepository;
+  private configRepo: ConfigRepository;
 
   constructor(private db: Database) {
     this.alertRepo = new AlertRepository(db);
+    this.configRepo = new ConfigRepository(db);
   }
 
   /**
@@ -160,7 +164,7 @@ export class AlertService {
       count24h
     );
 
-    return this.createAlert({
+    const alert = this.createAlert({
       ruleId: rule.id,
       alertType,
       previousState,
@@ -171,6 +175,50 @@ export class AlertService {
       count24h,
       message,
     });
+
+    // Send Telegram notification
+    this.sendTelegramNotification(alert).catch((err) => {
+      console.error('Failed to send Telegram notification:', err);
+    });
+
+    return alert;
+  }
+
+  /**
+   * Send Telegram notification for signal alert
+   */
+  private async sendTelegramNotification(alert: Alert): Promise<void> {
+    try {
+      const telegramConfig = this.configRepo.getJson<TelegramConfig>('telegram_config');
+
+      if (!telegramConfig || !telegramConfig.enabled) {
+        return;
+      }
+
+      const title =
+        alert.alertType === 'SIGNAL_DEAD'
+          ? '信号消失告警'
+          : alert.alertType === 'SIGNAL_RECOVERED'
+            ? '信号恢复'
+            : alert.alertType === 'FREQUENCY_DOWN'
+              ? '频率下降告警'
+              : '监控告警';
+
+      const result = await sendTelegramMessage(telegramConfig, {
+        title,
+        body: alert.message,
+        alertType: alert.alertType,
+      });
+
+      // Mark alert as sent if Telegram message was successful
+      if (result.success) {
+        this.markAsSent(alert.id);
+      } else {
+        console.error('Telegram send failed:', result.error);
+      }
+    } catch (error) {
+      console.error('Telegram notification error:', error);
+    }
   }
 
   /**

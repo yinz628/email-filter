@@ -80,13 +80,14 @@ export function validatePattern(pattern: string): PatternValidationResult {
  * Match a subject against multiple patterns
  * Returns the first matching pattern or null if none match
  * 
- * @param patterns - Array of regex pattern strings
+ * @param patterns - Array of pattern strings
  * @param subject - The email subject to match
+ * @param mode - Match mode: 'contains' (default) or 'regex'
  * @returns The first matching pattern or null
  */
-export function findMatchingPattern(patterns: string[], subject: string): string | null {
+export function findMatchingPattern(patterns: string[], subject: string, mode: MatchMode = 'contains'): string | null {
   for (const pattern of patterns) {
-    const result = matchSubject(pattern, subject);
+    const result = matchSubject(pattern, subject, mode);
     if (result.matched) {
       return pattern;
     }

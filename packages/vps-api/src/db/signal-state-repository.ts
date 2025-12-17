@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import type { SignalState, SignalStatus, MonitoringRule } from '@email-filter/shared';
+import type { SignalState, SignalStatus, MonitoringRule, SubjectMatchMode } from '@email-filter/shared';
 
 export interface SignalStateRow {
   rule_id: string;
@@ -16,6 +16,7 @@ interface MonitoringRuleRow {
   merchant: string;
   name: string;
   subject_pattern: string;
+  match_mode: string;
   expected_interval_minutes: number;
   dead_after_minutes: number;
   enabled: number;
@@ -44,6 +45,7 @@ export class SignalStateRepository {
       merchant: row.merchant,
       name: row.name,
       subjectPattern: row.subject_pattern,
+      matchMode: (row.match_mode as SubjectMatchMode) || 'contains',
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
       tags,

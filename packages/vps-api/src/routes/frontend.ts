@@ -527,6 +527,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <h2 style="margin:0;border:none;padding:0;">📡 信号监控规则</h2>
           </div>
           <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="monitoring-tag-filter" onchange="loadMonitoringRules()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="">全部标签</option>
+            </select>
             <select id="rules-rows-limit" onchange="loadMonitoringRules()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="10">10条</option>
               <option value="20" selected>20条</option>
@@ -539,11 +542,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <div class="card-body" id="rules-card-body" style="margin-top:15px;">
           <p style="color:#666;margin-bottom:15px">监控重点邮件信号的健康状态。当信号异常时自动告警。</p>
-          <div class="filter-bar">
-            <select id="monitoring-tag-filter" onchange="loadMonitoringRules()">
-              <option value="">全部标签</option>
-            </select>
-          </div>
           <table>
             <thead>
               <tr>
@@ -610,6 +608,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <h2 style="margin:0;border:none;padding:0;">📈 漏斗监控</h2>
           </div>
           <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="ratio-tag-filter" onchange="loadRatioMonitors()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="">全部标签</option>
+            </select>
             <select id="funnel-rows-limit" onchange="loadRatioMonitors()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="5">5条</option>
               <option value="10" selected>10条</option>
@@ -622,11 +623,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <div class="card-body" id="funnel-card-body" style="margin-top:15px;">
           <p style="color:#666;margin-bottom:15px">监控邮件流程的转化漏斗。支持多步骤，当任一步骤比例低于阈值时触发告警。</p>
-          <div class="filter-bar">
-            <select id="ratio-tag-filter" onchange="loadRatioMonitors()">
-              <option value="">全部标签</option>
-            </select>
-          </div>
           <div id="ratio-monitors-container"></div>
         </div>
       </div>

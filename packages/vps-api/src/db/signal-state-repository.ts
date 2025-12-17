@@ -63,7 +63,7 @@ export class SignalStateRepository {
       SELECT 
         ss.rule_id, ss.state, ss.last_seen_at, 
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
-        mr.id, mr.merchant, mr.name, mr.subject_pattern,
+        mr.id, mr.merchant, mr.name, mr.subject_pattern, mr.match_mode,
         mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
         mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
@@ -87,6 +87,7 @@ export class SignalStateRepository {
       merchant: row.merchant,
       name: row.name,
       subjectPattern: row.subject_pattern,
+      matchMode: (row.match_mode as SubjectMatchMode) || 'contains',
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
       tags,
@@ -122,7 +123,7 @@ export class SignalStateRepository {
       SELECT 
         ss.rule_id, ss.state, ss.last_seen_at, 
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
-        mr.id, mr.merchant, mr.name, mr.subject_pattern,
+        mr.id, mr.merchant, mr.name, mr.subject_pattern, mr.match_mode,
         mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
         mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
@@ -151,6 +152,7 @@ export class SignalStateRepository {
         merchant: row.merchant,
         name: row.name,
         subjectPattern: row.subject_pattern,
+        matchMode: (row.match_mode as SubjectMatchMode) || 'contains',
         expectedIntervalMinutes: row.expected_interval_minutes,
         deadAfterMinutes: row.dead_after_minutes,
         tags,
@@ -186,7 +188,7 @@ export class SignalStateRepository {
       SELECT 
         ss.rule_id, ss.state, ss.last_seen_at, 
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
-        mr.id, mr.merchant, mr.name, mr.subject_pattern,
+        mr.id, mr.merchant, mr.name, mr.subject_pattern, mr.match_mode,
         mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
         mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
@@ -216,6 +218,7 @@ export class SignalStateRepository {
         merchant: row.merchant,
         name: row.name,
         subjectPattern: row.subject_pattern,
+        matchMode: (row.match_mode as SubjectMatchMode) || 'contains',
         expectedIntervalMinutes: row.expected_interval_minutes,
         deadAfterMinutes: row.dead_after_minutes,
         tags,

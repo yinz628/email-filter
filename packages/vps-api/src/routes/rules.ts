@@ -214,13 +214,21 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const ruleRepository = new RuleRepository(db);
 
-      // Extract workerId from request body
+      // Extract workerId and tags from request body
       const body = request.body as Record<string, unknown>;
       const workerId = typeof body.workerId === 'string' ? body.workerId : undefined;
+      
+      // Add tags to validation data if provided
+      if (Array.isArray(body.tags)) {
+        validation.data.tags = body.tags.filter((t): t is string => typeof t === 'string');
+      }
 
       const rule = ruleRepository.create(validation.data, workerId);
       return reply.status(201).send(rule);
-    } catch (error) {
+    } catch (error: any) {
+      if (error.message === 'DUPLICATE_RULE') {
+        return reply.status(409).send({ error: 'Duplicate rule', message: '相同的规则已存在' });
+      }
       request.log.error(error, 'Error creating rule');
       return reply.status(500).send({ error: 'Internal error' });
     }

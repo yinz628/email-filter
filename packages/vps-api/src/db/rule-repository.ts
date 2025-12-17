@@ -9,6 +9,7 @@ interface RuleRow {
   match_type: string;
   match_mode: string;
   pattern: string;
+  tags: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -37,6 +38,7 @@ export class RuleRepository {
       matchType: row.match_type as MatchType,
       matchMode: row.match_mode as MatchMode,
       pattern: row.pattern,
+      tags: row.tags ? JSON.parse(row.tags) : undefined,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -45,21 +47,46 @@ export class RuleRepository {
   }
 
   /**
+   * Check if a duplicate rule exists
+   */
+  findDuplicate(dto: CreateRuleDTO, workerId?: string): FilterRuleWithWorker | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM filter_rules 
+      WHERE (worker_id = ? OR (worker_id IS NULL AND ? IS NULL))
+        AND category = ? 
+        AND match_type = ? 
+        AND match_mode = ? 
+        AND pattern = ?
+      LIMIT 1
+    `);
+    const row = stmt.get(workerId || null, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern) as RuleRow | undefined;
+    return row ? this.rowToRule(row) : null;
+  }
+
+  /**
    * Create a new filter rule
    * @param dto - Rule data
    * @param workerId - Optional worker ID to associate the rule with
+   * @throws Error if duplicate rule exists
    */
   create(dto: CreateRuleDTO, workerId?: string): FilterRuleWithWorker {
+    // Check for duplicate
+    const existing = this.findDuplicate(dto, workerId);
+    if (existing) {
+      throw new Error('DUPLICATE_RULE');
+    }
+
     const id = uuidv4();
     const now = new Date().toISOString();
     const enabled = dto.enabled !== undefined ? dto.enabled : true;
+    const tags = dto.tags ? JSON.stringify(dto.tags) : null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, enabled ? 1 : 0, now, now);
+    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, enabled ? 1 : 0, now, now);
 
     // Create associated stats record
     const statsStmt = this.db.prepare(`
@@ -75,6 +102,7 @@ export class RuleRepository {
       matchType: dto.matchType,
       matchMode: dto.matchMode,
       pattern: dto.pattern,
+      tags: dto.tags,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -198,6 +226,10 @@ export class RuleRepository {
     if (dto.workerId !== undefined) {
       updates.push('worker_id = ?');
       params.push(dto.workerId);
+    }
+    if (dto.tags !== undefined) {
+      updates.push('tags = ?');
+      params.push(dto.tags ? JSON.stringify(dto.tags) : null);
     }
 
     params.push(id);

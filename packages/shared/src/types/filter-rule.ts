@@ -23,6 +23,7 @@ export interface FilterRule {
   matchType: MatchType;
   matchMode: MatchMode;
   pattern: string;
+  tags?: string[];  // Optional tags for organization
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -37,6 +38,7 @@ export interface CreateRuleDTO {
   matchType: MatchType;
   matchMode: MatchMode;
   pattern: string;
+  tags?: string[];
   enabled?: boolean;
 }
 
@@ -48,5 +50,6 @@ export interface UpdateRuleDTO {
   matchType?: MatchType;
   matchMode?: MatchMode;
   pattern?: string;
+  tags?: string[];
   enabled?: boolean;
 }

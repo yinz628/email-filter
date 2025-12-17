@@ -130,6 +130,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <th>匹配字段</th>
               <th>匹配模式</th>
               <th>规则内容</th>
+              <th>标签</th>
               <th>Worker</th>
               <th>最后命中</th>
               <th>状态</th>
@@ -516,6 +517,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>规则内容 *</label>
           <input type="text" id="rule-pattern" required placeholder="要匹配的内容">
         </div>
+        <div class="form-group">
+          <label>标签（可选，用逗号分隔）</label>
+          <input type="text" id="rule-tags" placeholder="例如：营销,广告,垃圾">
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -767,7 +772,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderRules(rules) {
       const tbody = document.getElementById('rules-table');
       if (rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">暂无规则</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999">暂无规则</td></tr>';
         return;
       }
       tbody.innerHTML = rules.map(r => {
@@ -778,8 +783,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const matchType = {sender:'发件人',subject:'主题',domain:'域名'}[r.matchType] || r.matchType;
         const matchMode = {exact:'精确',contains:'包含',startsWith:'开头',endsWith:'结尾',regex:'正则'}[r.matchMode] || r.matchMode;
         const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN') : '-';
+        const tagsHtml = r.tags && r.tags.length > 0 ? r.tags.map(t => '<span style="background:#e0e0e0;padding:2px 6px;border-radius:3px;font-size:11px;margin-right:3px;">' + escapeHtml(t) + '</span>').join('') : '-';
         return '<tr><td>' + cat + '</td><td>' + matchType + '</td><td>' + matchMode + '</td>' +
-          '<td>' + escapeHtml(r.pattern) + '</td><td>' + escapeHtml(worker) + '</td>' +
+          '<td>' + escapeHtml(r.pattern) + '</td><td>' + tagsHtml + '</td><td>' + escapeHtml(worker) + '</td>' +
           '<td style="font-size:12px;color:#666">' + lastHit + '</td><td>' + status + '</td>' +
           '<td class="actions">' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleRule(\\'' + r.id + '\\')">切换</button>' +
@@ -790,12 +796,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     document.getElementById('add-rule-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const tagsInput = document.getElementById('rule-tags').value.trim();
+      const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : undefined;
       const body = {
         workerId: document.getElementById('rule-worker').value || undefined,
         category: document.getElementById('rule-category').value,
         matchType: document.getElementById('rule-match-type').value,
         matchMode: document.getElementById('rule-match-mode').value,
-        pattern: document.getElementById('rule-pattern').value
+        pattern: document.getElementById('rule-pattern').value,
+        tags: tags
       };
       try {
         const res = await fetch('/api/rules', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });

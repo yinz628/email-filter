@@ -21,11 +21,13 @@ CREATE TABLE IF NOT EXISTS filter_rules (
   match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
   match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
   pattern TEXT NOT NULL,
+  tags TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_hit_at TEXT,
-  FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
+  FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE,
+  UNIQUE(worker_id, category, match_type, match_mode, pattern)
 );
 
 CREATE INDEX IF NOT EXISTS idx_filter_rules_worker ON filter_rules(worker_id);

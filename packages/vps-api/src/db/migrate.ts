@@ -35,16 +35,29 @@ console.log('Database path:', dbPath);
 
 const db = new Database(dbPath);
 
-// Check if worker_url column exists
-const tableInfo = db.prepare('PRAGMA table_info(worker_instances)').all() as any[];
-const hasWorkerUrl = tableInfo.some((col: any) => col.name === 'worker_url');
+// Migration 1: Add worker_url column to worker_instances
+const workerTableInfo = db.prepare('PRAGMA table_info(worker_instances)').all() as any[];
+const hasWorkerUrl = workerTableInfo.some((col: any) => col.name === 'worker_url');
 
 if (!hasWorkerUrl) {
   console.log('Adding worker_url column to worker_instances table...');
   db.exec('ALTER TABLE worker_instances ADD COLUMN worker_url TEXT');
-  console.log('Migration completed successfully!');
+  console.log('worker_url column added.');
 } else {
-  console.log('worker_url column already exists, skipping migration.');
+  console.log('worker_url column already exists.');
 }
 
+// Migration 2: Add tags column to filter_rules
+const rulesTableInfo = db.prepare('PRAGMA table_info(filter_rules)').all() as any[];
+const hasTags = rulesTableInfo.some((col: any) => col.name === 'tags');
+
+if (!hasTags) {
+  console.log('Adding tags column to filter_rules table...');
+  db.exec('ALTER TABLE filter_rules ADD COLUMN tags TEXT');
+  console.log('tags column added.');
+} else {
+  console.log('tags column already exists.');
+}
+
+console.log('All migrations completed!');
 db.close();

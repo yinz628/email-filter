@@ -155,16 +155,21 @@ export class RatioMonitorService {
 
   /**
    * Get status for a single ratio monitor
+   * Reads real-time counts from signal_states table
    */
   getStatus(monitor: RatioMonitor): RatioStatus {
     const state = this.ratioRepo.getState(monitor.id);
     const firstRule = this.ruleRepo.getById(monitor.firstRuleId);
     const secondRule = this.ruleRepo.getById(monitor.secondRuleId);
 
+    // Get real-time counts from signal states (not cached state)
+    const firstStatus = this.stateRepo.getByRuleId(monitor.firstRuleId);
+    const secondStatus = this.stateRepo.getByRuleId(monitor.secondRuleId);
+    const firstCount = this.getCountByTimeWindow(firstStatus, monitor.timeWindow);
+    const secondCount = this.getCountByTimeWindow(secondStatus, monitor.timeWindow);
+
     // Build funnel steps status
     const funnelSteps: FunnelStepStatus[] = [];
-    const firstCount = state?.firstCount || 0;
-    const secondCount = state?.secondCount || 0;
 
     // Step 1 (first rule)
     funnelSteps.push({
@@ -189,19 +194,12 @@ export class RatioMonitorService {
       state: calculateRatioState(step2Ratio, monitor.thresholdPercent),
     });
 
-    // Additional steps (step 3+)
-    let stepsData: { ruleId: string; count: number }[] = [];
-    try {
-      stepsData = JSON.parse(state?.stepsData || '[]');
-    } catch {
-      stepsData = [];
-    }
-
+    // Additional steps (step 3+) - read real-time counts from signal states
     let prevCount = secondCount;
     for (const step of monitor.steps || []) {
       const stepRule = this.ruleRepo.getById(step.ruleId);
-      const stepData = stepsData.find((s) => s.ruleId === step.ruleId);
-      const stepCount = stepData?.count || 0;
+      const stepStatus = this.stateRepo.getByRuleId(step.ruleId);
+      const stepCount = this.getCountByTimeWindow(stepStatus, monitor.timeWindow);
       const ratioToFirst = calculateRatio(firstCount, stepCount);
       const ratioToPrevious = calculateRatio(prevCount, stepCount);
 

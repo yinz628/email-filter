@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run --outdir=dist",
+    "build": "echo 'Skipping worker-api build (use deploy for Cloudflare)'",
+    "build:cf": "wrangler deploy --dry-run --outdir=dist",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

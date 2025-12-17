@@ -241,10 +241,7 @@ export class RatioMonitorService {
     let alertsTriggered = 0;
 
     for (const monitor of monitors) {
-      const alertTriggered = this.checkMonitor(monitor);
-      if (alertTriggered) {
-        alertsTriggered++;
-      }
+      alertsTriggered += this.checkMonitor(monitor);
     }
 
     return { monitorsChecked: monitors.length, alertsTriggered };
@@ -252,12 +249,14 @@ export class RatioMonitorService {
 
   /**
    * Check a single ratio monitor and update state
-   * Returns true if an alert was triggered
+   * Returns number of alerts triggered
    */
-  private checkMonitor(monitor: RatioMonitor): boolean {
+  private checkMonitor(monitor: RatioMonitor): number {
     // Get counts from signal states based on time window
     const firstStatus = this.stateRepo.getByRuleId(monitor.firstRuleId);
     const secondStatus = this.stateRepo.getByRuleId(monitor.secondRuleId);
+    const firstRule = this.ruleRepo.getById(monitor.firstRuleId);
+    const secondRule = this.ruleRepo.getById(monitor.secondRuleId);
 
     // Get counts based on time window
     const firstCount = this.getCountByTimeWindow(firstStatus, monitor.timeWindow);
@@ -266,31 +265,128 @@ export class RatioMonitorService {
     // Calculate ratio for step 1->2
     const currentRatio = calculateRatio(firstCount, secondCount);
 
-    // Collect additional steps data
-    const stepsData: { ruleId: string; count: number }[] = [];
-    let overallState: RatioState = calculateRatioState(currentRatio, monitor.thresholdPercent);
+    // Get previous steps states from stored data
+    const previousStateRecord = this.ratioRepo.getState(monitor.id);
+    let previousStepsStates: Record<string, RatioState> = {};
+    try {
+      previousStepsStates = JSON.parse(previousStateRecord?.stepsData || '{}');
+      // Handle old format (array)
+      if (Array.isArray(previousStepsStates)) {
+        previousStepsStates = {};
+      }
+    } catch {
+      previousStepsStates = {};
+    }
+
+    // Collect steps data with states
+    const stepsData: Record<string, { count: number; state: RatioState }> = {};
+    let overallState: RatioState = 'HEALTHY';
+    let alertsTriggered = 0;
+
+    // Check step 1->2 (main threshold)
+    const step2State = calculateRatioState(currentRatio, monitor.thresholdPercent);
+    const step2Key = `step_1_2`;
+    const prevStep2State = previousStepsStates[step2Key] || 'HEALTHY';
+    stepsData[step2Key] = { count: secondCount, state: step2State };
+
+    if (step2State === 'LOW') {
+      overallState = 'LOW';
+    }
+
+    // Check if step 1->2 state changed
+    if (prevStep2State !== step2State) {
+      const alertType: RatioAlertType = step2State === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
+      const message = this.buildStepAlertMessage(
+        monitor,
+        alertType,
+        1,
+        2,
+        firstRule?.name || 'Step 1',
+        secondRule?.name || 'Step 2',
+        firstCount,
+        secondCount,
+        currentRatio,
+        monitor.thresholdPercent
+      );
+
+      const alert = this.ratioAlertRepo.create({
+        monitorId: monitor.id,
+        alertType,
+        previousState: prevStep2State,
+        currentState: step2State,
+        firstCount,
+        secondCount,
+        currentRatio,
+        message,
+      });
+
+      this.sendTelegramNotification(monitor, alert).catch((err) => {
+        console.error('Failed to send Telegram notification:', err);
+      });
+      alertsTriggered++;
+    }
 
     // Check additional steps
+    let prevCount = secondCount;
+    let prevStepName = secondRule?.name || 'Step 2';
+    let prevStepOrder = 2;
+
     for (const step of monitor.steps || []) {
       const stepStatus = this.stateRepo.getByRuleId(step.ruleId);
+      const stepRule = this.ruleRepo.getById(step.ruleId);
       const stepCount = this.getCountByTimeWindow(stepStatus, monitor.timeWindow);
-      stepsData.push({ ruleId: step.ruleId, count: stepCount });
 
-      // Calculate ratio to first step
-      const stepRatio = calculateRatio(firstCount, stepCount);
+      // Calculate ratio to previous step
+      const stepRatio = calculateRatio(prevCount, stepCount);
       const stepState = calculateRatioState(stepRatio, step.thresholdPercent);
+      const stepKey = `step_${prevStepOrder}_${step.order}`;
+      const prevStepState = previousStepsStates[stepKey] || 'HEALTHY';
 
-      // If any step is LOW, overall state is LOW
+      stepsData[stepKey] = { count: stepCount, state: stepState };
+
       if (stepState === 'LOW') {
         overallState = 'LOW';
       }
+
+      // Check if this step's state changed
+      if (prevStepState !== stepState) {
+        const alertType: RatioAlertType = stepState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
+        const message = this.buildStepAlertMessage(
+          monitor,
+          alertType,
+          prevStepOrder,
+          step.order,
+          prevStepName,
+          stepRule?.name || `Step ${step.order}`,
+          prevCount,
+          stepCount,
+          stepRatio,
+          step.thresholdPercent
+        );
+
+        const alert = this.ratioAlertRepo.create({
+          monitorId: monitor.id,
+          alertType,
+          previousState: prevStepState,
+          currentState: stepState,
+          firstCount: prevCount,
+          secondCount: stepCount,
+          currentRatio: stepRatio,
+          message,
+        });
+
+        this.sendTelegramNotification(monitor, alert).catch((err) => {
+          console.error('Failed to send Telegram notification:', err);
+        });
+        alertsTriggered++;
+      }
+
+      prevCount = stepCount;
+      prevStepName = stepRule?.name || `Step ${step.order}`;
+      prevStepOrder = step.order;
     }
 
-    // Get previous state
-    const previousStateRecord = this.ratioRepo.getState(monitor.id);
-    const previousState: RatioState = (previousStateRecord?.state as RatioState) || 'HEALTHY';
-
-    // Update state with steps data
+    // Update state with steps data (new format with states)
     this.ratioRepo.updateState(
       monitor.id,
       overallState,
@@ -300,31 +396,30 @@ export class RatioMonitorService {
       JSON.stringify(stepsData)
     );
 
-    // Check if alert should be triggered
-    if (previousState !== overallState) {
-      const alertType: RatioAlertType = overallState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
-      const message = this.buildAlertMessage(monitor, alertType, firstCount, secondCount, currentRatio);
+    return alertsTriggered;
+  }
 
-      const alert = this.ratioAlertRepo.create({
-        monitorId: monitor.id,
-        alertType,
-        previousState,
-        currentState: overallState,
-        firstCount,
-        secondCount,
-        currentRatio,
-        message,
-      });
-
-      // Send Telegram notification
-      this.sendTelegramNotification(monitor, alert).catch((err) => {
-        console.error('Failed to send Telegram notification:', err);
-      });
-
-      return true;
+  /**
+   * Build alert message for a specific step transition
+   */
+  private buildStepAlertMessage(
+    monitor: RatioMonitor,
+    alertType: RatioAlertType,
+    fromStepOrder: number,
+    toStepOrder: number,
+    fromStepName: string,
+    toStepName: string,
+    fromCount: number,
+    toCount: number,
+    ratio: number,
+    threshold: number
+  ): string {
+    const stepInfo = `步骤${fromStepOrder}→${toStepOrder} (${fromStepName} → ${toStepName})`;
+    if (alertType === 'RATIO_LOW') {
+      return `[比例告警] ${monitor.name}\n${stepInfo}\n比例 ${ratio.toFixed(1)}% 低于阈值 ${threshold}% (${toCount}/${fromCount})`;
+    } else {
+      return `[比例恢复] ${monitor.name}\n${stepInfo}\n比例 ${ratio.toFixed(1)}% 已恢复到阈值 ${threshold}% 以上 (${toCount}/${fromCount})`;
     }
-
-    return false;
   }
 
   /**
@@ -386,19 +481,7 @@ export class RatioMonitorService {
     }
   }
 
-  private buildAlertMessage(
-    monitor: RatioMonitor,
-    alertType: RatioAlertType,
-    firstCount: number,
-    secondCount: number,
-    currentRatio: number
-  ): string {
-    if (alertType === 'RATIO_LOW') {
-      return `[比例告警] ${monitor.name}: 比例 ${currentRatio.toFixed(1)}% 低于阈值 ${monitor.thresholdPercent}% (${secondCount}/${firstCount})`;
-    } else {
-      return `[比例恢复] ${monitor.name}: 比例 ${currentRatio.toFixed(1)}% 已恢复到阈值 ${monitor.thresholdPercent}% 以上 (${secondCount}/${firstCount})`;
-    }
-  }
+
 
   /**
    * Get all unique tags

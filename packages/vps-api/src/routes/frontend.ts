@@ -3414,7 +3414,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         
         // Build funnel visualization
         const funnelSteps = status?.funnelSteps || [];
-        let funnelHtml = '<div style="display:flex;flex-direction:column;gap:8px;margin:15px 0;">';
+        let funnelHtml = '<div style="display:flex;flex-direction:column;gap:4px;margin:15px 0;">';
+        
+        // Get thresholds for each step
+        const stepThresholds = [100, r.thresholdPercent]; // Step 1 is base (100%), Step 2 uses main threshold
+        (r.steps || []).forEach(s => stepThresholds.push(s.thresholdPercent));
         
         if (funnelSteps.length > 0) {
           const maxCount = Math.max(...funnelSteps.map(s => s.count), 1);
@@ -3423,6 +3427,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             const stepStateIcon = step.state === 'HEALTHY' ? '🟢' : '🔴';
             const bgColor = step.state === 'HEALTHY' ? '#d4edda' : '#f8d7da';
             const borderColor = step.state === 'HEALTHY' ? '#28a745' : '#dc3545';
+            const threshold = stepThresholds[idx] || 80;
+            
             funnelHtml += '<div style="display:flex;align-items:center;gap:10px;">' +
               '<div style="width:30px;text-align:center;font-weight:bold;color:#666;">' + step.order + '</div>' +
               '<div style="flex:1;position:relative;">' +
@@ -3438,9 +3444,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 '</div>' +
               '</div>' +
             '</div>';
-            // Add arrow between steps
+            // Add arrow with threshold between steps
             if (idx < funnelSteps.length - 1) {
-              funnelHtml += '<div style="margin-left:30px;padding-left:20px;color:#999;">↓</div>';
+              const nextThreshold = stepThresholds[idx + 1] || 80;
+              const nextStepState = funnelSteps[idx + 1]?.state || 'HEALTHY';
+              const thresholdColor = nextStepState === 'HEALTHY' ? '#28a745' : '#dc3545';
+              funnelHtml += '<div style="margin-left:30px;padding-left:20px;display:flex;align-items:center;gap:8px;">' +
+                '<span style="color:#999;">↓</span>' +
+                '<span style="font-size:11px;padding:2px 6px;background:' + (nextStepState === 'HEALTHY' ? '#e8f5e9' : '#ffebee') + ';color:' + thresholdColor + ';border-radius:3px;border:1px solid ' + thresholdColor + ';">阈值: ' + nextThreshold + '%</span>' +
+              '</div>';
             }
           });
         } else {

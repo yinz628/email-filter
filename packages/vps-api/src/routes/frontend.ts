@@ -397,6 +397,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-danger" onclick="cleanupIgnoredData()">🗑️ 清理已忽略商户数据</button>
           <div style="display:flex;gap:5px;align-items:center;">
             <select id="pending-cleanup-days" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="1">1天前</option>
+              <option value="3">3天前</option>
               <option value="7">7天前</option>
               <option value="14">14天前</option>
               <option value="30" selected>30天前</option>

@@ -1790,25 +1790,30 @@ export class CampaignAnalyticsService {
     const rootCampaigns = this.getRootCampaigns(merchantId);
     const userStats = this.getUserTypeStats(merchantId);
     const coverage = this.getCampaignCoverage(merchantId);
-    const levels = this.calculateDAGLevels(merchantId);
     
-    // Get transitions for new users
+    // Get transitions for new users - this determines the actual path graph
     const newUserTransitions = this.getNewUserTransitions(merchantId);
+    
+    // Calculate levels based on new user transitions only
+    const newUserLevels = this.calculateNewUserDAGLevels(merchantId);
     
     // Get valuable campaigns analysis
     const valuableAnalysis = this.getValuableCampaignsAnalysis(merchantId);
 
-    // Build level stats
-    const levelStats: CampaignLevelStats[] = coverage.map(c => ({
-      campaignId: c.campaignId,
-      subject: c.subject,
-      tag: c.tag,
-      isValuable: c.isValuable,
-      level: c.level,
-      isRoot: rootCampaigns.some(r => r.campaignId === c.campaignId && r.isConfirmed),
-      userCount: c.newUserCount,
-      coverage: c.newUserCoverage,
-    }));
+    // Build level stats - ONLY include campaigns that new users actually received
+    // Filter out campaigns with 0 new users (these are only received by old users)
+    const levelStats: CampaignLevelStats[] = coverage
+      .filter(c => c.newUserCount > 0) // Only campaigns received by new users
+      .map(c => ({
+        campaignId: c.campaignId,
+        subject: c.subject,
+        tag: c.tag,
+        isValuable: c.isValuable,
+        level: newUserLevels.get(c.campaignId) || 1,
+        isRoot: rootCampaigns.some(r => r.campaignId === c.campaignId && r.isConfirmed),
+        userCount: c.newUserCount,
+        coverage: c.newUserCoverage,
+      }));
 
     // Sort by level, then by coverage
     levelStats.sort((a, b) => {
@@ -1830,5 +1835,82 @@ export class CampaignAnalyticsService {
       valuableAnalysis: valuableAnalysis.valuableCampaigns,
       oldUserStats,
     };
+  }
+
+  /**
+   * Calculate DAG levels based on new user transitions only
+   * Root campaigns (confirmed) are always Level 1
+   * Other campaigns get levels based on their position in new user paths
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Map of campaignId to level
+   */
+  private calculateNewUserDAGLevels(merchantId: string): Map<string, number> {
+    // Get confirmed root campaigns - these are always Level 1
+    const rootCampaigns = this.db.prepare(`
+      SELECT id FROM campaigns WHERE merchant_id = ? AND is_root = 1
+    `).all(merchantId) as Array<{ id: string }>;
+    const rootIds = new Set(rootCampaigns.map(r => r.id));
+
+    // Get new user transitions
+    const transitions = this.getNewUserTransitions(merchantId);
+    
+    // Build adjacency list
+    const outEdges = new Map<string, string[]>();
+    const allCampaigns = new Set<string>();
+
+    for (const t of transitions.transitions) {
+      allCampaigns.add(t.fromCampaignId);
+      allCampaigns.add(t.toCampaignId);
+
+      if (!outEdges.has(t.fromCampaignId)) outEdges.set(t.fromCampaignId, []);
+      outEdges.get(t.fromCampaignId)!.push(t.toCampaignId);
+    }
+
+    // BFS from root campaigns
+    const levels = new Map<string, number>();
+    const queue: string[] = [];
+
+    // Start with root campaigns at Level 1
+    for (const rootId of rootIds) {
+      if (allCampaigns.has(rootId)) {
+        levels.set(rootId, 1);
+        queue.push(rootId);
+      }
+    }
+
+    // If no root campaigns, find campaigns with no incoming edges
+    if (queue.length === 0) {
+      const hasIncoming = new Set<string>();
+      for (const t of transitions.transitions) {
+        hasIncoming.add(t.toCampaignId);
+      }
+      for (const campaignId of allCampaigns) {
+        if (!hasIncoming.has(campaignId)) {
+          levels.set(campaignId, 1);
+          queue.push(campaignId);
+        }
+      }
+    }
+
+    // BFS to assign levels
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const currentLevel = levels.get(current) || 1;
+      const neighbors = outEdges.get(current) || [];
+
+      for (const neighbor of neighbors) {
+        const existingLevel = levels.get(neighbor);
+        const newLevel = currentLevel + 1;
+        
+        // Only update if we haven't visited or found a shorter path
+        if (existingLevel === undefined || newLevel < existingLevel) {
+          levels.set(neighbor, newLevel);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    return levels;
   }
 }

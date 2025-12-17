@@ -150,6 +150,9 @@ async function cacheMonitoringHit(
 }
 
 /**
+ * @deprecated Monitoring is now handled by VPS API in the main webhook endpoint.
+ * This function is kept for backward compatibility and cache sync purposes.
+ * 
  * Send email hit to monitoring API for real-time signal tracking
  * If the API is unavailable, caches the hit for later sync
  * This is fire-and-forget - errors are logged but don't block email flow
@@ -292,6 +295,9 @@ export async function syncCachedMonitoringHits(env: Env): Promise<{ synced: numb
 }
 
 /**
+ * @deprecated Campaign tracking is now handled by VPS API in the main webhook endpoint.
+ * This function is kept for backward compatibility only.
+ * 
  * Track email for campaign analytics
  * Sends email metadata to VPS API for campaign tracking
  * This is fire-and-forget - errors are logged but don't block email flow
@@ -489,7 +495,6 @@ export default {
     const to = message.to;
     const subject = message.headers.get('subject') || '';
     const messageId = message.headers.get('message-id') || crypto.randomUUID();
-    const receivedAt = new Date().toISOString();
 
     debugLog(env, `[DEBUG] ========== Email Received ==========`);
     debugLog(env, `[DEBUG] From: ${from}`);
@@ -507,27 +512,8 @@ export default {
       workerName: env.WORKER_NAME,
     };
 
-    // Track email for campaign analytics asynchronously (fire-and-forget)
-    // Uses ctx.waitUntil to ensure the tracking completes even after response is sent
-    // Requirements: 8.1, 8.3
-    const campaignPayload: CampaignTrackPayload = {
-      sender: from,
-      subject,
-      recipient: to,
-      receivedAt,
-    };
-    ctx.waitUntil(trackCampaignEmail(campaignPayload, env));
-
-    // Send email hit to monitoring API for real-time signal tracking
-    // Uses ctx.waitUntil to ensure the call completes even after response is sent
-    // Requirements: 8.1, 8.2
-    const monitoringPayload: MonitoringHitPayload = {
-      sender: from,
-      subject,
-      recipient: to,
-      receivedAt,
-    };
-    ctx.waitUntil(trackMonitoringHit(monitoringPayload, env));
+    // Campaign analytics and signal monitoring are now handled by VPS API
+    // in the main webhook endpoint, eliminating redundant API calls
 
     // Get filter decision from VPS API
     const decision = await getFilterDecision(payload, env);

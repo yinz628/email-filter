@@ -12,6 +12,7 @@ import { matchesRuleWebhook } from '@email-filter/shared';
 import { EmailService } from '../services/email.service.js';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { CampaignAnalyticsService } from '../services/campaign-analytics.service.js';
+import { HitProcessor } from '../services/monitoring/index.js';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { WorkerRepository } from '../db/worker-repository.js';
@@ -136,6 +137,20 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       } catch (analyticsError) {
         // Don't fail the webhook if analytics tracking fails
         request.log.warn(analyticsError, 'Failed to track email for campaign analytics');
+      }
+
+      // Track email for signal monitoring (regardless of filter result)
+      try {
+        const hitProcessor = new HitProcessor(db);
+        hitProcessor.processEmail({
+          sender: payload.from,
+          subject: payload.subject,
+          recipient: payload.to,
+          receivedAt: new Date(payload.timestamp).toISOString(),
+        });
+      } catch (monitoringError) {
+        // Don't fail the webhook if monitoring tracking fails
+        request.log.warn(monitoringError, 'Failed to track email for signal monitoring');
       }
 
       // Return the filter decision

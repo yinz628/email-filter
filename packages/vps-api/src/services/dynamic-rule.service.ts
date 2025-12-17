@@ -111,12 +111,62 @@ export class DynamicRuleService {
   }
 
   /**
+   * Common email subject prefixes to strip for better grouping
+   */
+  private static readonly SUBJECT_PREFIXES = [
+    // Urgency prefixes
+    /^don'?t miss( out)?[!:]?\s*/i,
+    /^trending[!:]?\s*/i,
+    /^hot[!:]?\s*/i,
+    /^new[!:]?\s*/i,
+    /^breaking[!:]?\s*/i,
+    /^urgent[!:]?\s*/i,
+    /^important[!:]?\s*/i,
+    /^reminder[!:]?\s*/i,
+    /^last chance[!:]?\s*/i,
+    /^final[!:]?\s*/i,
+    /^limited time[!:]?\s*/i,
+    /^act now[!:]?\s*/i,
+    /^hurry[!:]?\s*/i,
+    // Reply/Forward prefixes
+    /^re:\s*/i,
+    /^fw:\s*/i,
+    /^fwd:\s*/i,
+    // Marketing prefixes
+    /^sale[!:]?\s*/i,
+    /^flash sale[!:]?\s*/i,
+    /^exclusive[!:]?\s*/i,
+    /^special[!:]?\s*/i,
+    /^\[.*?\]\s*/,  // [Newsletter], [Update], etc.
+    /^【.*?】\s*/,   // Chinese brackets
+  ];
+
+  /**
+   * Normalize subject by removing common prefixes
+   * This helps group similar subjects together
+   */
+  private normalizeSubject(subject: string): string {
+    let normalized = subject.trim();
+    
+    // Apply prefix removal multiple times (for chained prefixes like "RE: Don't miss!")
+    for (let i = 0; i < 3; i++) {
+      const before = normalized;
+      for (const prefix of DynamicRuleService.SUBJECT_PREFIXES) {
+        normalized = normalized.replace(prefix, '');
+      }
+      if (normalized === before) break;
+    }
+    
+    return normalized.trim();
+  }
+
+  /**
    * Generate a hash for a subject string
    * Used for efficient grouping and lookup
    */
   private hashSubject(subject: string): string {
-    // Simple hash using the subject normalized (lowercase, trimmed)
-    const normalized = subject.toLowerCase().trim();
+    // Normalize subject before hashing to group similar subjects
+    const normalized = this.normalizeSubject(subject).toLowerCase();
     // Use a simple string hash
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
@@ -165,20 +215,23 @@ export class DynamicRuleService {
 
     // Requirements 6.1: If threshold exceeded, create dynamic rule
     if (count >= config.thresholdCount) {
+      // Use normalized subject for rule pattern (removes common prefixes)
+      const normalizedSubject = this.normalizeSubject(subject);
+      
       // Check if a dynamic rule for this subject already exists
-      const existingRule = this.findDynamicRuleBySubject(subject);
+      const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
       if (existingRule) {
         // Update lastHitAt for existing rule
         this.ruleRepository.updateLastHit(existingRule.id);
         return existingRule;
       }
 
-      // Create new dynamic rule
+      // Create new dynamic rule with normalized subject
       const ruleDto: CreateRuleDTO = {
         category: 'dynamic',
         matchType: 'subject',
         matchMode: 'contains',
-        pattern: subject,
+        pattern: normalizedSubject,
         enabled: true,
       };
 

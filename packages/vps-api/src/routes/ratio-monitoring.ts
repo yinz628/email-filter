@@ -198,6 +198,7 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
       const result = service.checkAll();
       return reply.send(result);
     } catch (error) {
+      console.error('[Ratio Check Error]', error);
       const message = error instanceof Error ? error.message : 'Unknown error';
       return reply.status(500).send({ error: message });
     }

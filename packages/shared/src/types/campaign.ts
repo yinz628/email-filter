@@ -44,6 +44,23 @@ export const CampaignTagColors: Record<CampaignTag, { bg: string; text: string; 
 // ============================================
 
 /**
+ * Merchant analysis status
+ * pending = 等待分析 (新发现的商户默认状态)
+ * active = 需要分析 (用户确认需要进行营销分析)
+ * ignored = 忽略 (不需要进行营销分析)
+ */
+export type MerchantAnalysisStatus = 'pending' | 'active' | 'ignored';
+
+/**
+ * Merchant analysis status labels
+ */
+export const MerchantAnalysisStatusLabels: Record<MerchantAnalysisStatus, string> = {
+  pending: '等待分析',
+  active: '分析中',
+  ignored: '已忽略',
+};
+
+/**
  * Merchant entity - represents a sender domain
  */
 export interface Merchant {
@@ -51,6 +68,7 @@ export interface Merchant {
   domain: string;
   displayName?: string;
   note?: string;
+  analysisStatus: MerchantAnalysisStatus; // 分析状态
   totalCampaigns: number;
   valuableCampaigns: number; // Count of campaigns with tag 1 or 2
   totalEmails: number;
@@ -434,10 +452,18 @@ export interface CampaignFilter {
  * Filter options for querying merchants
  */
 export interface MerchantFilter {
+  analysisStatus?: MerchantAnalysisStatus; // Filter by analysis status
   sortBy?: 'domain' | 'totalCampaigns' | 'totalEmails' | 'createdAt';
   sortOrder?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+}
+
+/**
+ * DTO for setting merchant analysis status
+ */
+export interface SetMerchantAnalysisStatusDTO {
+  status: MerchantAnalysisStatus;
 }
 
 // ============================================
@@ -452,6 +478,7 @@ export interface MerchantRow {
   domain: string;
   display_name: string | null;
   note: string | null;
+  analysis_status: string | null; // pending, active, ignored
   total_campaigns: number;
   valuable_campaigns: number;
   total_emails: number;
@@ -519,6 +546,7 @@ export function toMerchant(row: MerchantRow): Merchant {
     domain: row.domain,
     displayName: row.display_name ?? undefined,
     note: row.note ?? undefined,
+    analysisStatus: (row.analysis_status as MerchantAnalysisStatus) || 'pending',
     totalCampaigns: row.total_campaigns,
     valuableCampaigns: row.valuable_campaigns ?? 0,
     totalEmails: row.total_emails,

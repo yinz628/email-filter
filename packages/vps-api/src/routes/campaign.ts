@@ -15,6 +15,8 @@ import type {
   TrackEmailBatchDTO,
   CampaignFilter,
   MerchantFilter,
+  MerchantAnalysisStatus,
+  SetMerchantAnalysisStatusDTO,
 } from '@email-filter/shared';
 import { CampaignAnalyticsService } from '../services/campaign-analytics.service.js';
 import { getDatabase } from '../db/index.js';
@@ -200,6 +202,7 @@ interface RecipientParams {
 }
 
 interface GetMerchantsQuery {
+  analysisStatus?: string;
   sortBy?: string;
   sortOrder?: string;
   limit?: string;
@@ -252,9 +255,12 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const { sortBy, sortOrder, limit, offset } = request.query;
+      const { analysisStatus, sortBy, sortOrder, limit, offset } = request.query;
       const filter: MerchantFilter = {};
 
+      if (analysisStatus && ['pending', 'active', 'ignored'].includes(analysisStatus)) {
+        filter.analysisStatus = analysisStatus as MerchantAnalysisStatus;
+      }
       if (sortBy && ['domain', 'totalCampaigns', 'totalEmails', 'createdAt'].includes(sortBy)) {
         filter.sortBy = sortBy as MerchantFilter['sortBy'];
       }
@@ -343,6 +349,42 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send(merchant);
     } catch (error) {
       request.log.error(error, 'Error updating merchant');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/merchants/:id/status
+   * Set merchant analysis status (pending, active, ignored)
+   */
+  fastify.post('/merchants/:id/status', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    const body = request.body as Record<string, unknown>;
+    
+    if (!body?.status || !['pending', 'active', 'ignored'].includes(body.status as string)) {
+      return reply.status(400).send({ 
+        error: 'Invalid request', 
+        message: 'status must be one of: pending, active, ignored' 
+      });
+    }
+
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.setMerchantAnalysisStatus(request.params.id, {
+        status: body.status as MerchantAnalysisStatus,
+      });
+
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      return reply.send(merchant);
+    } catch (error) {
+      request.log.error(error, 'Error setting merchant status');
       return reply.status(500).send({ error: 'Internal error' });
     }
   });

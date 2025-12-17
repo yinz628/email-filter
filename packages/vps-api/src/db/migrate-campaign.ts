@@ -208,5 +208,23 @@ try {
   console.log('New user tracking columns migration skipped (may already exist).');
 }
 
+// Migration: Add analysis_status column to merchants table
+try {
+  const columns = db.prepare("PRAGMA table_info(merchants)").all() as Array<{ name: string }>;
+  const hasAnalysisStatusColumn = columns.some(col => col.name === 'analysis_status');
+  
+  if (!hasAnalysisStatusColumn) {
+    console.log('Adding analysis_status column to merchants table...');
+    db.exec(`
+      ALTER TABLE merchants ADD COLUMN analysis_status TEXT DEFAULT 'pending';
+    `);
+    console.log('analysis_status column added.');
+  } else {
+    console.log('analysis_status column already exists.');
+  }
+} catch (e) {
+  console.log('analysis_status column migration skipped (may already exist).');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

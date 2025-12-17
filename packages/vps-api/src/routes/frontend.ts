@@ -379,8 +379,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
       </div>
       <div class="card">
-        <h2>商户列表</h2>
-        <p style="color:#666;margin-bottom:15px">基于发件人域名自动识别的商户</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+          <h2 style="margin:0;border:none;padding:0;">商户列表</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="merchant-status-filter" onchange="loadMerchants()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部商户</option>
+              <option value="active">分析中</option>
+              <option value="pending">等待分析</option>
+              <option value="ignored">已忽略</option>
+            </select>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">基于发件人域名自动识别的商户。新发现的商户默认为"等待分析"状态。</p>
         <div id="merchants-empty" style="text-align:center;color:#999;padding:40px;">
           暂无数据。当邮件被处理时，系统会自动追踪营销活动。
         </div>
@@ -389,9 +399,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <tr>
               <th>商户域名</th>
               <th>显示名称</th>
+              <th>状态</th>
               <th>营销活动数</th>
               <th>邮件总数</th>
-              <th>创建时间</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -1532,7 +1542,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadMerchants() {
       if (!apiToken) return;
       try {
-        const res = await fetch('/api/campaign/merchants', { headers: getHeaders() });
+        const statusFilter = document.getElementById('merchant-status-filter')?.value || '';
+        let url = '/api/campaign/merchants';
+        if (statusFilter) url += '?analysisStatus=' + statusFilter;
+        
+        const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         merchantsData = data.merchants || [];
@@ -1542,6 +1556,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         console.error('Error loading merchants:', e);
       }
     }
+
+    // Merchant status labels and colors
+    const statusLabels = { pending: '等待分析', active: '分析中', ignored: '已忽略' };
+    const statusColors = {
+      pending: { bg: '#fff3cd', text: '#856404', border: '#ffc107' },
+      active: { bg: '#d4edda', text: '#155724', border: '#28a745' },
+      ignored: { bg: '#f8d7da', text: '#721c24', border: '#dc3545' }
+    };
 
     function renderMerchants() {
       const tbody = document.getElementById('merchants-table');
@@ -1558,19 +1580,49 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tableContainer.style.display = 'table';
       
       tbody.innerHTML = merchantsData.map(m => {
-        const createdAt = new Date(m.createdAt).toLocaleDateString('zh-CN');
+        const status = m.analysisStatus || 'pending';
+        const color = statusColors[status] || statusColors.pending;
+        const statusBadge = '<span style="background:' + color.bg + ';color:' + color.text + ';border:1px solid ' + color.border + ';padding:2px 8px;border-radius:4px;font-size:11px;">' + statusLabels[status] + '</span>';
+        
+        // Show different actions based on status
+        let actions = '';
+        if (status === 'active') {
+          actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">活动</button>' +
+            '<button class="btn btn-sm btn-success" onclick="showPathAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">分析</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
+        } else if (status === 'pending') {
+          actions = '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">开始分析</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
+        } else {
+          actions = '<button class="btn btn-sm btn-primary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">恢复分析</button>';
+        }
+        
         return '<tr>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
           '<td>' + escapeHtml(m.displayName || '-') + '</td>' +
+          '<td>' + statusBadge + '</td>' +
           '<td>' + m.totalCampaigns + '</td>' +
           '<td>' + m.totalEmails + '</td>' +
-          '<td>' + createdAt + '</td>' +
-          '<td class="actions">' +
-            '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">活动</button>' +
-            '<button class="btn btn-sm btn-success" onclick="showPathAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">分析</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="showRootCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">Root</button>' +
-          '</td></tr>';
+          '<td class="actions">' + actions + '</td></tr>';
       }).join('');
+    }
+
+    async function setMerchantStatus(merchantId, status) {
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/status', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ status })
+        });
+        if (res.ok) {
+          showAlert('状态已更新');
+          await loadMerchants();
+        } else {
+          showAlert('操作失败', 'error');
+        }
+      } catch (e) {
+        showAlert('操作失败', 'error');
+      }
     }
 
     async function updateCampaignStats() {

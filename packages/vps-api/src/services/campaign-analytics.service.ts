@@ -45,6 +45,8 @@ import type {
   CampaignCoverage,
   CampaignLevelStats,
   PathAnalysisResult,
+  MerchantAnalysisStatus,
+  SetMerchantAnalysisStatusDTO,
 } from '@email-filter/shared';
 import { toMerchant, toCampaign, ROOT_CAMPAIGN_KEYWORDS } from '@email-filter/shared';
 
@@ -130,6 +132,15 @@ export class CampaignAnalyticsService {
     const column = columnMap[sortBy] || 'm.created_at';
     const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
+    // Build WHERE clause for analysis status filter
+    let whereClause = '';
+    const params: (string | number)[] = [];
+    
+    if (filter?.analysisStatus) {
+      whereClause = 'WHERE m.analysis_status = ?';
+      params.push(filter.analysisStatus);
+    }
+
     // Query merchants with valuable campaigns count calculated from campaigns table
     const stmt = this.db.prepare(`
       SELECT 
@@ -142,12 +153,39 @@ export class CampaignAnalyticsService {
         WHERE is_valuable = 1
         GROUP BY merchant_id
       ) vc ON m.id = vc.merchant_id
+      ${whereClause}
       ORDER BY ${column} ${order}
       LIMIT ? OFFSET ?
     `);
 
-    const rows = stmt.all(limit, offset) as MerchantRow[];
+    params.push(limit, offset);
+    const rows = stmt.all(...params) as MerchantRow[];
     return rows.map(toMerchant);
+  }
+
+  /**
+   * Set merchant analysis status
+   * 
+   * @param id - Merchant ID
+   * @param data - Status data
+   * @returns Updated Merchant or null
+   */
+  setMerchantAnalysisStatus(id: string, data: SetMerchantAnalysisStatusDTO): Merchant | null {
+    const now = new Date().toISOString();
+    
+    const stmt = this.db.prepare(`
+      UPDATE merchants
+      SET analysis_status = ?, updated_at = ?
+      WHERE id = ?
+    `);
+
+    const result = stmt.run(data.status, now, id);
+    
+    if (result.changes === 0) {
+      return null;
+    }
+
+    return this.getMerchantById(id);
   }
 
   /**

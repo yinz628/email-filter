@@ -2017,32 +2017,43 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     // ============================================
 
     async function showPathAnalysis(merchantId, domain) {
+      currentMerchantId = merchantId;
       document.getElementById('flow-title').textContent = '完整路径分析 - ' + domain;
       document.getElementById('campaign-flow-section').style.display = 'block';
       document.getElementById('campaigns-section').style.display = 'none';
+      document.getElementById('flow-container').innerHTML = '<p style="color:#666;text-align:center;">加载中...</p>';
       
       try {
         const res = await fetch('/api/campaign/merchants/' + merchantId + '/path-analysis', { headers: getHeaders() });
-        if (!res.ok) throw new Error('Failed');
         const data = await res.json();
-        renderPathAnalysis(data);
+        if (!res.ok) {
+          document.getElementById('flow-container').innerHTML = '<p style="color:#e74c3c;text-align:center;">加载失败: ' + (data.error || res.status) + '</p>';
+          return;
+        }
+        renderPathAnalysis(data, merchantId);
       } catch (e) {
-        document.getElementById('flow-container').innerHTML = '<p style="color:#999;text-align:center;">加载失败或暂无数据</p>';
+        document.getElementById('flow-container').innerHTML = '<p style="color:#e74c3c;text-align:center;">加载失败: ' + e.message + '</p>';
       }
     }
 
-    function renderPathAnalysis(data) {
+    function renderPathAnalysis(data, merchantId) {
       const container = document.getElementById('flow-container');
       let html = '';
+      
+      // Check if data is valid
+      if (!data || !data.userStats) {
+        container.innerHTML = '<p style="color:#999;text-align:center;">暂无数据</p>';
+        return;
+      }
       
       // User Stats Section
       html += '<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:15px;margin-bottom:15px;">';
       html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#1565c0;">📊 用户统计</h3>';
       html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">';
-      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#1565c0;">' + data.userStats.totalRecipients + '</div><div style="font-size:11px;color:#666;">总收件人</div></div>';
-      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#28a745;">' + data.userStats.newUsers + '</div><div style="font-size:11px;color:#666;">新用户</div></div>';
-      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#ff9800;">' + data.userStats.oldUsers + '</div><div style="font-size:11px;color:#666;">老用户</div></div>';
-      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#9c27b0;">' + data.userStats.newUserPercentage.toFixed(1) + '%</div><div style="font-size:11px;color:#666;">新用户比例</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#1565c0;">' + (data.userStats.totalRecipients || 0) + '</div><div style="font-size:11px;color:#666;">总收件人</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#28a745;">' + (data.userStats.newUsers || 0) + '</div><div style="font-size:11px;color:#666;">新用户</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#ff9800;">' + (data.userStats.oldUsers || 0) + '</div><div style="font-size:11px;color:#666;">老用户</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:24px;font-weight:bold;color:#9c27b0;">' + (data.userStats.newUserPercentage || 0).toFixed(1) + '%</div><div style="font-size:11px;color:#666;">新用户比例</div></div>';
       html += '</div></div>';
       
       // Root Campaigns Section
@@ -2184,7 +2195,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         html += '<div style="background:#fce4ec;border:1px solid #f48fb1;border-radius:8px;padding:15px;margin-bottom:15px;">';
         html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
         html += '<h3 style="margin:0;font-size:14px;color:#c2185b;">👤 老用户活动统计 <span style="font-weight:normal;font-size:12px;color:#999;">(' + data.oldUserStats.length + '个活动)</span></h3>';
-        html += '<button class="btn btn-sm btn-danger" onclick="cleanupOldUserPaths(\\''+merchantId+'\\')">🗑️ 清理老用户路径</button>';
+        html += '<button class="btn btn-sm btn-danger" onclick="cleanupOldUserPaths(\\''+data.merchantId+'\\')">🗑️ 清理老用户路径</button>';
         html += '</div>';
         html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
         html += '<tr style="background:#f8bbd9;"><th style="padding:6px;text-align:left;">活动主题</th><th style="padding:6px;text-align:right;">老用户数</th><th style="padding:6px;text-align:right;">覆盖率</th></tr>';
@@ -2233,8 +2244,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const data = await res.json();
         if (res.ok) {
           showAlert('清理完成！删除了 ' + data.pathsDeleted + ' 条路径记录，影响 ' + data.oldUsersAffected + ' 个老用户', 'success');
-          // Refresh the path analysis view
-          showPathAnalysis(merchantId, '');
+          // Refresh the path analysis view - use currentMerchantId
+          if (currentMerchantId) {
+            showPathAnalysis(currentMerchantId, '');
+          }
         } else {
           showAlert(data.error || '清理失败', 'error');
         }

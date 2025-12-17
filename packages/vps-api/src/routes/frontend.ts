@@ -2182,21 +2182,41 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Old User Stats Section
       if (data.oldUserStats && data.oldUserStats.length > 0) {
         html += '<div style="background:#fce4ec;border:1px solid #f48fb1;border-radius:8px;padding:15px;margin-bottom:15px;">';
-        html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#c2185b;">👤 老用户活动统计</h3>';
+        html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#c2185b;">👤 老用户活动统计 <span style="font-weight:normal;font-size:12px;color:#999;">(' + data.oldUserStats.length + '个活动)</span></h3>';
         html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
         html += '<tr style="background:#f8bbd9;"><th style="padding:6px;text-align:left;">活动主题</th><th style="padding:6px;text-align:right;">老用户数</th><th style="padding:6px;text-align:right;">覆盖率</th></tr>';
-        data.oldUserStats.slice(0, 10).forEach(os => {
-          html += '<tr style="border-bottom:1px solid #eee;">';
+        const initialCount = 10;
+        data.oldUserStats.forEach((os, idx) => {
+          const hidden = idx >= initialCount ? ' class="old-user-hidden" style="display:none;"' : '';
+          html += '<tr' + hidden + ' style="border-bottom:1px solid #eee;">';
           html += '<td style="padding:6px;">' + escapeHtml(os.subject.substring(0, 40)) + '</td>';
           html += '<td style="padding:6px;text-align:right;">' + os.oldUserCount + '</td>';
           html += '<td style="padding:6px;text-align:right;">' + os.oldUserCoverage.toFixed(1) + '%</td>';
           html += '</tr>';
         });
         html += '</table>';
+        if (data.oldUserStats.length > initialCount) {
+          html += '<div style="text-align:center;margin-top:10px;">';
+          html += '<button id="old-user-toggle-btn" class="btn btn-sm btn-secondary" onclick="toggleOldUserStats()">显示更多 (' + (data.oldUserStats.length - initialCount) + ')</button>';
+          html += '</div>';
+        }
         html += '</div>';
       }
       
       container.innerHTML = html;
+    }
+
+    let oldUserStatsExpanded = false;
+    function toggleOldUserStats() {
+      oldUserStatsExpanded = !oldUserStatsExpanded;
+      const hiddenRows = document.querySelectorAll('.old-user-hidden');
+      const btn = document.getElementById('old-user-toggle-btn');
+      hiddenRows.forEach(row => {
+        row.style.display = oldUserStatsExpanded ? 'table-row' : 'none';
+      });
+      if (btn) {
+        btn.textContent = oldUserStatsExpanded ? '收起' : '显示更多 (' + hiddenRows.length + ')';
+      }
     }
 
     // Root Campaign Management

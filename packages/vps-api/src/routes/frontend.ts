@@ -3408,8 +3408,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       let html = displayMonitors.map(r => {
         const status = ratioStatuses.find(s => s.monitorId === r.id);
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
-        const stateIcon = status?.state === 'HEALTHY' ? '🟢' : '🔴';
-        const stateClass = status?.state === 'HEALTHY' ? 'status-enabled' : 'status-disabled';
         const timeWindowText = r.timeWindow === '1h' ? '1小时' : (r.timeWindow === '12h' ? '12小时' : '24小时');
         
         // Build funnel visualization
@@ -3478,7 +3476,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             '<div>' +
               '<strong style="font-size:16px;">' + escapeHtml(r.name) + '</strong>' +
               ' <span class="tag">' + escapeHtml(r.tag) + '</span>' +
-              ' <span class="status ' + stateClass + '">' + stateIcon + ' ' + (status?.state || '-') + '</span>' +
               ' ' + enabledStatus +
             '</div>' +
             '<div class="actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +

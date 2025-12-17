@@ -150,15 +150,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <table>
           <thead>
             <tr>
-              <th style="width:60px;">类型</th>
-              <th style="width:60px;">字段</th>
-              <th style="width:50px;">模式</th>
+              <th style="white-space:nowrap;">类型</th>
+              <th style="white-space:nowrap;">字段</th>
+              <th style="white-space:nowrap;">模式</th>
               <th style="min-width:200px;">规则内容</th>
-              <th style="width:100px;">标签</th>
-              <th style="width:60px;">Worker</th>
-              <th style="width:90px;">最后命中</th>
-              <th style="width:50px;">状态</th>
-              <th style="width:130px;">操作</th>
+              <th>标签</th>
+              <th style="white-space:nowrap;">Worker</th>
+              <th style="white-space:nowrap;">命中</th>
+              <th style="white-space:nowrap;">状态</th>
+              <th style="white-space:nowrap;">操作</th>
             </tr>
           </thead>
           <tbody id="rules-table"></tbody>
@@ -866,14 +866,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
         const tagsHtml = r.tags && r.tags.length > 0 ? r.tags.map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('') : '<span class="text-muted">-</span>';
         const patternDisplay = '<span style="word-break:break-all;white-space:normal;">' + escapeHtml(r.pattern) + '</span>';
-        return '<tr><td>' + cat + '</td><td>' + matchType + '</td><td>' + matchMode + '</td>' +
-          '<td>' + patternDisplay + '</td><td>' + tagsHtml + '</td><td>' + escapeHtml(worker) + '</td>' +
-          '<td class="text-muted">' + lastHit + '</td><td>' + status + '</td>' +
-          '<td class="actions">' +
+        return '<tr><td style="white-space:nowrap;">' + cat + '</td><td style="white-space:nowrap;">' + matchType + '</td><td style="white-space:nowrap;">' + matchMode + '</td>' +
+          '<td>' + patternDisplay + '</td><td>' + tagsHtml + '</td><td style="white-space:nowrap;">' + escapeHtml(worker) + '</td>' +
+          '<td class="text-muted" style="white-space:nowrap;">' + lastHit + '</td><td style="white-space:nowrap;">' + status + '</td>' +
+          '<td><div style="display:flex;flex-direction:column;gap:4px;">' +
             '<button class="btn btn-sm btn-primary" onclick=\\'editRule("' + r.id + '")\\'>编辑</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleRule(\\'' + r.id + '\\')">切换</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteRule(\\'' + r.id + '\\')">删除</button>' +
-          '</td></tr>';
+          '</div></td></tr>';
       }).join('');
     }
 

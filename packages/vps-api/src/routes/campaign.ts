@@ -9,6 +9,8 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type {
   UpdateMerchantDTO,
   MarkValuableDTO,
+  SetCampaignTagDTO,
+  CampaignTag,
   TrackEmailDTO,
   TrackEmailBatchDTO,
   CampaignFilter,
@@ -52,7 +54,7 @@ function validateUpdateMerchant(body: unknown): { valid: boolean; error?: string
 
 
 /**
- * Validate MarkValuableDTO
+ * Validate MarkValuableDTO (legacy)
  */
 function validateMarkValuable(body: unknown): { valid: boolean; error?: string; data?: MarkValuableDTO } {
   if (!body || typeof body !== 'object') {
@@ -67,6 +69,34 @@ function validateMarkValuable(body: unknown): { valid: boolean; error?: string; 
 
   const result: MarkValuableDTO = {
     valuable: data.valuable,
+  };
+
+  if (data.note !== undefined) {
+    if (typeof data.note !== 'string') {
+      return { valid: false, error: 'note must be a string' };
+    }
+    result.note = data.note;
+  }
+
+  return { valid: true, data: result };
+}
+
+/**
+ * Validate SetCampaignTagDTO
+ */
+function validateSetCampaignTag(body: unknown): { valid: boolean; error?: string; data?: SetCampaignTagDTO } {
+  if (!body || typeof body !== 'object') {
+    return { valid: false, error: 'Request body is required' };
+  }
+
+  const data = body as Record<string, unknown>;
+
+  if (typeof data.tag !== 'number' || data.tag < 0 || data.tag > 4) {
+    return { valid: false, error: 'tag must be a number between 0 and 4' };
+  }
+
+  const result: SetCampaignTagDTO = {
+    tag: data.tag as CampaignTag,
   };
 
   if (data.note !== undefined) {
@@ -408,7 +438,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
 
   /**
    * POST /api/campaign/campaigns/:id/valuable
-   * Mark or unmark a campaign as valuable
+   * Mark or unmark a campaign as valuable (legacy endpoint)
    * 
    * Requirements: 3.1, 3.2, 3.5
    */
@@ -433,6 +463,45 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send(campaign);
     } catch (error) {
       request.log.error(error, 'Error marking campaign as valuable');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/campaigns/:id/tag
+   * Set campaign tag (0-4)
+   * 
+   * Tag values:
+   * 0 = 未标记
+   * 1 = 高价值（含折扣码）
+   * 2 = 重要营销
+   * 3 = 一般营销
+   * 4 = 可忽略
+   */
+  fastify.post('/campaigns/:id/tag', async (
+    request: FastifyRequest<{ Params: CampaignParams }>,
+    reply: FastifyReply
+  ) => {
+    const validation = validateSetCampaignTag(request.body);
+    if (!validation.valid || !validation.data) {
+      return reply.status(400).send({ error: 'Invalid request', message: validation.error });
+    }
+
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const campaign = service.setCampaignTag(request.params.id, validation.data);
+      if (!campaign) {
+        return reply.status(404).send({ error: 'Campaign not found' });
+      }
+
+      return reply.send(campaign);
+    } catch (error: any) {
+      if (error.message?.includes('Invalid tag')) {
+        return reply.status(400).send({ error: 'Invalid request', message: error.message });
+      }
+      request.log.error(error, 'Error setting campaign tag');
       return reply.status(500).send({ error: 'Internal error' });
     }
   });

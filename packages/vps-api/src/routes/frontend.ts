@@ -1629,6 +1629,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
+    // Campaign tag labels and colors
+    const tagLabels = {
+      0: '未标记',
+      1: '高价值',
+      2: '重要',
+      3: '一般',
+      4: '可忽略'
+    };
+    const tagColors = {
+      0: { bg: '#f8f9fa', text: '#666', border: '#ddd' },
+      1: { bg: '#d4edda', text: '#155724', border: '#28a745' },
+      2: { bg: '#cce5ff', text: '#004085', border: '#007bff' },
+      3: { bg: '#fff3cd', text: '#856404', border: '#ffc107' },
+      4: { bg: '#f8d7da', text: '#721c24', border: '#dc3545' }
+    };
+
     function renderCampaigns() {
       const tbody = document.getElementById('campaigns-table');
       if (campaignsData.length === 0) {
@@ -1638,31 +1654,37 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       tbody.innerHTML = campaignsData.map(c => {
         const firstSeen = new Date(c.firstSeenAt).toLocaleDateString('zh-CN');
-        const valuableStatus = c.isValuable 
-          ? '<span class="status status-enabled">✓ 有价值</span>' 
-          : '<span class="status status-disabled">未标记</span>';
+        const tag = c.tag || 0;
+        const color = tagColors[tag] || tagColors[0];
+        const tagStatus = '<span style="background:' + color.bg + ';color:' + color.text + ';border:1px solid ' + color.border + ';padding:2px 8px;border-radius:4px;font-size:11px;">' + tagLabels[tag] + '</span>';
         const subjectDisplay = '<span class="text-truncate" title="' + escapeHtml(c.subject) + '">' + escapeHtml(c.subject) + '</span>';
         return '<tr>' +
           '<td>' + subjectDisplay + '</td>' +
           '<td>' + c.totalEmails + '</td>' +
           '<td>' + c.uniqueRecipients + '</td>' +
-          '<td>' + valuableStatus + '</td>' +
+          '<td>' + tagStatus + '</td>' +
           '<td>' + firstSeen + '</td>' +
           '<td class="actions">' +
-            '<button class="btn btn-sm ' + (c.isValuable ? 'btn-secondary' : 'btn-success') + '" onclick="toggleValuable(\\'' + c.id + '\\', ' + !c.isValuable + ')">' + (c.isValuable ? '取消标记' : '标记有价值') + '</button>' +
+            '<select onchange="setCampaignTag(\\'' + c.id + '\\', this.value)" style="padding:4px;border:1px solid #ddd;border-radius:4px;font-size:12px;">' +
+              '<option value="0"' + (tag === 0 ? ' selected' : '') + '>未标记</option>' +
+              '<option value="1"' + (tag === 1 ? ' selected' : '') + '>高价值</option>' +
+              '<option value="2"' + (tag === 2 ? ' selected' : '') + '>重要</option>' +
+              '<option value="3"' + (tag === 3 ? ' selected' : '') + '>一般</option>' +
+              '<option value="4"' + (tag === 4 ? ' selected' : '') + '>可忽略</option>' +
+            '</select>' +
           '</td></tr>';
       }).join('');
     }
 
-    async function toggleValuable(campaignId, valuable) {
+    async function setCampaignTag(campaignId, tag) {
       try {
-        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/valuable', {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/tag', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({ valuable })
+          body: JSON.stringify({ tag: parseInt(tag) })
         });
         if (res.ok) {
-          showAlert(valuable ? '已标记为有价值' : '已取消标记');
+          showAlert('标签已更新');
           await loadCampaigns(currentMerchantId);
           await updateCampaignStats();
         } else {
@@ -1671,6 +1693,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } catch (e) {
         showAlert('操作失败', 'error');
       }
+    }
+
+    // Legacy function for backward compatibility
+    async function toggleValuable(campaignId, valuable) {
+      await setCampaignTag(campaignId, valuable ? 1 : 0);
     }
 
     async function showMerchantFlow(merchantId, domain) {

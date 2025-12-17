@@ -4,6 +4,42 @@
  */
 
 // ============================================
+// Campaign Tag Types (营销活动标签)
+// ============================================
+
+/**
+ * Campaign tag values
+ * 1 = 包含折扣码，高价值活动
+ * 2 = 重要营销活动
+ * 3 = 一般营销活动
+ * 4 = 可忽略的营销活动 (不参与后续分析)
+ * 0 = 未标记
+ */
+export type CampaignTag = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * Campaign tag labels for display
+ */
+export const CampaignTagLabels: Record<CampaignTag, string> = {
+  0: '未标记',
+  1: '高价值（含折扣码）',
+  2: '重要营销',
+  3: '一般营销',
+  4: '可忽略',
+};
+
+/**
+ * Campaign tag colors for UI
+ */
+export const CampaignTagColors: Record<CampaignTag, { bg: string; text: string; border: string }> = {
+  0: { bg: '#f8f9fa', text: '#666', border: '#ddd' },
+  1: { bg: '#d4edda', text: '#155724', border: '#28a745' },
+  2: { bg: '#cce5ff', text: '#004085', border: '#007bff' },
+  3: { bg: '#fff3cd', text: '#856404', border: '#ffc107' },
+  4: { bg: '#f8d7da', text: '#721c24', border: '#dc3545' },
+};
+
+// ============================================
 // Core Entity Types
 // ============================================
 
@@ -16,7 +52,7 @@ export interface Merchant {
   displayName?: string;
   note?: string;
   totalCampaigns: number;
-  valuableCampaigns: number;
+  valuableCampaigns: number; // Count of campaigns with tag 1 or 2
   totalEmails: number;
   createdAt: Date;
   updatedAt: Date;
@@ -29,8 +65,10 @@ export interface Campaign {
   id: string;
   merchantId: string;
   subject: string;
-  isValuable: boolean;
-  valuableNote?: string;
+  tag: CampaignTag; // New: campaign tag (0-4)
+  tagNote?: string; // Note for the tag
+  isValuable: boolean; // Computed: tag === 1 || tag === 2
+  valuableNote?: string; // Deprecated: use tagNote instead
   totalEmails: number;
   uniqueRecipients: number;
   firstSeenAt: Date;
@@ -76,7 +114,8 @@ export interface RecipientPath {
 export interface PathCampaign {
   campaignId: string;
   subject: string;
-  isValuable: boolean;
+  tag: CampaignTag;
+  isValuable: boolean; // Computed: tag === 1 || tag === 2
   sequenceOrder: number;
   firstReceivedAt: Date;
 }
@@ -278,10 +317,18 @@ export interface UpdateMerchantDTO {
 }
 
 /**
- * DTO for marking campaign as valuable
+ * DTO for marking campaign as valuable (deprecated, use SetCampaignTagDTO)
  */
 export interface MarkValuableDTO {
   valuable: boolean;
+  note?: string;
+}
+
+/**
+ * DTO for setting campaign tag
+ */
+export interface SetCampaignTagDTO {
+  tag: CampaignTag;
   note?: string;
 }
 
@@ -295,6 +342,8 @@ export interface MarkValuableDTO {
 export interface CampaignFilter {
   merchantId?: string;
   isValuable?: boolean;
+  tag?: CampaignTag; // Filter by specific tag
+  excludeTag?: CampaignTag; // Exclude campaigns with this tag (e.g., 4 for ignorable)
   sortBy?: 'firstSeenAt' | 'lastSeenAt' | 'totalEmails' | 'uniqueRecipients';
   sortOrder?: 'asc' | 'desc';
   limit?: number;
@@ -338,8 +387,10 @@ export interface CampaignRow {
   merchant_id: string;
   subject: string;
   subject_hash: string;
-  is_valuable: number;
-  valuable_note: string | null;
+  tag: number; // 0-4
+  tag_note: string | null;
+  is_valuable: number; // Deprecated, computed from tag
+  valuable_note: string | null; // Deprecated, use tag_note
   total_emails: number;
   unique_recipients: number;
   first_seen_at: string;
@@ -395,12 +446,15 @@ export function toMerchant(row: MerchantRow): Merchant {
  * Convert CampaignRow to Campaign
  */
 export function toCampaign(row: CampaignRow): Campaign {
+  const tag = (row.tag ?? 0) as CampaignTag;
   return {
     id: row.id,
     merchantId: row.merchant_id,
     subject: row.subject,
-    isValuable: row.is_valuable === 1,
-    valuableNote: row.valuable_note ?? undefined,
+    tag,
+    tagNote: row.tag_note ?? undefined,
+    isValuable: tag === 1 || tag === 2, // High value or important
+    valuableNote: row.valuable_note ?? row.tag_note ?? undefined, // Backward compatibility
     totalEmails: row.total_emails,
     uniqueRecipients: row.unique_recipients,
     firstSeenAt: new Date(row.first_seen_at),

@@ -143,5 +143,31 @@ if (!existingTables.has('recipient_paths')) {
   console.log('recipient_paths table already exists.');
 }
 
+// Migration: Add tag column to campaigns table
+try {
+  const columns = db.prepare("PRAGMA table_info(campaigns)").all() as Array<{ name: string }>;
+  const hasTagColumn = columns.some(col => col.name === 'tag');
+  
+  if (!hasTagColumn) {
+    console.log('Adding tag column to campaigns table...');
+    db.exec(`
+      ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0;
+      ALTER TABLE campaigns ADD COLUMN tag_note TEXT;
+    `);
+    
+    // Migrate existing is_valuable data to tag
+    // is_valuable = 1 -> tag = 1 (high value)
+    db.exec(`
+      UPDATE campaigns SET tag = 1 WHERE is_valuable = 1;
+    `);
+    
+    console.log('tag column added and data migrated.');
+  } else {
+    console.log('tag column already exists.');
+  }
+} catch (e) {
+  console.log('tag column migration skipped (may already exist).');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

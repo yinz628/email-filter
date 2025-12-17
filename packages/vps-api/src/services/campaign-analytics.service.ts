@@ -16,6 +16,8 @@ import type {
   MerchantFilter,
   UpdateMerchantDTO,
   MarkValuableDTO,
+  SetCampaignTagDTO,
+  CampaignTag,
   TrackEmailDTO,
   TrackResult,
   MerchantRow,
@@ -289,9 +291,25 @@ export class CampaignAnalyticsService {
       params.push(filter.merchantId);
     }
 
+    // Filter by specific tag
+    if (filter?.tag !== undefined) {
+      conditions.push('tag = ?');
+      params.push(filter.tag);
+    }
+
+    // Exclude campaigns with specific tag (e.g., 4 for ignorable)
+    if (filter?.excludeTag !== undefined) {
+      conditions.push('(tag IS NULL OR tag != ?)');
+      params.push(filter.excludeTag);
+    }
+
+    // Legacy isValuable filter (tag 1 or 2)
     if (filter?.isValuable !== undefined) {
-      conditions.push('is_valuable = ?');
-      params.push(filter.isValuable ? 1 : 0);
+      if (filter.isValuable) {
+        conditions.push('(tag = 1 OR tag = 2)');
+      } else {
+        conditions.push('(tag IS NULL OR tag = 0 OR tag = 3 OR tag = 4)');
+      }
     }
 
     const whereClause = conditions.length > 0 
@@ -356,7 +374,7 @@ export class CampaignAnalyticsService {
   }
 
   /**
-   * Mark or unmark a campaign as valuable
+   * Mark or unmark a campaign as valuable (legacy method)
    * 
    * @param id - Campaign ID
    * @param data - Mark valuable data (valuable flag and optional note)
@@ -365,6 +383,28 @@ export class CampaignAnalyticsService {
    * Requirements: 3.1, 3.2, 3.5
    */
   markCampaignValuable(id: string, data: MarkValuableDTO): Campaign | null {
+    // Convert to new tag system: valuable = tag 1, not valuable = tag 0
+    return this.setCampaignTag(id, {
+      tag: data.valuable ? 1 : 0,
+      note: data.note,
+    });
+  }
+
+  /**
+   * Set campaign tag
+   * 
+   * @param id - Campaign ID
+   * @param data - Tag data (tag value 0-4 and optional note)
+   * @returns Updated Campaign or null if not found
+   * 
+   * Tag values:
+   * 0 = 未标记
+   * 1 = 高价值（含折扣码）
+   * 2 = 重要营销
+   * 3 = 一般营销
+   * 4 = 可忽略
+   */
+  setCampaignTag(id: string, data: SetCampaignTagDTO): Campaign | null {
     const now = new Date().toISOString();
     
     // Check if campaign exists
@@ -375,17 +415,29 @@ export class CampaignAnalyticsService {
       return null;
     }
 
+    // Validate tag value
+    const tag = data.tag as number;
+    if (tag < 0 || tag > 4) {
+      throw new Error('Invalid tag value. Must be 0-4.');
+    }
+
     const stmt = this.db.prepare(`
       UPDATE campaigns
-      SET is_valuable = ?,
+      SET tag = ?,
+          tag_note = ?,
+          is_valuable = ?,
           valuable_note = ?,
           updated_at = ?
       WHERE id = ?
     `);
 
+    const isValuable = tag === 1 || tag === 2 ? 1 : 0;
+
     stmt.run(
-      data.valuable ? 1 : 0,
-      data.valuable ? (data.note ?? null) : null, // Clear note when unmarking
+      tag,
+      data.note ?? null,
+      isValuable,
+      data.note ?? null, // Keep backward compatibility
       now,
       id
     );
@@ -600,6 +652,7 @@ export class CampaignAnalyticsService {
         rp.sequence_order,
         rp.first_received_at,
         c.subject,
+        c.tag,
         c.is_valuable
       FROM recipient_paths rp
       JOIN campaigns c ON rp.campaign_id = c.id
@@ -612,16 +665,21 @@ export class CampaignAnalyticsService {
       sequence_order: number;
       first_received_at: string;
       subject: string;
+      tag: number;
       is_valuable: number;
     }>;
 
-    const campaigns: PathCampaign[] = rows.map(row => ({
-      campaignId: row.campaign_id,
-      subject: row.subject,
-      isValuable: row.is_valuable === 1,
-      sequenceOrder: row.sequence_order,
-      firstReceivedAt: new Date(row.first_received_at),
-    }));
+    const campaigns: PathCampaign[] = rows.map(row => {
+      const tag = (row.tag ?? 0) as CampaignTag;
+      return {
+        campaignId: row.campaign_id,
+        subject: row.subject,
+        tag,
+        isValuable: tag === 1 || tag === 2,
+        sequenceOrder: row.sequence_order,
+        firstReceivedAt: new Date(row.first_received_at),
+      };
+    });
 
     return {
       merchantId,

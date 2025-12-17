@@ -2761,7 +2761,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         });
         if (res.ok) {
           const data = await res.json();
-          showAlert('心跳检查完成，检查了 ' + data.result.rulesChecked + ' 条规则，' + data.result.alertsTriggered + ' 条告警');
+          showAlert('心跳检查完成，检查了 ' + data.rulesChecked + ' 条规则，' + data.alertsTriggered + ' 条告警');
           loadMonitoringData();
         } else {
           showAlert('心跳检查失败', 'error');

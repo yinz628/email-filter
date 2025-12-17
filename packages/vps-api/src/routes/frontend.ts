@@ -30,6 +30,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .btn-danger:hover { background: #c0392b; }
     .btn-success { background: #27ae60; color: white; }
     .btn-success:hover { background: #219a52; }
+    .btn-warning { background: #ff9800; color: white; }
+    .btn-warning:hover { background: #e68900; }
     .btn-secondary { background: #6c757d; color: white; }
     .btn-secondary:hover { background: #5a6268; }
     .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -1588,6 +1590,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         let actions = '';
         if (status === 'active') {
           actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">活动</button>' +
+            '<button class="btn btn-sm btn-warning" onclick="showRootCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">Root</button>' +
             '<button class="btn btn-sm btn-success" onclick="showPathAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">分析</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
         } else if (status === 'pending') {

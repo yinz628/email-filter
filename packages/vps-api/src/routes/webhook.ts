@@ -11,6 +11,7 @@ import type { EmailWebhookPayload } from '@email-filter/shared';
 import { matchesRuleWebhook } from '@email-filter/shared';
 import { EmailService } from '../services/email.service.js';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
+import { CampaignAnalyticsService } from '../services/campaign-analytics.service.js';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { WorkerRepository } from '../db/worker-repository.js';
@@ -121,6 +122,20 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         if (matched) {
           watchRepo.incrementHit(watchRule.id);
         }
+      }
+
+      // Track email for campaign analytics (regardless of filter result)
+      try {
+        const analyticsService = new CampaignAnalyticsService(db);
+        analyticsService.trackEmailSelective({
+          sender: payload.from,
+          subject: payload.subject,
+          recipient: payload.to,
+          receivedAt: new Date(payload.timestamp).toISOString(),
+        });
+      } catch (analyticsError) {
+        // Don't fail the webhook if analytics tracking fails
+        request.log.warn(analyticsError, 'Failed to track email for campaign analytics');
       }
 
       // Return the filter decision

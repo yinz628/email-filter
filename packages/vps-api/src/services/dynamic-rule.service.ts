@@ -196,16 +196,18 @@ export class DynamicRuleService {
 
   /**
    * Find an existing dynamic rule that matches a subject
-   * Optimized: Direct database query instead of loading all rules
+   * Checks both:
+   * 1. Exact match (pattern === subject)
+   * 2. Contains match (subject contains pattern OR pattern contains subject)
    */
   private findDynamicRuleBySubject(subject: string): FilterRule | null {
     // First try exact match for better performance
-    const stmt = this.db.prepare(
+    const exactStmt = this.db.prepare(
       `SELECT * FROM filter_rules 
        WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
        LIMIT 1`
     );
-    const result = stmt.get(subject) as {
+    const exactResult = exactStmt.get(subject) as {
       id: string;
       category: string;
       match_type: string;
@@ -217,21 +219,70 @@ export class DynamicRuleService {
       last_hit_at: string | null;
     } | undefined;
 
-    if (result) {
-      return {
-        id: result.id,
-        category: result.category as 'dynamic',
-        matchType: result.match_type as FilterRule['matchType'],
-        matchMode: result.match_mode as FilterRule['matchMode'],
-        pattern: result.pattern,
-        enabled: result.enabled === 1,
-        createdAt: new Date(result.created_at),
-        updatedAt: new Date(result.updated_at),
-        lastHitAt: result.last_hit_at ? new Date(result.last_hit_at) : undefined,
-      };
+    if (exactResult) {
+      return this.mapRuleRow(exactResult);
+    }
+
+    // Check if any existing rule's pattern is contained in this subject
+    // or if this subject is contained in any existing rule's pattern
+    const allDynamicStmt = this.db.prepare(
+      `SELECT * FROM filter_rules 
+       WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'`
+    );
+    const allRules = allDynamicStmt.all() as {
+      id: string;
+      category: string;
+      match_type: string;
+      match_mode: string;
+      pattern: string;
+      enabled: number;
+      created_at: string;
+      updated_at: string;
+      last_hit_at: string | null;
+    }[];
+
+    const subjectLower = subject.toLowerCase();
+    for (const rule of allRules) {
+      const patternLower = rule.pattern.toLowerCase();
+      // If existing pattern matches this subject, return that rule
+      if (subjectLower.includes(patternLower)) {
+        return this.mapRuleRow(rule);
+      }
+      // If this subject would be a more specific version, also return existing rule
+      // (e.g., "Don't miss! Sale" contains "Sale", so "Sale" rule already covers it)
+      if (patternLower.includes(subjectLower)) {
+        return this.mapRuleRow(rule);
+      }
     }
 
     return null;
+  }
+
+  /**
+   * Map database row to FilterRule object
+   */
+  private mapRuleRow(row: {
+    id: string;
+    category: string;
+    match_type: string;
+    match_mode: string;
+    pattern: string;
+    enabled: number;
+    created_at: string;
+    updated_at: string;
+    last_hit_at: string | null;
+  }): FilterRule {
+    return {
+      id: row.id,
+      category: row.category as 'dynamic',
+      matchType: row.match_type as FilterRule['matchType'],
+      matchMode: row.match_mode as FilterRule['matchMode'],
+      pattern: row.pattern,
+      enabled: row.enabled === 1,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+      lastHitAt: row.last_hit_at ? new Date(row.last_hit_at) : undefined,
+    };
   }
 
   /**
@@ -280,17 +331,7 @@ export class DynamicRuleService {
       last_hit_at: string | null;
     }[];
 
-    return rows.map(row => ({
-      id: row.id,
-      category: row.category as 'dynamic',
-      matchType: row.match_type as FilterRule['matchType'],
-      matchMode: row.match_mode as FilterRule['matchMode'],
-      pattern: row.pattern,
-      enabled: row.enabled === 1,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-      lastHitAt: row.last_hit_at ? new Date(row.last_hit_at) : undefined,
-    }));
+    return rows.map(row => this.mapRuleRow(row));
   }
 
   /**

@@ -13,54 +13,77 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <title>Email Filter 管理面板</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { font-size: 24px; }
-    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-    .tab { padding: 10px 20px; background: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; font-size: 14px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 16px 24px; margin-bottom: 16px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; background: white; padding: 8px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .tab { padding: 8px 16px; background: transparent; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; color: #666; transition: all 0.2s; }
+    .tab:hover { background: #f0f2f5; color: #333; }
     .tab.active { background: #4a90d9; color: white; }
-    .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 10px; }
-    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+    .card { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card h2 { font-size: 16px; margin-bottom: 12px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 8px; font-weight: 600; }
+    .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px; }
     .btn-primary { background: #4a90d9; color: white; }
+    .btn-primary:hover { background: #3a7bc8; }
     .btn-danger { background: #e74c3c; color: white; }
+    .btn-danger:hover { background: #c0392b; }
     .btn-success { background: #27ae60; color: white; }
-    .btn-secondary { background: #95a5a6; color: white; }
-    .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-success:hover { background: #219a52; }
+    .btn-secondary { background: #6c757d; color: white; }
+    .btn-secondary:hover { background: #5a6268; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .btn-sm { padding: 4px 8px; font-size: 12px; }
-    .form-group { margin-bottom: 15px; }
-    .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: #555; }
-    .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-    .form-group input:focus, .form-group select:focus { outline: none; border-color: #4a90d9; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-    th { background: #f8f9fa; font-weight: 600; color: #555; }
-    .status { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; margin-bottom: 4px; font-weight: 500; color: #555; font-size: 13px; }
+    .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; transition: border-color 0.2s; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.1); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .table-wrapper { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
+    td { color: #333; }
+    tr:hover { background: #f8f9fa; }
+    .status { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
     .status-enabled { background: #d4edda; color: #155724; }
     .status-disabled { background: #f8d7da; color: #721c24; }
-    .category { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+    .category { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
     .category-whitelist { background: #d4edda; color: #155724; }
     .category-blacklist { background: #f8d7da; color: #721c24; }
     .category-dynamic { background: #fff3cd; color: #856404; }
     .hidden { display: none !important; }
-    .actions { display: flex; gap: 8px; }
-    .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-    .modal-content { background: white; padding: 25px; border-radius: 8px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; position: relative; }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-right: 30px; }
-    .modal-header h3 { font-size: 18px; color: #333; }
-    .modal-close { background: #f0f0f0; border: none; font-size: 20px; cursor: pointer; color: #666; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: absolute; top: 15px; right: 15px; z-index: 1001; transition: all 0.2s; }
+    .actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+    .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(2px); }
+    .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 480px; max-height: 85vh; overflow-y: auto; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-right: 30px; }
+    .modal-header h3 { font-size: 16px; color: #333; font-weight: 600; }
+    .modal-close { background: #f0f0f0; border: none; font-size: 18px; cursor: pointer; color: #666; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: absolute; top: 12px; right: 12px; z-index: 1001; transition: all 0.2s; }
     .modal-close:hover { background: #e74c3c; color: white; }
-    .alert { padding: 12px; border-radius: 4px; margin-bottom: 15px; }
-    .alert-success { background: #d4edda; color: #155724; }
-    .alert-error { background: #f8d7da; color: #721c24; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-    .stat-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; }
-    .stat-value { font-size: 32px; font-weight: bold; color: #4a90d9; }
-    .stat-label { color: #666; font-size: 14px; }
-    .filter-bar { display: flex; gap: 10px; margin-bottom: 15px; align-items: center; }
-    .filter-bar select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    .alert { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; animation: slideIn 0.3s ease; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .stat-card { background: linear-gradient(135deg, #f8f9fa 0%, #fff 100%); padding: 16px; border-radius: 8px; text-align: center; border: 1px solid #eee; }
+    .stat-value { font-size: 28px; font-weight: 700; color: #4a90d9; }
+    .stat-label { color: #666; font-size: 12px; margin-top: 4px; }
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+    .filter-bar select, .filter-bar input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    .tag { background: #e9ecef; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 3px; display: inline-block; }
+    .text-muted { color: #999; font-size: 12px; }
+    .text-truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+    @media (max-width: 768px) {
+      .container { padding: 12px; }
+      .header { padding: 12px 16px; }
+      .header h1 { font-size: 16px; }
+      .tabs { gap: 4px; padding: 6px; }
+      .tab { padding: 6px 12px; font-size: 12px; }
+      .card { padding: 12px; }
+      .form-row { grid-template-columns: 1fr; }
+      .actions { flex-wrap: wrap; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
   </style>
 </head>
 <body>
@@ -828,7 +851,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderRules(rules) {
       const tbody = document.getElementById('rules-table');
       if (rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999">暂无规则</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999;padding:30px;">暂无规则</td></tr>';
         return;
       }
       tbody.innerHTML = rules.map(r => {
@@ -838,11 +861,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const worker = r.workerId ? (workers.find(w => w.id === r.workerId)?.name || '未知') : '全局';
         const matchType = {sender:'发件人',subject:'主题',domain:'域名'}[r.matchType] || r.matchType;
         const matchMode = {exact:'精确',contains:'包含',startsWith:'开头',endsWith:'结尾',regex:'正则'}[r.matchMode] || r.matchMode;
-        const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN') : '-';
-        const tagsHtml = r.tags && r.tags.length > 0 ? r.tags.map(t => '<span style="background:#e0e0e0;padding:2px 6px;border-radius:3px;font-size:11px;margin-right:3px;">' + escapeHtml(t) + '</span>').join('') : '-';
+        const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+        const tagsHtml = r.tags && r.tags.length > 0 ? r.tags.map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('') : '<span class="text-muted">-</span>';
+        const patternDisplay = r.pattern.length > 40 ? '<span class="text-truncate" title="' + escapeHtml(r.pattern) + '">' + escapeHtml(r.pattern) + '</span>' : escapeHtml(r.pattern);
         return '<tr><td>' + cat + '</td><td>' + matchType + '</td><td>' + matchMode + '</td>' +
-          '<td>' + escapeHtml(r.pattern) + '</td><td>' + tagsHtml + '</td><td>' + escapeHtml(worker) + '</td>' +
-          '<td style="font-size:12px;color:#666">' + lastHit + '</td><td>' + status + '</td>' +
+          '<td>' + patternDisplay + '</td><td>' + tagsHtml + '</td><td>' + escapeHtml(worker) + '</td>' +
+          '<td class="text-muted">' + lastHit + '</td><td>' + status + '</td>' +
           '<td class="actions">' +
             '<button class="btn btn-sm btn-primary" onclick=\\'editRule("' + r.id + '")\\'>编辑</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="toggleRule(\\'' + r.id + '\\')">切换</button>' +

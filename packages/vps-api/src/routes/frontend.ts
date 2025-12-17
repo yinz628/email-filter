@@ -550,6 +550,38 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <tbody id="monitoring-alerts-table"></tbody>
         </table>
       </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">📈 比例监控</h2>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-secondary" onclick="checkRatioMonitors()">🔄 检查比例</button>
+            <button class="btn btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加比例监控</button>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">监控同一标签下两个规则的邮件数量比例。当比例低于阈值时触发告警。</p>
+        <div class="filter-bar">
+          <select id="ratio-tag-filter" onchange="loadRatioMonitors()">
+            <option value="">全部标签</option>
+          </select>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>标签</th>
+              <th>第一封邮件</th>
+              <th>第二封邮件</th>
+              <th>时间窗口</th>
+              <th>阈值</th>
+              <th>当前比例</th>
+              <th>状态</th>
+              <th>启用</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="ratio-monitors-table"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Settings Tab -->
@@ -871,6 +903,104 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-group">
           <label>标签</label>
           <input type="text" id="edit-monitoring-tags" placeholder="多个标签用逗号分隔">
+        </div>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Ratio Monitor Modal -->
+  <div id="add-ratio-monitor-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>添加比例监控</h3>
+        <button class="modal-close" onclick="hideModal('add-ratio-monitor-modal')">&times;</button>
+      </div>
+      <form id="add-ratio-monitor-form">
+        <div class="form-group">
+          <label>监控名称 *</label>
+          <input type="text" id="ratio-name" required placeholder="例如：注册流程转化率">
+        </div>
+        <div class="form-group">
+          <label>标签 *</label>
+          <input type="text" id="ratio-tag" required placeholder="用于分组，例如：注册流程">
+        </div>
+        <div class="form-group">
+          <label>第一封邮件规则 *</label>
+          <select id="ratio-first-rule" required>
+            <option value="">选择规则...</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">作为分母（基准）</p>
+        </div>
+        <div class="form-group">
+          <label>第二封邮件规则 *</label>
+          <select id="ratio-second-rule" required>
+            <option value="">选择规则...</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">作为分子（比较对象）</p>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>阈值（%）*</label>
+            <input type="number" id="ratio-threshold" required min="0" max="100" value="80" placeholder="80">
+            <p style="color:#888;font-size:12px;margin-top:5px">低于此比例触发告警</p>
+          </div>
+          <div class="form-group">
+            <label>时间窗口 *</label>
+            <select id="ratio-time-window" required>
+              <option value="1h">1小时</option>
+              <option value="12h">12小时</option>
+              <option value="24h" selected>24小时</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-success">创建</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit Ratio Monitor Modal -->
+  <div id="edit-ratio-monitor-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>编辑比例监控</h3>
+        <button class="modal-close" onclick="hideModal('edit-ratio-monitor-modal')">&times;</button>
+      </div>
+      <form id="edit-ratio-monitor-form">
+        <input type="hidden" id="edit-ratio-id">
+        <div class="form-group">
+          <label>监控名称 *</label>
+          <input type="text" id="edit-ratio-name" required>
+        </div>
+        <div class="form-group">
+          <label>标签 *</label>
+          <input type="text" id="edit-ratio-tag" required>
+        </div>
+        <div class="form-group">
+          <label>第一封邮件规则 *</label>
+          <select id="edit-ratio-first-rule" required>
+            <option value="">选择规则...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>第二封邮件规则 *</label>
+          <select id="edit-ratio-second-rule" required>
+            <option value="">选择规则...</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>阈值（%）*</label>
+            <input type="number" id="edit-ratio-threshold" required min="0" max="100">
+          </div>
+          <div class="form-group">
+            <label>时间窗口 *</label>
+            <select id="edit-ratio-time-window" required>
+              <option value="1h">1小时</option>
+              <option value="12h">12小时</option>
+              <option value="24h">24小时</option>
+            </select>
+          </div>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2541,6 +2671,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function loadMonitoringData() {
       await Promise.all([loadMonitoringRules(), loadMonitoringStatus(), loadMonitoringAlerts()]);
+      await loadRatioMonitors();
     }
 
     async function loadMonitoringRules() {
@@ -2813,6 +2944,229 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       } catch (e) {
         showAlert('心跳检查失败', 'error');
+      }
+    }
+
+    // ==================== Ratio Monitor Functions ====================
+    let ratioMonitors = [];
+    let ratioStatuses = [];
+
+    async function loadRatioMonitors() {
+      if (!apiToken) return;
+      try {
+        const tagFilter = document.getElementById('ratio-tag-filter')?.value || '';
+        let url = '/api/monitoring/ratio';
+        if (tagFilter) {
+          url += '?tag=' + encodeURIComponent(tagFilter);
+        }
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        ratioMonitors = data.monitors || [];
+        await loadRatioStatus();
+        renderRatioMonitors();
+        updateRatioTagFilter();
+        updateRatioRuleSelects();
+      } catch (e) {
+        console.error('加载比例监控失败', e);
+      }
+    }
+
+    async function loadRatioStatus() {
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/monitoring/ratio/status', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        ratioStatuses = data.statuses || [];
+      } catch (e) {
+        console.error('加载比例状态失败', e);
+      }
+    }
+
+    function updateRatioTagFilter() {
+      const select = document.getElementById('ratio-tag-filter');
+      if (!select) return;
+      const currentValue = select.value;
+      const allTags = new Set();
+      ratioMonitors.forEach(r => allTags.add(r.tag));
+      const options = ['<option value="">全部标签</option>'];
+      Array.from(allTags).sort().forEach(tag => {
+        options.push('<option value="' + escapeHtml(tag) + '"' + (tag === currentValue ? ' selected' : '') + '>' + escapeHtml(tag) + '</option>');
+      });
+      select.innerHTML = options.join('');
+    }
+
+    function updateRatioRuleSelects() {
+      const options = ['<option value="">选择规则...</option>'];
+      monitoringRules.forEach(r => {
+        options.push('<option value="' + r.id + '">' + escapeHtml(r.merchant + ' - ' + r.name) + '</option>');
+      });
+      const optionsHtml = options.join('');
+      ['ratio-first-rule', 'ratio-second-rule', 'edit-ratio-first-rule', 'edit-ratio-second-rule'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = optionsHtml;
+      });
+    }
+
+    function renderRatioMonitors() {
+      const tbody = document.getElementById('ratio-monitors-table');
+      if (ratioMonitors.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#999">暂无比例监控</td></tr>';
+        return;
+      }
+      tbody.innerHTML = ratioMonitors.map(r => {
+        const status = ratioStatuses.find(s => s.monitorId === r.id);
+        const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
+        const stateIcon = status?.state === 'HEALTHY' ? '🟢' : '🔴';
+        const stateClass = status?.state === 'HEALTHY' ? 'status-enabled' : 'status-disabled';
+        const currentRatio = status ? status.currentRatio.toFixed(1) + '%' : '-';
+        const firstRuleName = status?.firstRuleName || '未知';
+        const secondRuleName = status?.secondRuleName || '未知';
+        const timeWindowText = r.timeWindow === '1h' ? '1小时' : (r.timeWindow === '12h' ? '12小时' : '24小时');
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
+          '<td><span class="tag">' + escapeHtml(r.tag) + '</span></td>' +
+          '<td>' + escapeHtml(firstRuleName) + ' (' + (status?.firstCount || 0) + ')</td>' +
+          '<td>' + escapeHtml(secondRuleName) + ' (' + (status?.secondCount || 0) + ')</td>' +
+          '<td>' + timeWindowText + '</td>' +
+          '<td>' + r.thresholdPercent + '%</td>' +
+          '<td><strong>' + currentRatio + '</strong></td>' +
+          '<td><span class="status ' + stateClass + '">' + stateIcon + ' ' + (status?.state || '-') + '</span></td>' +
+          '<td>' + enabledStatus + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="editRatioMonitor(\\'' + r.id + '\\')">编辑</button>' +
+            '<button class="btn btn-sm btn-' + (r.enabled ? 'warning' : 'success') + '" onclick="toggleRatioMonitor(\\'' + r.id + '\\')">' + (r.enabled ? '禁用' : '启用') + '</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteRatioMonitor(\\'' + r.id + '\\')">删除</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    // Add ratio monitor form
+    document.getElementById('add-ratio-monitor-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = {
+        name: document.getElementById('ratio-name').value,
+        tag: document.getElementById('ratio-tag').value,
+        firstRuleId: document.getElementById('ratio-first-rule').value,
+        secondRuleId: document.getElementById('ratio-second-rule').value,
+        thresholdPercent: parseFloat(document.getElementById('ratio-threshold').value),
+        timeWindow: document.getElementById('ratio-time-window').value,
+        enabled: true
+      };
+      try {
+        const res = await fetch('/api/monitoring/ratio', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          hideModal('add-ratio-monitor-modal');
+          document.getElementById('add-ratio-monitor-form').reset();
+          showAlert('比例监控创建成功');
+          loadRatioMonitors();
+        } else {
+          const err = await res.json();
+          showAlert(err.error || '创建失败', 'error');
+        }
+      } catch (e) {
+        showAlert('创建失败', 'error');
+      }
+    });
+
+    function editRatioMonitor(id) {
+      const monitor = ratioMonitors.find(r => r.id === id);
+      if (!monitor) return;
+      document.getElementById('edit-ratio-id').value = monitor.id;
+      document.getElementById('edit-ratio-name').value = monitor.name;
+      document.getElementById('edit-ratio-tag').value = monitor.tag;
+      document.getElementById('edit-ratio-first-rule').value = monitor.firstRuleId;
+      document.getElementById('edit-ratio-second-rule').value = monitor.secondRuleId;
+      document.getElementById('edit-ratio-threshold').value = monitor.thresholdPercent;
+      document.getElementById('edit-ratio-time-window').value = monitor.timeWindow;
+      showModal('edit-ratio-monitor-modal');
+    }
+
+    document.getElementById('edit-ratio-monitor-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('edit-ratio-id').value;
+      const data = {
+        name: document.getElementById('edit-ratio-name').value,
+        tag: document.getElementById('edit-ratio-tag').value,
+        firstRuleId: document.getElementById('edit-ratio-first-rule').value,
+        secondRuleId: document.getElementById('edit-ratio-second-rule').value,
+        thresholdPercent: parseFloat(document.getElementById('edit-ratio-threshold').value),
+        timeWindow: document.getElementById('edit-ratio-time-window').value
+      };
+      try {
+        const res = await fetch('/api/monitoring/ratio/' + id, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          hideModal('edit-ratio-monitor-modal');
+          showAlert('比例监控更新成功');
+          loadRatioMonitors();
+        } else {
+          const err = await res.json();
+          showAlert(err.error || '更新失败', 'error');
+        }
+      } catch (e) {
+        showAlert('更新失败', 'error');
+      }
+    });
+
+    async function toggleRatioMonitor(id) {
+      const monitor = ratioMonitors.find(r => r.id === id);
+      if (!monitor) return;
+      try {
+        const res = await fetch('/api/monitoring/ratio/' + id, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify({ enabled: !monitor.enabled })
+        });
+        if (res.ok) {
+          loadRatioMonitors();
+        }
+      } catch (e) {
+        showAlert('操作失败', 'error');
+      }
+    }
+
+    async function deleteRatioMonitor(id) {
+      if (!confirm('确定要删除这个比例监控吗？')) return;
+      try {
+        const res = await fetch('/api/monitoring/ratio/' + id, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          showAlert('删除成功');
+          loadRatioMonitors();
+        }
+      } catch (e) {
+        showAlert('删除失败', 'error');
+      }
+    }
+
+    async function checkRatioMonitors() {
+      try {
+        const res = await fetch('/api/monitoring/ratio/check', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('比例检查完成，检查了 ' + data.monitorsChecked + ' 个监控，' + data.alertsTriggered + ' 条告警');
+          loadRatioMonitors();
+        } else {
+          showAlert('比例检查失败', 'error');
+        }
+      } catch (e) {
+        showAlert('比例检查失败', 'error');
       }
     }
 

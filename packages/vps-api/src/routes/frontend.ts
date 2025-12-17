@@ -41,7 +41,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .table-wrapper { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
     th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
     td { color: #333; }
     tr:hover { background: #f8f9fa; }
@@ -146,22 +146,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </select>
           <button class="btn btn-primary" onclick="showModal('add-rule-modal')">+ 添加规则</button>
         </div>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
-              <th>类型</th>
-              <th>匹配字段</th>
-              <th>匹配模式</th>
-              <th>规则内容</th>
-              <th>标签</th>
-              <th>Worker</th>
-              <th>最后命中</th>
-              <th>状态</th>
-              <th>操作</th>
+              <th style="width:60px;">类型</th>
+              <th style="width:60px;">字段</th>
+              <th style="width:50px;">模式</th>
+              <th style="min-width:200px;">规则内容</th>
+              <th style="width:100px;">标签</th>
+              <th style="width:60px;">Worker</th>
+              <th style="width:90px;">最后命中</th>
+              <th style="width:50px;">状态</th>
+              <th style="width:130px;">操作</th>
             </tr>
           </thead>
           <tbody id="rules-table"></tbody>
         </table>
+        </div>
       </div>
     </div>
 
@@ -863,7 +865,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const matchMode = {exact:'精确',contains:'包含',startsWith:'开头',endsWith:'结尾',regex:'正则'}[r.matchMode] || r.matchMode;
         const lastHit = r.lastHitAt ? new Date(r.lastHitAt).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
         const tagsHtml = r.tags && r.tags.length > 0 ? r.tags.map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('') : '<span class="text-muted">-</span>';
-        const patternDisplay = r.pattern.length > 40 ? '<span class="text-truncate" title="' + escapeHtml(r.pattern) + '">' + escapeHtml(r.pattern) + '</span>' : escapeHtml(r.pattern);
+        const patternDisplay = '<span style="word-break:break-all;white-space:normal;">' + escapeHtml(r.pattern) + '</span>';
         return '<tr><td>' + cat + '</td><td>' + matchType + '</td><td>' + matchMode + '</td>' +
           '<td>' + patternDisplay + '</td><td>' + tagsHtml + '</td><td>' + escapeHtml(worker) + '</td>' +
           '<td class="text-muted">' + lastHit + '</td><td>' + status + '</td>' +

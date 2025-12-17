@@ -2078,7 +2078,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const res = await fetch('/api/campaign/merchants/' + merchantId + '/detect-root-candidates', {
           method: 'POST',
-          headers: getHeaders()
+          headers: getHeaders(),
+          body: JSON.stringify({})
         });
         if (res.ok) {
           const data = await res.json();
@@ -2096,7 +2097,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const res = await fetch('/api/campaign/merchants/' + merchantId + '/recalculate-users', {
           method: 'POST',
-          headers: getHeaders()
+          headers: getHeaders(),
+          body: JSON.stringify({})
         });
         if (res.ok) {
           const data = await res.json();

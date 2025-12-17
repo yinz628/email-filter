@@ -2098,25 +2098,82 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       html += '</div>';
       
-      // Transitions Section (New Users Only)
+      // Transitions Section (New Users Only) - Tree View
       html += '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:15px;margin-bottom:15px;">';
       html += '<h3 style="margin:0 0 10px 0;font-size:14px;color:#2e7d32;">🔄 新用户转移路径</h3>';
       if (data.transitions && data.transitions.length > 0) {
-        html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-        html += '<tr style="background:#c8e6c9;"><th style="padding:6px;text-align:left;">来源</th><th style="padding:6px;text-align:center;">→</th><th style="padding:6px;text-align:left;">目标</th><th style="padding:6px;text-align:right;">人数</th><th style="padding:6px;text-align:right;">比例</th></tr>';
-        data.transitions.slice(0, 20).forEach(t => {
-          html += '<tr style="border-bottom:1px solid #eee;">';
-          html += '<td style="padding:6px;">' + escapeHtml(t.fromSubject.substring(0, 25)) + '</td>';
-          html += '<td style="padding:6px;text-align:center;color:#999;">→</td>';
-          html += '<td style="padding:6px;">' + escapeHtml(t.toSubject.substring(0, 25)) + '</td>';
-          html += '<td style="padding:6px;text-align:right;font-weight:bold;">' + t.userCount + '</td>';
-          html += '<td style="padding:6px;text-align:right;color:#666;">' + t.transitionRatio.toFixed(1) + '%</td>';
-          html += '</tr>';
+        // Build tree structure from transitions
+        const transitionMap = {};
+        const allTargets = new Set();
+        
+        data.transitions.forEach(t => {
+          if (!transitionMap[t.fromCampaignId]) {
+            transitionMap[t.fromCampaignId] = {
+              subject: t.fromSubject,
+              children: []
+            };
+          }
+          transitionMap[t.fromCampaignId].children.push({
+            campaignId: t.toCampaignId,
+            subject: t.toSubject,
+            userCount: t.userCount,
+            ratio: t.transitionRatio
+          });
+          allTargets.add(t.toCampaignId);
         });
-        html += '</table>';
-        if (data.transitions.length > 20) {
-          html += '<p style="color:#999;font-size:11px;text-align:center;margin-top:5px;">显示前 20 条</p>';
+        
+        // Find root nodes (nodes that are not targets of any transition)
+        const rootNodes = Object.keys(transitionMap).filter(id => !allTargets.has(id));
+        
+        // If no clear roots, use nodes with most outgoing transitions
+        if (rootNodes.length === 0) {
+          const sortedNodes = Object.entries(transitionMap)
+            .sort((a, b) => b[1].children.length - a[1].children.length);
+          if (sortedNodes.length > 0) rootNodes.push(sortedNodes[0][0]);
         }
+        
+        // Render tree recursively
+        function renderTreeNode(campaignId, depth, maxDepth) {
+          if (depth > maxDepth || !transitionMap[campaignId]) return '';
+          const node = transitionMap[campaignId];
+          let nodeHtml = '';
+          
+          node.children.sort((a, b) => b.userCount - a.userCount).slice(0, 5).forEach((child, idx, arr) => {
+            const isLast = idx === arr.length - 1;
+            const prefix = depth > 0 ? '│'.repeat(depth - 1) + (isLast ? '└' : '├') : '';
+            const bgColor = child.ratio >= 50 ? '#c8e6c9' : (child.ratio >= 20 ? '#fff9c4' : 'transparent');
+            
+            nodeHtml += '<div style="padding:3px 0;font-size:12px;font-family:monospace;background:' + bgColor + ';border-radius:3px;margin:2px 0;">';
+            nodeHtml += '<span style="color:#999;">' + prefix + '→ </span>';
+            nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>';
+            nodeHtml += '<span style="color:#2e7d32;font-weight:bold;margin-left:8px;">' + child.userCount + '人</span>';
+            nodeHtml += '<span style="color:#666;margin-left:5px;">(' + child.ratio.toFixed(1) + '%)</span>';
+            nodeHtml += '</div>';
+            
+            // Recursively render children
+            nodeHtml += renderTreeNode(child.campaignId, depth + 1, maxDepth);
+          });
+          
+          if (node.children.length > 5) {
+            const prefix = depth > 0 ? '│'.repeat(depth - 1) + '└' : '';
+            nodeHtml += '<div style="padding:3px 0;font-size:11px;color:#999;font-family:monospace;">' + prefix + '... +' + (node.children.length - 5) + ' 更多</div>';
+          }
+          
+          return nodeHtml;
+        }
+        
+        // Render from each root
+        rootNodes.forEach(rootId => {
+          const rootNode = transitionMap[rootId];
+          if (rootNode) {
+            html += '<div style="margin-bottom:15px;padding:10px;background:#fff;border-radius:6px;border:1px solid #c8e6c9;">';
+            html += '<div style="font-weight:bold;font-size:13px;color:#1b5e20;margin-bottom:8px;">🎯 ' + escapeHtml(rootNode.subject.substring(0, 45)) + '</div>';
+            html += renderTreeNode(rootId, 0, 4);
+            html += '</div>';
+          }
+        });
+        
+        html += '<p style="color:#888;font-size:11px;margin-top:10px;">💡 绿色背景=主路径(≥50%) | 黄色背景=次级路径(≥20%)</p>';
       } else {
         html += '<p style="color:#999;font-size:12px;">暂无转移数据</p>';
       }

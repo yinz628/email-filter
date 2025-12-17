@@ -2795,16 +2795,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return;
       }
       tbody.innerHTML = alerts.map(a => {
-        const typeIcon = a.alertType === 'SIGNAL_RECOVERED' ? '✅' : (a.alertType === 'FREQUENCY_DOWN' ? '⚠️' : '🚨');
-        const typeText = a.alertType === 'SIGNAL_RECOVERED' ? '恢复' : (a.alertType === 'FREQUENCY_DOWN' ? '频率下降' : '信号消失');
+        let typeIcon, typeText;
+        switch (a.alertType) {
+          case 'SIGNAL_RECOVERED':
+            typeIcon = '✅'; typeText = '信号恢复'; break;
+          case 'FREQUENCY_DOWN':
+            typeIcon = '⚠️'; typeText = '频率下降'; break;
+          case 'SIGNAL_DEAD':
+            typeIcon = '🚨'; typeText = '信号消失'; break;
+          case 'RATIO_LOW':
+            typeIcon = '📉'; typeText = '比例过低'; break;
+          case 'RATIO_RECOVERED':
+            typeIcon = '📈'; typeText = '比例恢复'; break;
+          default:
+            typeIcon = '❓'; typeText = a.alertType;
+        }
         const sentStatus = a.sentAt ? '<span class="status status-enabled">已发送</span>' : '<span class="status status-disabled">未发送</span>';
         const time = new Date(a.createdAt).toLocaleString('zh-CN');
+        // For ratio alerts, show ratio info instead of gap
+        const infoCol = a.alertType.startsWith('RATIO_') ? a.count24h + '%' : a.gapMinutes + ' 分钟';
         return '<tr>' +
           '<td>' + time + '</td>' +
           '<td>' + typeIcon + ' ' + typeText + '</td>' +
-          '<td>' + escapeHtml(a.rule?.name || a.ruleId) + '</td>' +
+          '<td>' + escapeHtml(a.rule?.name || a.message || a.ruleId) + '</td>' +
           '<td>' + a.previousState + ' → ' + a.currentState + '</td>' +
-          '<td>' + a.gapMinutes + ' 分钟</td>' +
+          '<td>' + infoCol + '</td>' +
           '<td>' + sentStatus + '</td>' +
         '</tr>';
       }).join('');

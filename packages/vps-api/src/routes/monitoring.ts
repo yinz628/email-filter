@@ -460,7 +460,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       if (ruleId) {
         filter.ruleId = ruleId;
       }
-      if (alertType && ['FREQUENCY_DOWN', 'SIGNAL_DEAD', 'SIGNAL_RECOVERED'].includes(alertType)) {
+      if (alertType && ['FREQUENCY_DOWN', 'SIGNAL_DEAD', 'SIGNAL_RECOVERED', 'RATIO_LOW', 'RATIO_RECOVERED'].includes(alertType)) {
         filter.alertType = alertType as AlertFilter['alertType'];
       }
       if (startDate) {

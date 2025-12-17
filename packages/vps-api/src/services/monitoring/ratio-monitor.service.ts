@@ -46,7 +46,14 @@ export class RatioMonitorService {
       throw new Error(`Second rule not found: ${dto.secondRuleId}`);
     }
 
-    return this.ratioRepo.create(dto);
+    const monitor = this.ratioRepo.create(dto);
+    
+    // Immediately check the monitor to set correct initial state and trigger alert if needed
+    if (monitor.enabled) {
+      this.checkMonitor(monitor);
+    }
+    
+    return monitor;
   }
 
   /**

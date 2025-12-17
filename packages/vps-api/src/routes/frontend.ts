@@ -895,39 +895,26 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
   <!-- Add Ratio Monitor Modal -->
   <div id="add-ratio-monitor-modal" class="modal hidden">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width:600px;">
       <div class="modal-header">
-        <h3>添加比例监控</h3>
+        <h3>添加漏斗监控</h3>
         <button class="modal-close" onclick="hideModal('add-ratio-monitor-modal')">&times;</button>
       </div>
       <form id="add-ratio-monitor-form">
-        <div class="form-group">
-          <label>监控名称 *</label>
-          <input type="text" id="ratio-name" required placeholder="例如：注册流程转化率">
-        </div>
-        <div class="form-group">
-          <label>标签 *</label>
-          <input type="text" id="ratio-tag" required placeholder="用于分组，例如：注册流程">
-        </div>
-        <div class="form-group">
-          <label>第一封邮件规则 *</label>
-          <select id="ratio-first-rule" required>
-            <option value="">选择规则...</option>
-          </select>
-          <p style="color:#888;font-size:12px;margin-top:5px">作为分母（基准）</p>
-        </div>
-        <div class="form-group">
-          <label>第二封邮件规则 *</label>
-          <select id="ratio-second-rule" required>
-            <option value="">选择规则...</option>
-          </select>
-          <p style="color:#888;font-size:12px;margin-top:5px">作为分子（比较对象）</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>监控名称 *</label>
+            <input type="text" id="ratio-name" required placeholder="例如：注册流程转化率">
+          </div>
+          <div class="form-group">
+            <label>标签 *</label>
+            <input type="text" id="ratio-tag" required placeholder="用于分组，例如：注册流程">
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>阈值（%）*</label>
+            <label>默认阈值（%）*</label>
             <input type="number" id="ratio-threshold" required min="0" max="100" value="80" placeholder="80">
-            <p style="color:#888;font-size:12px;margin-top:5px">低于此比例触发告警</p>
           </div>
           <div class="form-group">
             <label>时间窗口 *</label>
@@ -938,6 +925,30 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </select>
           </div>
         </div>
+        <div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <label style="font-weight:600;">漏斗步骤</label>
+            <button type="button" class="btn btn-sm btn-primary" onclick="addFunnelStep()">+ 添加步骤</button>
+          </div>
+          <div id="funnel-steps-container">
+            <div class="funnel-step" data-order="1" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">
+              <span style="width:30px;font-weight:bold;color:#666;">1</span>
+              <select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <option value="">选择规则...</option>
+              </select>
+              <input type="number" class="funnel-step-threshold" value="100" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%" disabled>
+              <span style="color:#888;font-size:12px;">基准</span>
+            </div>
+            <div class="funnel-step" data-order="2" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">
+              <span style="width:30px;font-weight:bold;color:#666;">2</span>
+              <select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <option value="">选择规则...</option>
+              </select>
+              <input type="number" class="funnel-step-threshold" value="80" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">
+              <span style="color:#888;font-size:12px;">%</span>
+            </div>
+          </div>
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -945,36 +956,26 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
   <!-- Edit Ratio Monitor Modal -->
   <div id="edit-ratio-monitor-modal" class="modal hidden">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width:600px;">
       <div class="modal-header">
-        <h3>编辑比例监控</h3>
+        <h3>编辑漏斗监控</h3>
         <button class="modal-close" onclick="hideModal('edit-ratio-monitor-modal')">&times;</button>
       </div>
       <form id="edit-ratio-monitor-form">
         <input type="hidden" id="edit-ratio-id">
-        <div class="form-group">
-          <label>监控名称 *</label>
-          <input type="text" id="edit-ratio-name" required>
-        </div>
-        <div class="form-group">
-          <label>标签 *</label>
-          <input type="text" id="edit-ratio-tag" required>
-        </div>
-        <div class="form-group">
-          <label>第一封邮件规则 *</label>
-          <select id="edit-ratio-first-rule" required>
-            <option value="">选择规则...</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>第二封邮件规则 *</label>
-          <select id="edit-ratio-second-rule" required>
-            <option value="">选择规则...</option>
-          </select>
+        <div class="form-row">
+          <div class="form-group">
+            <label>监控名称 *</label>
+            <input type="text" id="edit-ratio-name" required>
+          </div>
+          <div class="form-group">
+            <label>标签 *</label>
+            <input type="text" id="edit-ratio-tag" required>
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>阈值（%）*</label>
+            <label>默认阈值（%）*</label>
             <input type="number" id="edit-ratio-threshold" required min="0" max="100">
           </div>
           <div class="form-group">
@@ -985,6 +986,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="24h">24小时</option>
             </select>
           </div>
+        </div>
+        <div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <label style="font-weight:600;">漏斗步骤</label>
+            <button type="button" class="btn btn-sm btn-primary" onclick="addEditFunnelStep()">+ 添加步骤</button>
+          </div>
+          <div id="edit-funnel-steps-container"></div>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2982,14 +2990,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     function updateRatioRuleSelects() {
-      const options = ['<option value="">选择规则...</option>'];
-      monitoringRules.forEach(r => {
-        options.push('<option value="' + r.id + '">' + escapeHtml(r.merchant + ' - ' + r.name) + '</option>');
-      });
-      const optionsHtml = options.join('');
-      ['ratio-first-rule', 'ratio-second-rule', 'edit-ratio-first-rule', 'edit-ratio-second-rule'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = optionsHtml;
+      const optionsHtml = getRuleOptionsHtml();
+      // Update all funnel step selects
+      document.querySelectorAll('.funnel-step-rule').forEach(el => {
+        const currentValue = el.value;
+        el.innerHTML = optionsHtml;
+        if (currentValue) el.value = currentValue;
       });
     }
 
@@ -3062,15 +3068,80 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }).join('');
     }
 
+    // Funnel step management
+    let funnelStepCounter = 2;
+    
+    function addFunnelStep() {
+      funnelStepCounter++;
+      const container = document.getElementById('funnel-steps-container');
+      const defaultThreshold = document.getElementById('ratio-threshold').value || 80;
+      const stepHtml = '<div class="funnel-step" data-order="' + funnelStepCounter + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+        '<span style="width:30px;font-weight:bold;color:#666;">' + funnelStepCounter + '</span>' +
+        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' +
+          getRuleOptionsHtml() +
+        '</select>' +
+        '<input type="number" class="funnel-step-threshold" value="' + defaultThreshold + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+        '<button type="button" class="btn btn-sm btn-danger" onclick="removeFunnelStep(this)" style="padding:4px 8px;">×</button>' +
+      '</div>';
+      container.insertAdjacentHTML('beforeend', stepHtml);
+    }
+    
+    function removeFunnelStep(btn) {
+      btn.closest('.funnel-step').remove();
+      renumberFunnelSteps('funnel-steps-container');
+    }
+    
+    function renumberFunnelSteps(containerId) {
+      const container = document.getElementById(containerId);
+      const steps = container.querySelectorAll('.funnel-step');
+      steps.forEach((step, idx) => {
+        step.dataset.order = idx + 1;
+        step.querySelector('span').textContent = idx + 1;
+      });
+      if (containerId === 'funnel-steps-container') {
+        funnelStepCounter = steps.length;
+      } else {
+        editFunnelStepCounter = steps.length;
+      }
+    }
+    
+    function getRuleOptionsHtml() {
+      let html = '<option value="">选择规则...</option>';
+      monitoringRules.forEach(r => {
+        html += '<option value="' + r.id + '">' + escapeHtml(r.merchant + ' - ' + r.name) + '</option>';
+      });
+      return html;
+    }
+    
+    function collectFunnelSteps(containerId) {
+      const container = document.getElementById(containerId);
+      const stepElements = container.querySelectorAll('.funnel-step');
+      const steps = [];
+      stepElements.forEach((el, idx) => {
+        const ruleId = el.querySelector('.funnel-step-rule').value;
+        const threshold = parseFloat(el.querySelector('.funnel-step-threshold').value) || 80;
+        if (ruleId) {
+          steps.push({ ruleId, order: idx + 1, thresholdPercent: threshold });
+        }
+      });
+      return steps;
+    }
+
     // Add ratio monitor form
     document.getElementById('add-ratio-monitor-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const steps = collectFunnelSteps('funnel-steps-container');
+      if (steps.length < 2) {
+        showAlert('至少需要两个步骤', 'error');
+        return;
+      }
       const data = {
         name: document.getElementById('ratio-name').value,
         tag: document.getElementById('ratio-tag').value,
-        firstRuleId: document.getElementById('ratio-first-rule').value,
-        secondRuleId: document.getElementById('ratio-second-rule').value,
-        thresholdPercent: parseFloat(document.getElementById('ratio-threshold').value),
+        firstRuleId: steps[0].ruleId,
+        secondRuleId: steps[1].ruleId,
+        steps: steps.slice(2).map((s, idx) => ({ ruleId: s.ruleId, order: idx + 3, thresholdPercent: s.thresholdPercent })),
+        thresholdPercent: steps[1].thresholdPercent,
         timeWindow: document.getElementById('ratio-time-window').value,
         enabled: true
       };
@@ -3083,7 +3154,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         if (res.ok) {
           hideModal('add-ratio-monitor-modal');
           document.getElementById('add-ratio-monitor-form').reset();
-          showAlert('比例监控创建成功');
+          resetFunnelSteps();
+          showAlert('漏斗监控创建成功');
           loadRatioMonitors();
         } else {
           const err = await res.json();
@@ -3093,6 +3165,46 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         showAlert('创建失败', 'error');
       }
     });
+    
+    function resetFunnelSteps() {
+      funnelStepCounter = 2;
+      const container = document.getElementById('funnel-steps-container');
+      container.innerHTML = '<div class="funnel-step" data-order="1" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+        '<span style="width:30px;font-weight:bold;color:#666;">1</span>' +
+        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+        '<input type="number" class="funnel-step-threshold" value="100" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%" disabled>' +
+        '<span style="color:#888;font-size:12px;">基准</span>' +
+      '</div>' +
+      '<div class="funnel-step" data-order="2" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+        '<span style="width:30px;font-weight:bold;color:#666;">2</span>' +
+        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+        '<input type="number" class="funnel-step-threshold" value="80" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+        '<span style="color:#888;font-size:12px;">%</span>' +
+      '</div>';
+    }
+
+    // Edit funnel step management
+    let editFunnelStepCounter = 0;
+    
+    function addEditFunnelStep() {
+      editFunnelStepCounter++;
+      const container = document.getElementById('edit-funnel-steps-container');
+      const defaultThreshold = document.getElementById('edit-ratio-threshold').value || 80;
+      const stepHtml = '<div class="funnel-step" data-order="' + editFunnelStepCounter + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+        '<span style="width:30px;font-weight:bold;color:#666;">' + editFunnelStepCounter + '</span>' +
+        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' +
+          getRuleOptionsHtml() +
+        '</select>' +
+        '<input type="number" class="funnel-step-threshold" value="' + defaultThreshold + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+        (editFunnelStepCounter > 2 ? '<button type="button" class="btn btn-sm btn-danger" onclick="removeEditFunnelStep(this)" style="padding:4px 8px;">×</button>' : '<span style="color:#888;font-size:12px;">' + (editFunnelStepCounter === 1 ? '基准' : '%') + '</span>') +
+      '</div>';
+      container.insertAdjacentHTML('beforeend', stepHtml);
+    }
+    
+    function removeEditFunnelStep(btn) {
+      btn.closest('.funnel-step').remove();
+      renumberFunnelSteps('edit-funnel-steps-container');
+    }
 
     function editRatioMonitor(id) {
       const monitor = ratioMonitors.find(r => r.id === id);
@@ -3100,22 +3212,64 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-ratio-id').value = monitor.id;
       document.getElementById('edit-ratio-name').value = monitor.name;
       document.getElementById('edit-ratio-tag').value = monitor.tag;
-      document.getElementById('edit-ratio-first-rule').value = monitor.firstRuleId;
-      document.getElementById('edit-ratio-second-rule').value = monitor.secondRuleId;
       document.getElementById('edit-ratio-threshold').value = monitor.thresholdPercent;
       document.getElementById('edit-ratio-time-window').value = monitor.timeWindow;
+      
+      // Build steps UI
+      const container = document.getElementById('edit-funnel-steps-container');
+      container.innerHTML = '';
+      editFunnelStepCounter = 0;
+      
+      // Step 1
+      editFunnelStepCounter++;
+      container.innerHTML += '<div class="funnel-step" data-order="1" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+        '<span style="width:30px;font-weight:bold;color:#666;">1</span>' +
+        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+        '<input type="number" class="funnel-step-threshold" value="100" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%" disabled>' +
+        '<span style="color:#888;font-size:12px;">基准</span>' +
+      '</div>';
+      container.querySelector('.funnel-step[data-order="1"] .funnel-step-rule').value = monitor.firstRuleId;
+      
+      // Step 2
+      editFunnelStepCounter++;
+      container.innerHTML += '<div class="funnel-step" data-order="2" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+        '<span style="width:30px;font-weight:bold;color:#666;">2</span>' +
+        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+        '<input type="number" class="funnel-step-threshold" value="' + monitor.thresholdPercent + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+        '<span style="color:#888;font-size:12px;">%</span>' +
+      '</div>';
+      container.querySelector('.funnel-step[data-order="2"] .funnel-step-rule').value = monitor.secondRuleId;
+      
+      // Additional steps
+      (monitor.steps || []).forEach(step => {
+        editFunnelStepCounter++;
+        container.innerHTML += '<div class="funnel-step" data-order="' + editFunnelStepCounter + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+          '<span style="width:30px;font-weight:bold;color:#666;">' + editFunnelStepCounter + '</span>' +
+          '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+          '<input type="number" class="funnel-step-threshold" value="' + step.thresholdPercent + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+          '<button type="button" class="btn btn-sm btn-danger" onclick="removeEditFunnelStep(this)" style="padding:4px 8px;">×</button>' +
+        '</div>';
+        container.querySelector('.funnel-step[data-order="' + editFunnelStepCounter + '"] .funnel-step-rule').value = step.ruleId;
+      });
+      
       showModal('edit-ratio-monitor-modal');
     }
 
     document.getElementById('edit-ratio-monitor-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const id = document.getElementById('edit-ratio-id').value;
+      const steps = collectFunnelSteps('edit-funnel-steps-container');
+      if (steps.length < 2) {
+        showAlert('至少需要两个步骤', 'error');
+        return;
+      }
       const data = {
         name: document.getElementById('edit-ratio-name').value,
         tag: document.getElementById('edit-ratio-tag').value,
-        firstRuleId: document.getElementById('edit-ratio-first-rule').value,
-        secondRuleId: document.getElementById('edit-ratio-second-rule').value,
-        thresholdPercent: parseFloat(document.getElementById('edit-ratio-threshold').value),
+        firstRuleId: steps[0].ruleId,
+        secondRuleId: steps[1].ruleId,
+        steps: steps.slice(2).map((s, idx) => ({ ruleId: s.ruleId, order: idx + 3, thresholdPercent: s.thresholdPercent })),
+        thresholdPercent: steps[1].thresholdPercent,
         timeWindow: document.getElementById('edit-ratio-time-window').value
       };
       try {
@@ -3126,7 +3280,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         });
         if (res.ok) {
           hideModal('edit-ratio-monitor-modal');
-          showAlert('比例监控更新成功');
+          showAlert('漏斗监控更新成功');
           loadRatioMonitors();
         } else {
           const err = await res.json();

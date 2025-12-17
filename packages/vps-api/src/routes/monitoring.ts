@@ -75,10 +75,10 @@ function validateCreateRuleBody(body: unknown): { valid: boolean; error?: string
   if (!data.subjectPattern || typeof data.subjectPattern !== 'string' || data.subjectPattern.trim() === '') {
     return { valid: false, error: 'subjectPattern is required and must be a non-empty string' };
   }
-  if (typeof data.expectedIntervalMinutes !== 'number' || data.expectedIntervalMinutes <= 0) {
+  if (typeof data.expectedIntervalMinutes !== 'number' || !Number.isFinite(data.expectedIntervalMinutes) || data.expectedIntervalMinutes <= 0) {
     return { valid: false, error: 'expectedIntervalMinutes must be a positive number' };
   }
-  if (typeof data.deadAfterMinutes !== 'number' || data.deadAfterMinutes <= 0) {
+  if (typeof data.deadAfterMinutes !== 'number' || !Number.isFinite(data.deadAfterMinutes) || data.deadAfterMinutes <= 0) {
     return { valid: false, error: 'deadAfterMinutes must be a positive number' };
   }
 
@@ -133,13 +133,13 @@ function validateUpdateRuleBody(body: unknown): { valid: boolean; error?: string
     updateData.subjectPattern = data.subjectPattern;
   }
   if (data.expectedIntervalMinutes !== undefined) {
-    if (typeof data.expectedIntervalMinutes !== 'number' || data.expectedIntervalMinutes <= 0) {
+    if (typeof data.expectedIntervalMinutes !== 'number' || !Number.isFinite(data.expectedIntervalMinutes) || data.expectedIntervalMinutes <= 0) {
       return { valid: false, error: 'expectedIntervalMinutes must be a positive number' };
     }
     updateData.expectedIntervalMinutes = data.expectedIntervalMinutes;
   }
   if (data.deadAfterMinutes !== undefined) {
-    if (typeof data.deadAfterMinutes !== 'number' || data.deadAfterMinutes <= 0) {
+    if (typeof data.deadAfterMinutes !== 'number' || !Number.isFinite(data.deadAfterMinutes) || data.deadAfterMinutes <= 0) {
       return { valid: false, error: 'deadAfterMinutes must be a positive number' };
     }
     updateData.deadAfterMinutes = data.deadAfterMinutes;

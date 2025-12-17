@@ -2952,12 +2952,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       e.preventDefault();
       const tagsInput = document.getElementById('monitoring-tags').value;
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+      const intervalValue = document.getElementById('monitoring-interval').value;
+      const deadAfterValue = document.getElementById('monitoring-dead-after').value;
+      const expectedIntervalMinutes = parseInt(intervalValue, 10);
+      const deadAfterMinutes = parseInt(deadAfterValue, 10);
+      if (!intervalValue || isNaN(expectedIntervalMinutes) || expectedIntervalMinutes <= 0) {
+        showAlert('预期间隔必须是正整数', 'error');
+        return;
+      }
+      if (!deadAfterValue || isNaN(deadAfterMinutes) || deadAfterMinutes <= 0) {
+        showAlert('死亡阈值必须是正整数', 'error');
+        return;
+      }
       const data = {
         merchant: document.getElementById('monitoring-merchant').value,
         name: document.getElementById('monitoring-name').value,
         subjectPattern: document.getElementById('monitoring-pattern').value,
-        expectedIntervalMinutes: parseInt(document.getElementById('monitoring-interval').value),
-        deadAfterMinutes: parseInt(document.getElementById('monitoring-dead-after').value),
+        expectedIntervalMinutes: expectedIntervalMinutes,
+        deadAfterMinutes: deadAfterMinutes,
         tags: tags,
         enabled: true
       };
@@ -3000,12 +3012,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const id = document.getElementById('edit-monitoring-id').value;
       const tagsInput = document.getElementById('edit-monitoring-tags').value;
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+      const intervalValue = document.getElementById('edit-monitoring-interval').value;
+      const deadAfterValue = document.getElementById('edit-monitoring-dead-after').value;
+      const expectedIntervalMinutes = parseInt(intervalValue, 10);
+      const deadAfterMinutes = parseInt(deadAfterValue, 10);
+      if (!intervalValue || isNaN(expectedIntervalMinutes) || expectedIntervalMinutes <= 0) {
+        showAlert('预期间隔必须是正整数', 'error');
+        return;
+      }
+      if (!deadAfterValue || isNaN(deadAfterMinutes) || deadAfterMinutes <= 0) {
+        showAlert('死亡阈值必须是正整数', 'error');
+        return;
+      }
       const data = {
         merchant: document.getElementById('edit-monitoring-merchant').value,
         name: document.getElementById('edit-monitoring-name').value,
         subjectPattern: document.getElementById('edit-monitoring-pattern').value,
-        expectedIntervalMinutes: parseInt(document.getElementById('edit-monitoring-interval').value),
-        deadAfterMinutes: parseInt(document.getElementById('edit-monitoring-dead-after').value),
+        expectedIntervalMinutes: expectedIntervalMinutes,
+        deadAfterMinutes: deadAfterMinutes,
         tags: tags
       };
       try {
@@ -3352,41 +3376,53 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-ratio-threshold').value = monitor.thresholdPercent;
       document.getElementById('edit-ratio-time-window').value = monitor.timeWindow;
       
-      // Build steps UI
+      // Build steps UI - collect all steps first, then build HTML once
       const container = document.getElementById('edit-funnel-steps-container');
       container.innerHTML = '';
       editFunnelStepCounter = 0;
       
-      // Step 1
-      editFunnelStepCounter++;
-      container.innerHTML += '<div class="funnel-step" data-order="1" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
-        '<span style="width:30px;font-weight:bold;color:#666;">1</span>' +
-        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
-        '<input type="number" class="funnel-step-threshold" value="100" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%" disabled>' +
-        '<span style="color:#888;font-size:12px;">基准</span>' +
-      '</div>';
-      container.querySelector('.funnel-step[data-order="1"] .funnel-step-rule').value = monitor.firstRuleId;
+      // Collect all steps data
+      const allSteps = [
+        { order: 1, ruleId: monitor.firstRuleId, thresholdPercent: 100, isBase: true },
+        { order: 2, ruleId: monitor.secondRuleId, thresholdPercent: monitor.thresholdPercent, isBase: false }
+      ];
+      (monitor.steps || []).forEach((step, idx) => {
+        allSteps.push({ order: idx + 3, ruleId: step.ruleId, thresholdPercent: step.thresholdPercent, isBase: false, removable: true });
+      });
       
-      // Step 2
-      editFunnelStepCounter++;
-      container.innerHTML += '<div class="funnel-step" data-order="2" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
-        '<span style="width:30px;font-weight:bold;color:#666;">2</span>' +
-        '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
-        '<input type="number" class="funnel-step-threshold" value="' + monitor.thresholdPercent + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
-        '<span style="color:#888;font-size:12px;">%</span>' +
-      '</div>';
-      container.querySelector('.funnel-step[data-order="2"] .funnel-step-rule').value = monitor.secondRuleId;
+      // Build all HTML at once
+      let html = '';
+      allSteps.forEach(step => {
+        editFunnelStepCounter = step.order;
+        if (step.isBase) {
+          html += '<div class="funnel-step" data-order="' + step.order + '" data-rule-id="' + step.ruleId + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+            '<span style="width:30px;font-weight:bold;color:#666;">' + step.order + '</span>' +
+            '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+            '<input type="number" class="funnel-step-threshold" value="100" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%" disabled>' +
+            '<span style="color:#888;font-size:12px;">基准</span>' +
+          '</div>';
+        } else if (step.removable) {
+          html += '<div class="funnel-step" data-order="' + step.order + '" data-rule-id="' + step.ruleId + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+            '<span style="width:30px;font-weight:bold;color:#666;">' + step.order + '</span>' +
+            '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+            '<input type="number" class="funnel-step-threshold" value="' + step.thresholdPercent + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+            '<button type="button" class="btn btn-sm btn-danger" onclick="removeEditFunnelStep(this)" style="padding:4px 8px;">×</button>' +
+          '</div>';
+        } else {
+          html += '<div class="funnel-step" data-order="' + step.order + '" data-rule-id="' + step.ruleId + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
+            '<span style="width:30px;font-weight:bold;color:#666;">' + step.order + '</span>' +
+            '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
+            '<input type="number" class="funnel-step-threshold" value="' + step.thresholdPercent + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
+            '<span style="color:#888;font-size:12px;">%</span>' +
+          '</div>';
+        }
+      });
+      container.innerHTML = html;
       
-      // Additional steps
-      (monitor.steps || []).forEach(step => {
-        editFunnelStepCounter++;
-        container.innerHTML += '<div class="funnel-step" data-order="' + editFunnelStepCounter + '" style="display:flex;gap:10px;align-items:center;margin-bottom:8px;padding:8px;background:white;border-radius:4px;border:1px solid #ddd;">' +
-          '<span style="width:30px;font-weight:bold;color:#666;">' + editFunnelStepCounter + '</span>' +
-          '<select class="funnel-step-rule" required style="flex:1;padding:6px;border:1px solid #ddd;border-radius:4px;">' + getRuleOptionsHtml() + '</select>' +
-          '<input type="number" class="funnel-step-threshold" value="' + step.thresholdPercent + '" min="0" max="100" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;" placeholder="阈值%">' +
-          '<button type="button" class="btn btn-sm btn-danger" onclick="removeEditFunnelStep(this)" style="padding:4px 8px;">×</button>' +
-        '</div>';
-        container.querySelector('.funnel-step[data-order="' + editFunnelStepCounter + '"] .funnel-step-rule').value = step.ruleId;
+      // Now set all select values after DOM is built
+      allSteps.forEach(step => {
+        const stepEl = container.querySelector('.funnel-step[data-order="' + step.order + '"] .funnel-step-rule');
+        if (stepEl) stepEl.value = step.ruleId;
       });
       
       showModal('edit-ratio-monitor-modal');

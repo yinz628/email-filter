@@ -25,6 +25,8 @@ export interface Env {
   SEB: SendEmail;
   /** VPS API base URL for campaign tracking (optional, derived from VPS_API_URL if not set) */
   VPS_API_BASE_URL?: string;
+  /** KV namespace for caching monitoring hits when VPS API is unavailable (optional) */
+  MONITORING_CACHE?: KVNamespace;
 }
 
 /** Debug logger - only logs when DEBUG_LOGGING is enabled */
@@ -59,6 +61,30 @@ interface CampaignTrackPayload {
   receivedAt: string;
 }
 
+/** Monitoring hit payload sent to VPS API */
+interface MonitoringHitPayload {
+  sender: string;
+  subject: string;
+  recipient: string;
+  receivedAt: string;
+}
+
+/** Cached monitoring hit with metadata */
+interface CachedMonitoringHit {
+  payload: MonitoringHitPayload;
+  cachedAt: string;
+  retryCount: number;
+}
+
+/** Key prefix for cached monitoring hits in KV */
+const MONITORING_CACHE_PREFIX = 'monitoring_hit:';
+
+/** Maximum number of cached hits to sync in one batch */
+const MAX_SYNC_BATCH_SIZE = 50;
+
+/** TTL for cached monitoring hits (24 hours in seconds) */
+const CACHE_TTL_SECONDS = 24 * 60 * 60;
+
 /**
  * Extract sender email from the "from" header
  * Handles formats like "Name <email@example.com>" or plain "email@example.com"
@@ -88,6 +114,180 @@ function getVpsApiBaseUrl(env: Env): string | null {
     return `${url.protocol}//${url.host}`;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Cache a monitoring hit to KV storage when VPS API is unavailable
+ * 
+ * Requirements: 8.4
+ */
+async function cacheMonitoringHit(
+  payload: MonitoringHitPayload,
+  env: Env
+): Promise<void> {
+  if (!env.MONITORING_CACHE) {
+    debugLog(env, '[DEBUG] Monitoring cache skipped: KV namespace not configured');
+    return;
+  }
+
+  try {
+    const cacheKey = `${MONITORING_CACHE_PREFIX}${Date.now()}_${crypto.randomUUID()}`;
+    const cachedHit: CachedMonitoringHit = {
+      payload,
+      cachedAt: new Date().toISOString(),
+      retryCount: 0,
+    };
+
+    await env.MONITORING_CACHE.put(cacheKey, JSON.stringify(cachedHit), {
+      expirationTtl: CACHE_TTL_SECONDS,
+    });
+
+    debugLog(env, `[DEBUG] Monitoring hit cached: ${cacheKey}`);
+  } catch (error) {
+    console.error('Failed to cache monitoring hit:', error);
+  }
+}
+
+/**
+ * Send email hit to monitoring API for real-time signal tracking
+ * If the API is unavailable, caches the hit for later sync
+ * This is fire-and-forget - errors are logged but don't block email flow
+ * 
+ * Requirements: 8.1, 8.2, 8.4
+ */
+export async function trackMonitoringHit(
+  payload: MonitoringHitPayload,
+  env: Env
+): Promise<void> {
+  const baseUrl = getVpsApiBaseUrl(env);
+  if (!baseUrl) {
+    debugLog(env, '[DEBUG] Monitoring hit skipped: VPS API base URL not configured');
+    return;
+  }
+
+  const hitUrl = `${baseUrl}/api/monitoring/hit`;
+
+  try {
+    debugLog(env, `[DEBUG] Sending monitoring hit: ${hitUrl}`);
+    debugLog(env, `[DEBUG] Monitoring payload: ${JSON.stringify(payload)}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+    const response = await fetch(hitUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Monitoring hit API returned ${response.status}: ${errorText}`);
+      // Cache the hit for later retry when API returns error
+      await cacheMonitoringHit(payload, env);
+    } else {
+      debugLog(env, '[DEBUG] Monitoring hit recorded successfully');
+    }
+  } catch (error) {
+    // Log error but don't throw - monitoring should never block email flow
+    console.error('Monitoring hit error (non-blocking):', error);
+    // Cache the hit for later retry when network fails
+    await cacheMonitoringHit(payload, env);
+  }
+}
+
+/**
+ * Sync cached monitoring hits to VPS API
+ * Called when API becomes available to flush cached events
+ * 
+ * Requirements: 8.4
+ */
+export async function syncCachedMonitoringHits(env: Env): Promise<{ synced: number; failed: number; remaining: number }> {
+  if (!env.MONITORING_CACHE) {
+    return { synced: 0, failed: 0, remaining: 0 };
+  }
+
+  const baseUrl = getVpsApiBaseUrl(env);
+  if (!baseUrl) {
+    return { synced: 0, failed: 0, remaining: 0 };
+  }
+
+  const hitUrl = `${baseUrl}/api/monitoring/hit`;
+  let synced = 0;
+  let failed = 0;
+
+  try {
+    // List cached hits
+    const listResult = await env.MONITORING_CACHE.list({ prefix: MONITORING_CACHE_PREFIX, limit: MAX_SYNC_BATCH_SIZE });
+    
+    for (const key of listResult.keys) {
+      try {
+        const cachedData = await env.MONITORING_CACHE.get(key.name);
+        if (!cachedData) {
+          // Key expired or deleted, skip
+          continue;
+        }
+
+        const cachedHit: CachedMonitoringHit = JSON.parse(cachedData);
+
+        // Try to send the cached hit
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+        const response = await fetch(hitUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+          },
+          body: JSON.stringify(cachedHit.payload),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          // Successfully synced, delete from cache
+          await env.MONITORING_CACHE.delete(key.name);
+          synced++;
+          debugLog(env, `[DEBUG] Synced cached monitoring hit: ${key.name}`);
+        } else {
+          // API returned error, increment retry count
+          cachedHit.retryCount++;
+          if (cachedHit.retryCount >= 3) {
+            // Max retries reached, delete the cached hit
+            await env.MONITORING_CACHE.delete(key.name);
+            failed++;
+            console.error(`Monitoring hit sync failed after 3 retries: ${key.name}`);
+          } else {
+            // Update retry count
+            await env.MONITORING_CACHE.put(key.name, JSON.stringify(cachedHit), {
+              expirationTtl: CACHE_TTL_SECONDS,
+            });
+            failed++;
+          }
+        }
+      } catch (error) {
+        console.error(`Error syncing cached hit ${key.name}:`, error);
+        failed++;
+      }
+    }
+
+    // Get remaining count
+    const remainingList = await env.MONITORING_CACHE.list({ prefix: MONITORING_CACHE_PREFIX, limit: 1 });
+    const remaining = remainingList.keys.length > 0 ? -1 : 0; // -1 indicates there are more
+
+    return { synced, failed, remaining };
+  } catch (error) {
+    console.error('Error syncing cached monitoring hits:', error);
+    return { synced, failed, remaining: -1 };
   }
 }
 
@@ -204,6 +404,20 @@ export default {
       });
     }
     
+    // Sync cached monitoring hits to VPS API
+    // Requirements: 8.4
+    if (url.pathname === '/sync-monitoring-cache') {
+      const result = await syncCachedMonitoringHits(env);
+      return new Response(JSON.stringify({
+        status: 'ok',
+        workerName: env.WORKER_NAME,
+        timestamp: Date.now(),
+        ...result,
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     // Full connectivity test - tests Worker -> VPS connection
     if (url.pathname === '/test-connection') {
       const result = {
@@ -303,6 +517,17 @@ export default {
       receivedAt,
     };
     ctx.waitUntil(trackCampaignEmail(campaignPayload, env));
+
+    // Send email hit to monitoring API for real-time signal tracking
+    // Uses ctx.waitUntil to ensure the call completes even after response is sent
+    // Requirements: 8.1, 8.2
+    const monitoringPayload: MonitoringHitPayload = {
+      sender: from,
+      subject,
+      recipient: to,
+      receivedAt,
+    };
+    ctx.waitUntil(trackMonitoringHit(monitoringPayload, env));
 
     // Get filter decision from VPS API
     const decision = await getFilterDecision(payload, env);

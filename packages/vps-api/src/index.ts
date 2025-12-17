@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { config } from './config.js';
-import { initializeDatabase, closeDatabase } from './db/index.js';
+import { initializeDatabase, closeDatabase, getDatabase } from './db/index.js';
 import {
   webhookRoutes,
   rulesRoutes,
@@ -13,7 +13,9 @@ import {
   logsRoutes,
   watchRoutes,
   campaignRoutes,
+  monitoringRoutes,
 } from './routes/index.js';
+import { SchedulerService } from './services/monitoring/index.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -67,6 +69,10 @@ await fastify.register(workerRoutes, { prefix: '/api/workers' });
 await fastify.register(logsRoutes, { prefix: '/api/logs' });
 await fastify.register(watchRoutes, { prefix: '/api/watch' });
 await fastify.register(campaignRoutes, { prefix: '/api/campaign' });
+await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
+
+// Scheduler instance
+let scheduler: SchedulerService | null = null;
 
 // Start server
 async function start() {
@@ -75,6 +81,14 @@ async function start() {
     console.log('Initializing database...');
     initializeDatabase();
     console.log('Database initialized successfully');
+
+    // Initialize and start scheduler for monitoring tasks
+    // - Heartbeat checks every 5 minutes (Requirement 4.1)
+    // - Data cleanup daily at 3 AM (Requirements 7.2, 7.3, 7.4)
+    console.log('Starting monitoring scheduler...');
+    scheduler = new SchedulerService(getDatabase(), config.scheduler);
+    scheduler.start();
+    console.log('Monitoring scheduler started');
 
     // Start server
     await fastify.listen({ port: config.port, host: config.host });
@@ -88,6 +102,9 @@ async function start() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
+  if (scheduler) {
+    scheduler.stop();
+  }
   closeDatabase();
   await fastify.close();
   process.exit(0);
@@ -95,6 +112,9 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   console.log('Shutting down...');
+  if (scheduler) {
+    scheduler.stop();
+  }
   closeDatabase();
   await fastify.close();
   process.exit(0);

@@ -136,6 +136,9 @@ importers:
       fastify:
         specifier: ^4.25.0
         version: 4.29.1
+      node-cron:
+        specifier: ^4.2.1
+        version: 4.2.1
       uuid:
         specifier: ^9.0.1
         version: 9.0.1
@@ -143,6 +146,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.8
         version: 7.6.13
+      '@types/node-cron':
+        specifier: ^3.0.11
+        version: 3.0.11
       '@types/uuid':
         specifier: ^9.0.7
         version: 9.0.8
@@ -1001,6 +1007,9 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
+  '@types/node-cron@3.0.11':
+    resolution: {integrity: sha512-0ikrnug3/IyneSHqCBeslAhlK2aBfYek1fGo4bP4QnZPmiqSGRK+Oy7ZMisLWkesffJvQ1cqAcBnJC+8+nxIAg==}
+
   '@types/node@20.19.27':
     resolution: {integrity: sha512-N2clP5pJhB2YnZJ3PIHFk5RkygRX5WO/5f0WC08tp0wd+sv0rsJk3MqWn3CbNmT2J505a5336jaQj4ph1AdMug==}
 
@@ -1717,6 +1726,10 @@ packages:
   node-abi@3.85.0:
     resolution: {integrity: sha512-zsFhmbkAzwhTft6nd3VxcG0cvJsT70rL+BIGHWVq5fi6MwGrHwzqKaxXE+Hl2GmnGItnDKPPkO5/LQqjVkIdFg==}
     engines: {node: '>=10'}
+
+  node-cron@4.2.1:
+    resolution: {integrity: sha512-lgimEHPE/QDgFlywTd8yTR61ptugX3Qer29efeyWw2rv259HtGBNn1vZVmp8lB9uo9wC0t/AT4iGqXxia+CJFg==}
+    engines: {node: '>=6.0.0'}
 
   npm-run-path@5.3.0:
     resolution: {integrity: sha512-ppwTtiJZq0O/ai0z7yfudtBpWIoxM8yE6nHi1X47eFR2EWORqfbu6CnPlNsjeN683eT0qG6H/Pyf9fCcvjnnnQ==}
@@ -2773,6 +2786,8 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
+  '@types/node-cron@3.0.11': {}
+
   '@types/node@20.19.27':
     dependencies:
       undici-types: 6.21.0
@@ -3618,6 +3633,8 @@ snapshots:
   node-abi@3.85.0:
     dependencies:
       semver: 7.7.3
+
+  node-cron@4.2.1: {}
 
   npm-run-path@5.3.0:
     dependencies:

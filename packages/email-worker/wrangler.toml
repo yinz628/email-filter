@@ -21,6 +21,12 @@ DEBUG_LOGGING = "true"
 [[send_email]]
 name = "SEB"
 
+# KV namespace for caching monitoring hits when VPS API is unavailable (optional)
+# To enable, create a KV namespace and uncomment the following:
+# [[kv_namespaces]]
+# binding = "MONITORING_CACHE"
+# id = "your-kv-namespace-id"
+
 # Build configuration
 [build]
 command = ""

@@ -24,3 +24,6 @@ export * from './api.js';
 
 // Campaign analytics types
 export * from './campaign.js';
+
+// Monitoring types
+export * from './monitoring.js';

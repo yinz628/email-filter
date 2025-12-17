@@ -2757,7 +2757,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const res = await fetch('/api/monitoring/heartbeat', {
           method: 'POST',
-          headers: getHeaders()
+          headers: getHeaders(),
+          body: JSON.stringify({})
         });
         if (res.ok) {
           const data = await res.json();

@@ -43,6 +43,7 @@ interface AlertParams {
 
 interface GetRulesQuery {
   merchant?: string;
+  tag?: string;
   enabled?: string;
 }
 
@@ -81,6 +82,16 @@ function validateCreateRuleBody(body: unknown): { valid: boolean; error?: string
     return { valid: false, error: 'deadAfterMinutes must be a positive number' };
   }
 
+  // Parse tags
+  let tags: string[] = [];
+  if (data.tags !== undefined) {
+    if (Array.isArray(data.tags)) {
+      tags = data.tags.filter((t): t is string => typeof t === 'string');
+    } else if (typeof data.tags === 'string') {
+      tags = data.tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    }
+  }
+
   return {
     valid: true,
     data: {
@@ -89,6 +100,7 @@ function validateCreateRuleBody(body: unknown): { valid: boolean; error?: string
       subjectPattern: data.subjectPattern as string,
       expectedIntervalMinutes: data.expectedIntervalMinutes as number,
       deadAfterMinutes: data.deadAfterMinutes as number,
+      tags,
       enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
     },
   };
@@ -131,6 +143,13 @@ function validateUpdateRuleBody(body: unknown): { valid: boolean; error?: string
       return { valid: false, error: 'deadAfterMinutes must be a positive number' };
     }
     updateData.deadAfterMinutes = data.deadAfterMinutes;
+  }
+  if (data.tags !== undefined) {
+    if (Array.isArray(data.tags)) {
+      updateData.tags = data.tags.filter((t): t is string => typeof t === 'string');
+    } else if (typeof data.tags === 'string') {
+      updateData.tags = data.tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    }
   }
   if (data.enabled !== undefined) {
     updateData.enabled = Boolean(data.enabled);
@@ -243,11 +262,14 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const ruleRepo = new MonitoringRuleRepository(db);
       const ruleService = new MonitoringRuleService(ruleRepo);
 
-      const { merchant, enabled } = request.query;
-      const filter: { merchant?: string; enabled?: boolean } = {};
+      const { merchant, tag, enabled } = request.query;
+      const filter: { merchant?: string; tag?: string; enabled?: boolean } = {};
 
       if (merchant) {
         filter.merchant = merchant;
+      }
+      if (tag) {
+        filter.tag = tag;
       }
       if (enabled !== undefined) {
         filter.enabled = enabled === 'true';

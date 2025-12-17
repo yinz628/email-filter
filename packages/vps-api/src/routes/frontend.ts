@@ -488,11 +488,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <p style="color:#666;margin-bottom:15px">监控重点邮件信号的健康状态。当信号异常时自动告警。</p>
+        <div class="filter-bar">
+          <select id="monitoring-tag-filter" onchange="loadMonitoringRules()">
+            <option value="">全部标签</option>
+          </select>
+        </div>
         <table>
           <thead>
             <tr>
               <th>商户</th>
               <th>规则名称</th>
+              <th>标签</th>
               <th>主题匹配</th>
               <th>预期间隔</th>
               <th>死亡阈值</th>
@@ -822,6 +828,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <p style="color:#888;font-size:12px;margin-top:5px">超过此时间判定为DEAD，4320=3天</p>
           </div>
         </div>
+        <div class="form-group">
+          <label>标签</label>
+          <input type="text" id="monitoring-tags" placeholder="多个标签用逗号分隔，例如：重要,订单">
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -857,6 +867,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <label>死亡阈值（分钟）*</label>
             <input type="number" id="edit-monitoring-dead-after" required min="1">
           </div>
+        </div>
+        <div class="form-group">
+          <label>标签</label>
+          <input type="text" id="edit-monitoring-tags" placeholder="多个标签用逗号分隔">
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2532,27 +2546,50 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadMonitoringRules() {
       if (!apiToken) return;
       try {
-        const res = await fetch('/api/monitoring/rules', { headers: getHeaders() });
+        const tagFilter = document.getElementById('monitoring-tag-filter')?.value || '';
+        let url = '/api/monitoring/rules';
+        if (tagFilter) {
+          url += '?tag=' + encodeURIComponent(tagFilter);
+        }
+        const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         monitoringRules = data.rules || [];
         renderMonitoringRules();
+        updateMonitoringTagFilter();
       } catch (e) {
         showAlert('加载监控规则失败', 'error');
       }
     }
 
+    function updateMonitoringTagFilter() {
+      const select = document.getElementById('monitoring-tag-filter');
+      if (!select) return;
+      const currentValue = select.value;
+      const allTags = new Set();
+      monitoringRules.forEach(r => {
+        (r.tags || []).forEach(t => allTags.add(t));
+      });
+      const options = ['<option value="">全部标签</option>'];
+      Array.from(allTags).sort().forEach(tag => {
+        options.push('<option value="' + escapeHtml(tag) + '"' + (tag === currentValue ? ' selected' : '') + '>' + escapeHtml(tag) + '</option>');
+      });
+      select.innerHTML = options.join('');
+    }
+
     function renderMonitoringRules() {
       const tbody = document.getElementById('monitoring-rules-table');
       if (monitoringRules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">暂无监控规则</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999">暂无监控规则</td></tr>';
         return;
       }
       tbody.innerHTML = monitoringRules.map(r => {
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
+        const tagsHtml = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
         return '<tr>' +
           '<td>' + escapeHtml(r.merchant) + '</td>' +
           '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
+          '<td>' + (tagsHtml || '-') + '</td>' +
           '<td><code style="font-size:11px;">' + escapeHtml(r.subjectPattern) + '</code></td>' +
           '<td>' + r.expectedIntervalMinutes + ' 分钟</td>' +
           '<td>' + r.deadAfterMinutes + ' 分钟</td>' +
@@ -2653,12 +2690,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     // Add monitoring rule form
     document.getElementById('add-monitoring-rule-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const tagsInput = document.getElementById('monitoring-tags').value;
+      const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
       const data = {
         merchant: document.getElementById('monitoring-merchant').value,
         name: document.getElementById('monitoring-name').value,
         subjectPattern: document.getElementById('monitoring-pattern').value,
         expectedIntervalMinutes: parseInt(document.getElementById('monitoring-interval').value),
         deadAfterMinutes: parseInt(document.getElementById('monitoring-dead-after').value),
+        tags: tags,
         enabled: true
       };
       try {
@@ -2691,18 +2731,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-monitoring-pattern').value = rule.subjectPattern;
       document.getElementById('edit-monitoring-interval').value = rule.expectedIntervalMinutes;
       document.getElementById('edit-monitoring-dead-after').value = rule.deadAfterMinutes;
+      document.getElementById('edit-monitoring-tags').value = (rule.tags || []).join(', ');
       showModal('edit-monitoring-rule-modal');
     }
 
     document.getElementById('edit-monitoring-rule-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const id = document.getElementById('edit-monitoring-id').value;
+      const tagsInput = document.getElementById('edit-monitoring-tags').value;
+      const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
       const data = {
         merchant: document.getElementById('edit-monitoring-merchant').value,
         name: document.getElementById('edit-monitoring-name').value,
         subjectPattern: document.getElementById('edit-monitoring-pattern').value,
         expectedIntervalMinutes: parseInt(document.getElementById('edit-monitoring-interval').value),
-        deadAfterMinutes: parseInt(document.getElementById('edit-monitoring-dead-after').value)
+        deadAfterMinutes: parseInt(document.getElementById('edit-monitoring-dead-after').value),
+        tags: tags
       };
       try {
         const res = await fetch('/api/monitoring/rules/' + id, {

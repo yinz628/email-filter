@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS monitoring_rules (
   subject_pattern TEXT NOT NULL,
   expected_interval_minutes INTEGER NOT NULL,
   dead_after_minutes INTEGER NOT NULL,
+  tags TEXT NOT NULL DEFAULT '[]',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

@@ -33,6 +33,12 @@ export class SignalStateRepository {
    * Convert database row to MonitoringRule
    */
   private rowToRule(row: MonitoringRuleRow): MonitoringRule {
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse((row as any).tags || '[]');
+    } catch {
+      tags = [];
+    }
     return {
       id: row.id,
       merchant: row.merchant,
@@ -40,6 +46,7 @@ export class SignalStateRepository {
       subjectPattern: row.subject_pattern,
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
+      tags,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -55,7 +62,7 @@ export class SignalStateRepository {
         ss.rule_id, ss.state, ss.last_seen_at, 
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
         mr.id, mr.merchant, mr.name, mr.subject_pattern,
-        mr.expected_interval_minutes, mr.dead_after_minutes,
+        mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
         mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
       JOIN monitoring_rules mr ON ss.rule_id = mr.id
@@ -67,6 +74,12 @@ export class SignalStateRepository {
       return null;
     }
 
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(row.tags || '[]');
+    } catch {
+      tags = [];
+    }
     const rule: MonitoringRule = {
       id: row.id,
       merchant: row.merchant,
@@ -74,6 +87,7 @@ export class SignalStateRepository {
       subjectPattern: row.subject_pattern,
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
+      tags,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.rule_updated_at),
@@ -107,7 +121,7 @@ export class SignalStateRepository {
         ss.rule_id, ss.state, ss.last_seen_at, 
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
         mr.id, mr.merchant, mr.name, mr.subject_pattern,
-        mr.expected_interval_minutes, mr.dead_after_minutes,
+        mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
         mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
       JOIN monitoring_rules mr ON ss.rule_id = mr.id
@@ -124,6 +138,12 @@ export class SignalStateRepository {
     const now = new Date();
 
     return rows.map((row) => {
+      let tags: string[] = [];
+      try {
+        tags = JSON.parse(row.tags || '[]');
+      } catch {
+        tags = [];
+      }
       const rule: MonitoringRule = {
         id: row.id,
         merchant: row.merchant,
@@ -131,6 +151,7 @@ export class SignalStateRepository {
         subjectPattern: row.subject_pattern,
         expectedIntervalMinutes: row.expected_interval_minutes,
         deadAfterMinutes: row.dead_after_minutes,
+        tags,
         enabled: row.enabled === 1,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.rule_updated_at),
@@ -164,7 +185,7 @@ export class SignalStateRepository {
         ss.rule_id, ss.state, ss.last_seen_at, 
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
         mr.id, mr.merchant, mr.name, mr.subject_pattern,
-        mr.expected_interval_minutes, mr.dead_after_minutes,
+        mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
         mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
       JOIN monitoring_rules mr ON ss.rule_id = mr.id
@@ -182,6 +203,12 @@ export class SignalStateRepository {
     const now = new Date();
 
     return rows.map((row) => {
+      let tags: string[] = [];
+      try {
+        tags = JSON.parse(row.tags || '[]');
+      } catch {
+        tags = [];
+      }
       const rule: MonitoringRule = {
         id: row.id,
         merchant: row.merchant,
@@ -189,6 +216,7 @@ export class SignalStateRepository {
         subjectPattern: row.subject_pattern,
         expectedIntervalMinutes: row.expected_interval_minutes,
         deadAfterMinutes: row.dead_after_minutes,
+        tags,
         enabled: row.enabled === 1,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.rule_updated_at),

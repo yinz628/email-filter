@@ -14,6 +14,7 @@ interface MonitoringRuleRow {
   subject_pattern: string;
   expected_interval_minutes: number;
   dead_after_minutes: number;
+  tags: string;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -29,6 +30,12 @@ export class MonitoringRuleRepository {
    * Convert database row to MonitoringRule
    */
   private rowToRule(row: MonitoringRuleRow): MonitoringRule {
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(row.tags || '[]');
+    } catch {
+      tags = [];
+    }
     return {
       id: row.id,
       merchant: row.merchant,
@@ -36,6 +43,7 @@ export class MonitoringRuleRepository {
       subjectPattern: row.subject_pattern,
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
+      tags,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -49,14 +57,15 @@ export class MonitoringRuleRepository {
     const id = uuidv4();
     const now = new Date().toISOString();
     const enabled = dto.enabled !== undefined ? dto.enabled : true;
+    const tags = dto.tags || [];
 
     const stmt = this.db.prepare(`
       INSERT INTO monitoring_rules (
         id, merchant, name, subject_pattern, 
         expected_interval_minutes, dead_after_minutes, 
-        enabled, created_at, updated_at
+        tags, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -66,6 +75,7 @@ export class MonitoringRuleRepository {
       dto.subjectPattern,
       dto.expectedIntervalMinutes,
       dto.deadAfterMinutes,
+      JSON.stringify(tags),
       enabled ? 1 : 0,
       now,
       now
@@ -85,6 +95,7 @@ export class MonitoringRuleRepository {
       subjectPattern: dto.subjectPattern,
       expectedIntervalMinutes: dto.expectedIntervalMinutes,
       deadAfterMinutes: dto.deadAfterMinutes,
+      tags,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -110,6 +121,11 @@ export class MonitoringRuleRepository {
     if (filter?.merchant) {
       query += ' AND merchant = ?';
       params.push(filter.merchant);
+    }
+
+    if (filter?.tag) {
+      query += ' AND tags LIKE ?';
+      params.push('%"' + filter.tag + '"%');
     }
 
     if (filter?.enabled !== undefined) {
@@ -167,6 +183,10 @@ export class MonitoringRuleRepository {
     if (dto.deadAfterMinutes !== undefined) {
       updates.push('dead_after_minutes = ?');
       params.push(dto.deadAfterMinutes);
+    }
+    if (dto.tags !== undefined) {
+      updates.push('tags = ?');
+      params.push(JSON.stringify(dto.tags));
     }
     if (dto.enabled !== undefined) {
       updates.push('enabled = ?');

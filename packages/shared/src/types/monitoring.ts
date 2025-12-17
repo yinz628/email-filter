@@ -41,6 +41,7 @@ export interface MonitoringRule {
   subjectPattern: string;              // Subject matching pattern (regex)
   expectedIntervalMinutes: number;     // Expected appearance interval (minutes)
   deadAfterMinutes: number;            // Death threshold (minutes)
+  tags: string[];                      // Tags for categorization
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -55,6 +56,7 @@ export interface CreateMonitoringRuleDTO {
   subjectPattern: string;
   expectedIntervalMinutes: number;
   deadAfterMinutes: number;
+  tags?: string[];
   enabled?: boolean;
 }
 
@@ -68,6 +70,7 @@ export interface UpdateMonitoringRuleDTO {
   subjectPattern?: string;
   expectedIntervalMinutes?: number;
   deadAfterMinutes?: number;
+  tags?: string[];
   enabled?: boolean;
 }
 
@@ -76,6 +79,7 @@ export interface UpdateMonitoringRuleDTO {
  */
 export interface MonitoringRuleFilter {
   merchant?: string;
+  tag?: string;
   enabled?: boolean;
 }
 

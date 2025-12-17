@@ -202,4 +202,20 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
       return reply.status(500).send({ error: message });
     }
   });
+
+  // Get ratio alerts
+  fastify.get(
+    '/alerts',
+    async (request: FastifyRequest<{ Querystring: { limit?: string } }>, reply: FastifyReply) => {
+      try {
+        const service = getService();
+        const limit = request.query.limit ? parseInt(request.query.limit, 10) : 50;
+        const alerts = service.getAlerts(limit);
+        return reply.send({ alerts, total: alerts.length });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        return reply.status(500).send({ error: message });
+      }
+    }
+  );
 }

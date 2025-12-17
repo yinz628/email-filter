@@ -5,15 +5,17 @@ import type {
   UpdateRatioMonitorDTO,
   RatioStatus,
   RatioState,
-  AlertType,
-  CreateAlertDTO,
   FunnelStepStatus,
 } from '@email-filter/shared';
 import { calculateRatio, calculateRatioState } from '@email-filter/shared';
 import { RatioMonitorRepository } from '../../db/ratio-monitor-repository.js';
 import { MonitoringRuleRepository } from '../../db/monitoring-rule-repository.js';
 import { SignalStateRepository } from '../../db/signal-state-repository.js';
-import { AlertRepository } from '../../db/alert-repository.js';
+import {
+  RatioAlertRepository,
+  type RatioAlertType,
+  type RatioAlert,
+} from '../../db/ratio-alert-repository.js';
 
 /**
  * Service for ratio monitoring operations
@@ -22,13 +24,13 @@ export class RatioMonitorService {
   private ratioRepo: RatioMonitorRepository;
   private ruleRepo: MonitoringRuleRepository;
   private stateRepo: SignalStateRepository;
-  private alertRepo: AlertRepository;
+  private ratioAlertRepo: RatioAlertRepository;
 
   constructor(db: Database) {
     this.ratioRepo = new RatioMonitorRepository(db);
     this.ruleRepo = new MonitoringRuleRepository(db);
     this.stateRepo = new SignalStateRepository(db);
-    this.alertRepo = new AlertRepository(db);
+    this.ratioAlertRepo = new RatioAlertRepository(db);
   }
 
   /**
@@ -47,13 +49,52 @@ export class RatioMonitorService {
     }
 
     const monitor = this.ratioRepo.create(dto);
-    
-    // Immediately check the monitor to set correct initial state and trigger alert if needed
+
+    // Set initial state based on current ratio (without triggering alert)
     if (monitor.enabled) {
-      this.checkMonitor(monitor);
+      this.initializeMonitorState(monitor);
     }
-    
+
     return monitor;
+  }
+
+  /**
+   * Initialize monitor state without triggering alerts
+   * This sets the correct initial state based on current data
+   */
+  private initializeMonitorState(monitor: RatioMonitor): void {
+    const firstStatus = this.stateRepo.getByRuleId(monitor.firstRuleId);
+    const secondStatus = this.stateRepo.getByRuleId(monitor.secondRuleId);
+
+    const firstCount = this.getCountByTimeWindow(firstStatus, monitor.timeWindow);
+    const secondCount = this.getCountByTimeWindow(secondStatus, monitor.timeWindow);
+    const currentRatio = calculateRatio(firstCount, secondCount);
+
+    // Collect additional steps data
+    const stepsData: { ruleId: string; count: number }[] = [];
+    let overallState: RatioState = calculateRatioState(currentRatio, monitor.thresholdPercent);
+
+    for (const step of monitor.steps || []) {
+      const stepStatus = this.stateRepo.getByRuleId(step.ruleId);
+      const stepCount = this.getCountByTimeWindow(stepStatus, monitor.timeWindow);
+      stepsData.push({ ruleId: step.ruleId, count: stepCount });
+
+      const stepRatio = calculateRatio(firstCount, stepCount);
+      const stepState = calculateRatioState(stepRatio, step.thresholdPercent);
+      if (stepState === 'LOW') {
+        overallState = 'LOW';
+      }
+    }
+
+    // Update state without creating alert (initial state)
+    this.ratioRepo.updateState(
+      monitor.id,
+      overallState,
+      firstCount,
+      secondCount,
+      currentRatio,
+      JSON.stringify(stepsData)
+    );
   }
 
   /**
@@ -256,26 +297,30 @@ export class RatioMonitorService {
 
     // Check if alert should be triggered
     if (previousState !== overallState) {
-      const alertType: AlertType = overallState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
+      const alertType: RatioAlertType = overallState === 'LOW' ? 'RATIO_LOW' : 'RATIO_RECOVERED';
       const message = this.buildAlertMessage(monitor, alertType, firstCount, secondCount, currentRatio);
 
-      const alertDto: CreateAlertDTO = {
-        ruleId: monitor.id, // Using monitor ID as rule ID for ratio alerts
+      this.ratioAlertRepo.create({
+        monitorId: monitor.id,
         alertType,
-        previousState: previousState === 'HEALTHY' ? 'ACTIVE' : 'WEAK',
-        currentState: overallState === 'HEALTHY' ? 'ACTIVE' : 'WEAK',
-        gapMinutes: 0,
-        count1h: firstCount,
-        count12h: secondCount,
-        count24h: Math.round(currentRatio),
+        previousState,
+        currentState: overallState,
+        firstCount,
+        secondCount,
+        currentRatio,
         message,
-      };
-
-      this.alertRepo.create(alertDto);
+      });
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * Get ratio alerts
+   */
+  getAlerts(limit?: number): RatioAlert[] {
+    return this.ratioAlertRepo.getAll(limit);
   }
 
   private getCountByTimeWindow(
@@ -296,7 +341,7 @@ export class RatioMonitorService {
 
   private buildAlertMessage(
     monitor: RatioMonitor,
-    alertType: AlertType,
+    alertType: RatioAlertType,
     firstCount: number,
     secondCount: number,
     currentRatio: number

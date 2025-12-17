@@ -2779,10 +2779,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadMonitoringAlerts() {
       if (!apiToken) return;
       try {
-        const res = await fetch('/api/monitoring/alerts?limit=50', { headers: getHeaders() });
-        if (!res.ok) throw new Error('Failed');
-        const data = await res.json();
-        renderMonitoringAlerts(data.alerts || []);
+        // Load both signal alerts and ratio alerts
+        const [signalRes, ratioRes] = await Promise.all([
+          fetch('/api/monitoring/alerts?limit=50', { headers: getHeaders() }),
+          fetch('/api/monitoring/ratio/alerts?limit=50', { headers: getHeaders() })
+        ]);
+        
+        let signalAlerts = [];
+        let ratioAlerts = [];
+        
+        if (signalRes.ok) {
+          const signalData = await signalRes.json();
+          signalAlerts = (signalData.alerts || []).map(a => ({ ...a, source: 'signal' }));
+        }
+        
+        if (ratioRes.ok) {
+          const ratioData = await ratioRes.json();
+          ratioAlerts = (ratioData.alerts || []).map(a => ({ ...a, source: 'ratio' }));
+        }
+        
+        // Merge and sort by createdAt descending
+        const allAlerts = [...signalAlerts, ...ratioAlerts].sort((a, b) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ).slice(0, 50);
+        
+        renderMonitoringAlerts(allAlerts);
       } catch (e) {
         console.error('加载告警历史失败', e);
       }
@@ -2812,12 +2833,21 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
         const sentStatus = a.sentAt ? '<span class="status status-enabled">已发送</span>' : '<span class="status status-disabled">未发送</span>';
         const time = new Date(a.createdAt).toLocaleString('zh-CN');
-        // For ratio alerts, show ratio info instead of gap
-        const infoCol = a.alertType.startsWith('RATIO_') ? a.count24h + '%' : a.gapMinutes + ' 分钟';
+        
+        // Different display for signal vs ratio alerts
+        let infoCol, nameCol;
+        if (a.source === 'ratio') {
+          infoCol = a.currentRatio.toFixed(1) + '%';
+          nameCol = escapeHtml(a.message || a.monitorId);
+        } else {
+          infoCol = a.gapMinutes + ' 分钟';
+          nameCol = escapeHtml(a.rule?.name || a.message || a.ruleId);
+        }
+        
         return '<tr>' +
           '<td>' + time + '</td>' +
           '<td>' + typeIcon + ' ' + typeText + '</td>' +
-          '<td>' + escapeHtml(a.rule?.name || a.message || a.ruleId) + '</td>' +
+          '<td>' + nameCol + '</td>' +
           '<td>' + a.previousState + ' → ' + a.currentState + '</td>' +
           '<td>' + infoCol + '</td>' +
           '<td>' + sentStatus + '</td>' +

@@ -93,6 +93,36 @@ try {
     console.log('Tags column added successfully!');
   }
 
+  // Create ratio_alerts table (separate from alerts table to avoid FK constraint issues)
+  const ratioAlertsExists = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='ratio_alerts'"
+  ).get();
+
+  if (ratioAlertsExists) {
+    console.log('ratio_alerts table already exists');
+  } else {
+    console.log('Creating ratio_alerts table...');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ratio_alerts (
+        id TEXT PRIMARY KEY,
+        monitor_id TEXT NOT NULL,
+        alert_type TEXT NOT NULL,
+        previous_state TEXT NOT NULL,
+        current_state TEXT NOT NULL,
+        first_count INTEGER NOT NULL,
+        second_count INTEGER NOT NULL,
+        current_ratio REAL NOT NULL,
+        message TEXT NOT NULL,
+        sent_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ratio_alerts_monitor_id ON ratio_alerts(monitor_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ratio_alerts_created_at ON ratio_alerts(created_at)`);
+    console.log('ratio_alerts table created successfully!');
+  }
+
 } catch (error) {
   console.error('Migration failed:', error);
   process.exit(1);

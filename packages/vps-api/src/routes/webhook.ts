@@ -146,7 +146,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
           sender: payload.from,
           subject: payload.subject,
           recipient: payload.to,
-          receivedAt: new Date(payload.timestamp).toISOString(),
+          receivedAt: new Date(payload.timestamp),
         });
       } catch (monitoringError) {
         // Don't fail the webhook if monitoring tracking fails

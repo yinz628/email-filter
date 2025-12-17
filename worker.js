@@ -124,6 +124,30 @@ async function requireAuth(request, env) {
 // Filter Engine
 // ============================================
 
+// 转义正则表达式特殊字符
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 将 VPS matchMode 转换为 Worker 格式
+function convertVpsMatchMode(matchMode, pattern) {
+  switch (matchMode) {
+    case 'contains':
+      return { matchMode: 'text', pattern };
+    case 'exact':
+      return { matchMode: 'regex', pattern: `^${escapeRegex(pattern)}$` };
+    case 'startsWith':
+      return { matchMode: 'regex', pattern: `^${escapeRegex(pattern)}` };
+    case 'endsWith':
+      return { matchMode: 'regex', pattern: `${escapeRegex(pattern)}$` };
+    case 'regex':
+      return { matchMode: 'regex', pattern };
+    default:
+      // 默认使用包含匹配
+      return { matchMode: 'text', pattern };
+  }
+}
+
 function validatePattern(pattern) {
   try {
     new RegExp(pattern);
@@ -246,18 +270,23 @@ async function syncDynamicRulesFromVps(kv, vpsApiUrl, vpsApiToken) {
     const vpsRules = data.rules || [];
     
     // 转换 VPS 规则格式为本地格式
-    const localRules = vpsRules.map(r => ({
-      id: r.id,
-      name: `[VPS] ${r.pattern}`,
-      type: r.matchType === 'sender' ? 'from' : r.matchType, // sender -> from
-      pattern: r.pattern,
-      matchMode: r.matchMode === 'contains' ? 'text' : 'regex',
-      category: 'dynamic',
-      enabled: r.enabled,
-      createdAt: new Date(r.createdAt).getTime(),
-      updatedAt: new Date(r.updatedAt).getTime(),
-      fromVps: true, // 标记来自 VPS
-    }));
+    const localRules = vpsRules.map(r => {
+      // 正确转换 matchMode 和 pattern
+      const converted = convertVpsMatchMode(r.matchMode, r.pattern);
+      return {
+        id: r.id,
+        name: `[VPS] ${r.pattern}`,
+        type: r.matchType === 'sender' ? 'from' : r.matchType, // sender -> from
+        pattern: converted.pattern,
+        matchMode: converted.matchMode,
+        category: 'dynamic',
+        enabled: r.enabled,
+        createdAt: new Date(r.createdAt).getTime(),
+        updatedAt: new Date(r.updatedAt).getTime(),
+        fromVps: true, // 标记来自 VPS
+        originalMatchMode: r.matchMode, // 保留原始匹配模式用于调试
+      };
+    });
 
     // 获取现有规则数据
     const rulesData = await getAllRulesData(kv);

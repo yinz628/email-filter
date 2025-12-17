@@ -497,12 +497,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="100">100条</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="loadMonitoringAlerts()">🔄 刷新</button>
+            <button class="btn btn-sm btn-danger" id="batch-delete-alerts-btn" onclick="batchDeleteAlerts()" style="display:none;">🗑️ 删除选中</button>
           </div>
         </div>
         <div class="card-body" id="alerts-card-body" style="margin-top:15px;">
           <table>
             <thead>
               <tr>
+                <th style="width:30px;"><input type="checkbox" id="select-all-alerts" onchange="toggleSelectAllAlerts()"></th>
                 <th>时间</th>
                 <th>类型</th>
                 <th>规则</th>
@@ -3047,7 +3049,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderMonitoringAlerts(alerts) {
       const tbody = document.getElementById('monitoring-alerts-table');
       if (alerts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无告警记录</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">暂无告警记录</td></tr>';
+        document.getElementById('batch-delete-alerts-btn').style.display = 'none';
         return;
       }
       
@@ -3089,9 +3092,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           nameCol = escapeHtml(a.rule?.name || a.message || a.ruleId);
         }
         
+        const checkbox = '<input type="checkbox" class="alert-checkbox" data-id="' + a.id + '" data-source="' + a.source + '" onchange="updateBatchDeleteBtn()">';
         const deleteBtn = '<button class="btn btn-sm btn-danger" onclick="deleteAlert(\\'' + a.id + '\\', \\'' + a.source + '\\')">删除</button>';
         
         return '<tr>' +
+          '<td>' + checkbox + '</td>' +
           '<td>' + time + '</td>' +
           '<td>' + typeIcon + ' ' + typeText + '</td>' +
           '<td>' + nameCol + '</td>' +
@@ -3103,8 +3108,65 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }).join('');
       
       if (filtered.length > limit) {
-        tbody.innerHTML += '<tr><td colspan="7" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + filtered.length + ' 条</td></tr>';
+        tbody.innerHTML += '<tr><td colspan="8" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + filtered.length + ' 条</td></tr>';
       }
+      
+      // Reset select all checkbox
+      document.getElementById('select-all-alerts').checked = false;
+      document.getElementById('batch-delete-alerts-btn').style.display = 'none';
+    }
+    
+    function toggleSelectAllAlerts() {
+      const selectAll = document.getElementById('select-all-alerts').checked;
+      document.querySelectorAll('.alert-checkbox').forEach(cb => cb.checked = selectAll);
+      updateBatchDeleteBtn();
+    }
+    
+    function updateBatchDeleteBtn() {
+      const checkedCount = document.querySelectorAll('.alert-checkbox:checked').length;
+      const btn = document.getElementById('batch-delete-alerts-btn');
+      if (checkedCount > 0) {
+        btn.style.display = 'inline-flex';
+        btn.textContent = '🗑️ 删除选中 (' + checkedCount + ')';
+      } else {
+        btn.style.display = 'none';
+      }
+    }
+    
+    async function batchDeleteAlerts() {
+      const checkboxes = document.querySelectorAll('.alert-checkbox:checked');
+      if (checkboxes.length === 0) return;
+      
+      if (!confirm('确定要删除选中的 ' + checkboxes.length + ' 条告警记录吗？')) return;
+      
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const cb of checkboxes) {
+        const id = cb.dataset.id;
+        const source = cb.dataset.source;
+        try {
+          const url = source === 'ratio' ? '/api/monitoring/ratio/alerts/' + id : '/api/monitoring/alerts/' + id;
+          const res = await fetch(url, {
+            method: 'DELETE',
+            headers: getHeaders()
+          });
+          if (res.ok) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (e) {
+          failCount++;
+        }
+      }
+      
+      if (failCount === 0) {
+        showAlert('成功删除 ' + successCount + ' 条记录');
+      } else {
+        showAlert('删除完成: 成功 ' + successCount + ' 条, 失败 ' + failCount + ' 条', 'error');
+      }
+      loadMonitoringAlerts();
     }
     
     async function deleteAlert(id, source) {

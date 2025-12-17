@@ -3460,16 +3460,30 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
         funnelHtml += '</div>';
         
+        // Build threshold status badges
+        let thresholdBadges = '';
+        if (funnelSteps.length > 1) {
+          for (let i = 1; i < funnelSteps.length; i++) {
+            const stepState = funnelSteps[i].state;
+            const threshold = stepThresholds[i] || 80;
+            const badgeColor = stepState === 'HEALTHY' ? '#28a745' : '#dc3545';
+            const badgeBg = stepState === 'HEALTHY' ? '#e8f5e9' : '#ffebee';
+            const badgeIcon = stepState === 'HEALTHY' ? '🟢' : '🔴';
+            thresholdBadges += '<span style="font-size:11px;padding:2px 6px;background:' + badgeBg + ';color:' + badgeColor + ';border-radius:3px;border:1px solid ' + badgeColor + ';margin-right:4px;">' + (i) + '→' + (i+1) + ': ' + threshold + '% ' + badgeIcon + '</span>';
+          }
+        }
+        
         return '<div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
             '<div>' +
               '<strong style="font-size:16px;">' + escapeHtml(r.name) + '</strong>' +
               ' <span class="tag">' + escapeHtml(r.tag) + '</span>' +
               ' <span class="status ' + stateClass + '">' + stateIcon + ' ' + (status?.state || '-') + '</span>' +
               ' ' + enabledStatus +
             '</div>' +
-            '<div class="actions">' +
-              '<span style="color:#666;font-size:12px;margin-right:10px;">时间窗口: ' + timeWindowText + ' | 阈值: ' + r.thresholdPercent + '%</span>' +
+            '<div class="actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+              '<span style="color:#666;font-size:12px;">时间窗口: ' + timeWindowText + '</span>' +
+              thresholdBadges +
               '<button class="btn btn-sm btn-primary" onclick="editRatioMonitor(\\'' + r.id + '\\')">编辑</button>' +
               '<button class="btn btn-sm btn-' + (r.enabled ? 'warning' : 'success') + '" onclick="toggleRatioMonitor(\\'' + r.id + '\\')">' + (r.enabled ? '禁用' : '启用') + '</button>' +
               '<button class="btn btn-sm btn-danger" onclick="deleteRatioMonitor(\\'' + r.id + '\\')">删除</button>' +

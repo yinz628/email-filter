@@ -623,4 +623,96 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  // ============================================
+  // Enhanced Analysis Routes (活动转移路径分析)
+  // ============================================
+
+  /**
+   * GET /api/campaign/merchants/:id/transitions
+   * Get campaign transitions (活动转移路径表)
+   * Returns: From | To | User_Count | Transition_Ratio
+   */
+  fastify.get('/merchants/:id/transitions', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      // Check if merchant exists
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const transitions = service.getCampaignTransitions(request.params.id);
+
+      return reply.send(transitions);
+    } catch (error) {
+      request.log.error(error, 'Error fetching campaign transitions');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/merchants/:id/branches
+   * Get path branch analysis (路径分支分析)
+   * Identifies main paths and secondary paths
+   */
+  fastify.get('/merchants/:id/branches', async (
+    request: FastifyRequest<{ Params: MerchantParams; Querystring: { minPathLength?: string; mainPathThreshold?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      // Check if merchant exists
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const { minPathLength, mainPathThreshold } = request.query;
+      const minLen = minPathLength ? parseInt(minPathLength, 10) : 2;
+      const threshold = mainPathThreshold ? parseFloat(mainPathThreshold) : 5;
+
+      const branches = service.getPathBranchAnalysis(request.params.id, minLen, threshold);
+
+      return reply.send(branches);
+    } catch (error) {
+      request.log.error(error, 'Error fetching path branches');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/merchants/:id/valuable-analysis
+   * Get valuable campaigns analysis (有价值活动路径视图)
+   * Shows common predecessors and successors for valuable campaigns
+   */
+  fastify.get('/merchants/:id/valuable-analysis', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      // Check if merchant exists
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      const analysis = service.getValuableCampaignsAnalysis(request.params.id);
+
+      return reply.send(analysis);
+    } catch (error) {
+      request.log.error(error, 'Error fetching valuable campaigns analysis');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

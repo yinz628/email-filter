@@ -29,6 +29,14 @@ import type {
   CampaignFlow,
   FlowNode,
   FlowEdge,
+  CampaignTransition,
+  CampaignTransitionsResult,
+  PathBranch,
+  PathBranchAnalysis,
+  ValuableCampaignPath,
+  ValuableCampaignsAnalysis,
+  PredecessorInfo,
+  SuccessorInfo,
 } from '@email-filter/shared';
 import { toMerchant, toCampaign } from '@email-filter/shared';
 
@@ -920,5 +928,391 @@ export class CampaignAnalyticsService {
       nodes,
       edges,
     };
+  }
+
+  // ============================================
+  // Campaign Transition Analysis Methods (活动转移路径)
+  // ============================================
+
+  /**
+   * Get campaign transitions for a merchant
+   * Extracts all campaign-to-campaign transitions from recipient paths
+   * 
+   * @param merchantId - Merchant ID to analyze
+   * @returns CampaignTransitionsResult with all transitions
+   */
+  getCampaignTransitions(merchantId: string): CampaignTransitionsResult {
+    // Get all recipient paths
+    const pathsStmt = this.db.prepare(`
+      SELECT 
+        rp.recipient,
+        rp.campaign_id,
+        rp.sequence_order,
+        c.subject,
+        c.is_valuable
+      FROM recipient_paths rp
+      JOIN campaigns c ON rp.campaign_id = c.id
+      WHERE rp.merchant_id = ?
+      ORDER BY rp.recipient, rp.sequence_order ASC
+    `);
+
+    const rows = pathsStmt.all(merchantId) as Array<{
+      recipient: string;
+      campaign_id: string;
+      sequence_order: number;
+      subject: string;
+      is_valuable: number;
+    }>;
+
+    // Group by recipient
+    const recipientPaths = new Map<string, Array<{
+      campaignId: string;
+      subject: string;
+      isValuable: boolean;
+    }>>();
+
+    for (const row of rows) {
+      if (!recipientPaths.has(row.recipient)) {
+        recipientPaths.set(row.recipient, []);
+      }
+      recipientPaths.get(row.recipient)!.push({
+        campaignId: row.campaign_id,
+        subject: row.subject,
+        isValuable: row.is_valuable === 1,
+      });
+    }
+
+    const totalRecipients = recipientPaths.size;
+
+    // Extract transitions
+    const transitionMap = new Map<string, {
+      fromCampaignId: string;
+      fromSubject: string;
+      fromIsValuable: boolean;
+      toCampaignId: string;
+      toSubject: string;
+      toIsValuable: boolean;
+      users: Set<string>;
+    }>();
+
+    for (const [recipient, path] of recipientPaths) {
+      for (let i = 0; i < path.length - 1; i++) {
+        const from = path[i];
+        const to = path[i + 1];
+        const key = `${from.campaignId}:${to.campaignId}`;
+
+        if (!transitionMap.has(key)) {
+          transitionMap.set(key, {
+            fromCampaignId: from.campaignId,
+            fromSubject: from.subject,
+            fromIsValuable: from.isValuable,
+            toCampaignId: to.campaignId,
+            toSubject: to.subject,
+            toIsValuable: to.isValuable,
+            users: new Set(),
+          });
+        }
+        transitionMap.get(key)!.users.add(recipient);
+      }
+    }
+
+    // Convert to result array
+    const transitions: CampaignTransition[] = Array.from(transitionMap.values())
+      .map(t => ({
+        fromCampaignId: t.fromCampaignId,
+        fromSubject: t.fromSubject,
+        fromIsValuable: t.fromIsValuable,
+        toCampaignId: t.toCampaignId,
+        toSubject: t.toSubject,
+        toIsValuable: t.toIsValuable,
+        userCount: t.users.size,
+        transitionRatio: totalRecipients > 0 ? (t.users.size / totalRecipients) * 100 : 0,
+      }))
+      .sort((a, b) => b.userCount - a.userCount);
+
+    return {
+      merchantId,
+      totalRecipients,
+      transitions,
+    };
+  }
+
+  // ============================================
+  // Path Branch Analysis Methods (路径分支分析)
+  // ============================================
+
+  /**
+   * Analyze path branches for a merchant
+   * Identifies main paths (high frequency) and secondary paths (lower frequency)
+   * 
+   * @param merchantId - Merchant ID to analyze
+   * @param minPathLength - Minimum path length to consider (default: 2)
+   * @param mainPathThreshold - Percentage threshold for main paths (default: 5%)
+   * @returns PathBranchAnalysis with main and secondary paths
+   */
+  getPathBranchAnalysis(
+    merchantId: string,
+    minPathLength: number = 2,
+    mainPathThreshold: number = 5
+  ): PathBranchAnalysis {
+    // Get all recipient paths
+    const pathsStmt = this.db.prepare(`
+      SELECT 
+        rp.recipient,
+        rp.campaign_id,
+        rp.sequence_order,
+        c.subject,
+        c.is_valuable
+      FROM recipient_paths rp
+      JOIN campaigns c ON rp.campaign_id = c.id
+      WHERE rp.merchant_id = ?
+      ORDER BY rp.recipient, rp.sequence_order ASC
+    `);
+
+    const rows = pathsStmt.all(merchantId) as Array<{
+      recipient: string;
+      campaign_id: string;
+      sequence_order: number;
+      subject: string;
+      is_valuable: number;
+    }>;
+
+    // Group by recipient
+    const recipientPaths = new Map<string, Array<{
+      campaignId: string;
+      subject: string;
+      isValuable: boolean;
+    }>>();
+
+    for (const row of rows) {
+      if (!recipientPaths.has(row.recipient)) {
+        recipientPaths.set(row.recipient, []);
+      }
+      recipientPaths.get(row.recipient)!.push({
+        campaignId: row.campaign_id,
+        subject: row.subject,
+        isValuable: row.is_valuable === 1,
+      });
+    }
+
+    const totalRecipients = recipientPaths.size;
+
+    // Count unique paths
+    const pathCountMap = new Map<string, {
+      path: string[];
+      subjects: string[];
+      valuableCampaignIds: string[];
+      count: number;
+    }>();
+
+    for (const [, path] of recipientPaths) {
+      if (path.length < minPathLength) continue;
+
+      const pathKey = path.map(p => p.campaignId).join('->');
+      
+      if (!pathCountMap.has(pathKey)) {
+        pathCountMap.set(pathKey, {
+          path: path.map(p => p.campaignId),
+          subjects: path.map(p => p.subject),
+          valuableCampaignIds: path.filter(p => p.isValuable).map(p => p.campaignId),
+          count: 0,
+        });
+      }
+      pathCountMap.get(pathKey)!.count++;
+    }
+
+    // Convert to PathBranch array
+    const allPaths: PathBranch[] = Array.from(pathCountMap.values())
+      .map(p => ({
+        path: p.path,
+        subjects: p.subjects,
+        userCount: p.count,
+        percentage: totalRecipients > 0 ? (p.count / totalRecipients) * 100 : 0,
+        hasValuable: p.valuableCampaignIds.length > 0,
+        valuableCampaignIds: p.valuableCampaignIds,
+      }))
+      .sort((a, b) => b.userCount - a.userCount);
+
+    // Separate into main and secondary paths
+    const mainPaths = allPaths.filter(p => p.percentage >= mainPathThreshold);
+    const secondaryPaths = allPaths.filter(p => p.percentage < mainPathThreshold && p.percentage >= 1);
+    const valuablePaths = allPaths.filter(p => p.hasValuable).slice(0, 20);
+
+    return {
+      merchantId,
+      totalRecipients,
+      mainPaths: mainPaths.slice(0, 10),
+      secondaryPaths: secondaryPaths.slice(0, 20),
+      valuablePaths,
+    };
+  }
+
+  // ============================================
+  // Valuable Campaign Analysis Methods (有价值活动路径视图)
+  // ============================================
+
+  /**
+   * Analyze valuable campaigns and their path context
+   * Shows common predecessors and successors for each valuable campaign
+   * 
+   * @param merchantId - Merchant ID to analyze
+   * @returns ValuableCampaignsAnalysis with detailed path info for valuable campaigns
+   */
+  getValuableCampaignsAnalysis(merchantId: string): ValuableCampaignsAnalysis {
+    // Get all valuable campaigns for this merchant
+    const valuableCampaignsStmt = this.db.prepare(`
+      SELECT id, subject, unique_recipients
+      FROM campaigns
+      WHERE merchant_id = ? AND is_valuable = 1
+      ORDER BY unique_recipients DESC
+    `);
+
+    const valuableCampaigns = valuableCampaignsStmt.all(merchantId) as Array<{
+      id: string;
+      subject: string;
+      unique_recipients: number;
+    }>;
+
+    if (valuableCampaigns.length === 0) {
+      return {
+        merchantId,
+        totalValuableCampaigns: 0,
+        valuableCampaigns: [],
+      };
+    }
+
+    // Get total recipients for percentage calculation
+    const totalRecipientsStmt = this.db.prepare(`
+      SELECT COUNT(DISTINCT recipient) as total
+      FROM recipient_paths
+      WHERE merchant_id = ?
+    `);
+    const totalResult = totalRecipientsStmt.get(merchantId) as { total: number };
+    const totalRecipients = totalResult.total;
+
+    // Get transitions data
+    const transitions = this.getCampaignTransitions(merchantId);
+
+    // Calculate DAG levels using topological sort
+    const levels = this.calculateDAGLevels(merchantId);
+
+    // Build analysis for each valuable campaign
+    const valuableCampaignPaths: ValuableCampaignPath[] = valuableCampaigns.map(vc => {
+      // Find predecessors (campaigns that lead to this one)
+      const predecessors: PredecessorInfo[] = transitions.transitions
+        .filter(t => t.toCampaignId === vc.id)
+        .map(t => ({
+          campaignId: t.fromCampaignId,
+          subject: t.fromSubject,
+          isValuable: t.fromIsValuable,
+          transitionCount: t.userCount,
+          transitionRatio: t.transitionRatio,
+        }))
+        .sort((a, b) => b.transitionCount - a.transitionCount)
+        .slice(0, 5);
+
+      // Find successors (campaigns that follow this one)
+      const successors: SuccessorInfo[] = transitions.transitions
+        .filter(t => t.fromCampaignId === vc.id)
+        .map(t => ({
+          campaignId: t.toCampaignId,
+          subject: t.toSubject,
+          isValuable: t.toIsValuable,
+          transitionCount: t.userCount,
+          transitionRatio: t.transitionRatio,
+        }))
+        .sort((a, b) => b.transitionCount - a.transitionCount)
+        .slice(0, 5);
+
+      return {
+        campaignId: vc.id,
+        subject: vc.subject,
+        level: levels.get(vc.id) || 1,
+        recipientCount: vc.unique_recipients,
+        percentage: totalRecipients > 0 ? (vc.unique_recipients / totalRecipients) * 100 : 0,
+        commonPredecessors: predecessors,
+        commonSuccessors: successors,
+      };
+    });
+
+    return {
+      merchantId,
+      totalValuableCampaigns: valuableCampaigns.length,
+      valuableCampaigns: valuableCampaignPaths,
+    };
+  }
+
+  /**
+   * Calculate DAG levels for campaigns using topological sort
+   * Level 1 = campaigns with no predecessors (in-degree 0)
+   * Level N = campaigns whose all predecessors are at level < N
+   * 
+   * @param merchantId - Merchant ID
+   * @returns Map of campaignId to level
+   */
+  private calculateDAGLevels(merchantId: string): Map<string, number> {
+    const transitions = this.getCampaignTransitions(merchantId);
+    
+    // Build adjacency list and in-degree count
+    const inDegree = new Map<string, number>();
+    const outEdges = new Map<string, string[]>();
+    const allCampaigns = new Set<string>();
+
+    for (const t of transitions.transitions) {
+      allCampaigns.add(t.fromCampaignId);
+      allCampaigns.add(t.toCampaignId);
+
+      // Initialize in-degree
+      if (!inDegree.has(t.fromCampaignId)) inDegree.set(t.fromCampaignId, 0);
+      if (!inDegree.has(t.toCampaignId)) inDegree.set(t.toCampaignId, 0);
+
+      // Increment in-degree for target
+      inDegree.set(t.toCampaignId, (inDegree.get(t.toCampaignId) || 0) + 1);
+
+      // Add to out edges
+      if (!outEdges.has(t.fromCampaignId)) outEdges.set(t.fromCampaignId, []);
+      outEdges.get(t.fromCampaignId)!.push(t.toCampaignId);
+    }
+
+    // Topological sort with level assignment
+    const levels = new Map<string, number>();
+    const queue: string[] = [];
+
+    // Start with in-degree 0 nodes (Level 1)
+    for (const [campaignId, degree] of inDegree) {
+      if (degree === 0) {
+        queue.push(campaignId);
+        levels.set(campaignId, 1);
+      }
+    }
+
+    // BFS to assign levels
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const currentLevel = levels.get(current) || 1;
+      const neighbors = outEdges.get(current) || [];
+
+      for (const neighbor of neighbors) {
+        const newDegree = (inDegree.get(neighbor) || 1) - 1;
+        inDegree.set(neighbor, newDegree);
+
+        // Update level to be max of current level + 1
+        const existingLevel = levels.get(neighbor) || 0;
+        levels.set(neighbor, Math.max(existingLevel, currentLevel + 1));
+
+        if (newDegree === 0) {
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    // Handle any remaining campaigns (cycles or isolated)
+    for (const campaignId of allCampaigns) {
+      if (!levels.has(campaignId)) {
+        levels.set(campaignId, 1);
+      }
+    }
+
+    return levels;
   }
 }

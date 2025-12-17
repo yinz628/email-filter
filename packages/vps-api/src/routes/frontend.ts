@@ -1566,8 +1566,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + m.totalEmails + '</td>' +
           '<td>' + createdAt + '</td>' +
           '<td class="actions">' +
-            '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">查看活动</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="showMerchantFlow(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">路径分析</button>' +
+            '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">活动</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="showMerchantFlow(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">路径</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="showTransitions(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">转移</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="showValuableAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">价值</button>' +
           '</td></tr>';
       }).join('');
     }
@@ -1723,6 +1725,118 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       });
       
       html += '</div></div>';
+      container.innerHTML = html;
+    }
+
+    // ============================================
+    // Enhanced Analysis Views (活动转移路径分析)
+    // ============================================
+
+    async function showTransitions(merchantId, domain) {
+      document.getElementById('flow-title').textContent = '活动转移路径 - ' + domain;
+      document.getElementById('campaign-flow-section').style.display = 'block';
+      document.getElementById('campaigns-section').style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/transitions', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderTransitions(data);
+      } catch (e) {
+        document.getElementById('flow-container').innerHTML = '<p style="color:#999;text-align:center;">加载失败或暂无数据</p>';
+      }
+    }
+
+    function renderTransitions(data) {
+      const container = document.getElementById('flow-container');
+      if (!data.transitions || data.transitions.length === 0) {
+        container.innerHTML = '<p style="color:#999;text-align:center;">暂无转移数据</p>';
+        return;
+      }
+      
+      let html = '<div style="margin-bottom:15px;color:#666;">总收件人: ' + data.totalRecipients + '</div>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+      html += '<thead><tr style="background:#f8f9fa;">';
+      html += '<th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">来源活动</th>';
+      html += '<th style="padding:8px;text-align:center;border-bottom:2px solid #ddd;">→</th>';
+      html += '<th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">目标活动</th>';
+      html += '<th style="padding:8px;text-align:right;border-bottom:2px solid #ddd;">人数</th>';
+      html += '<th style="padding:8px;text-align:right;border-bottom:2px solid #ddd;">比例</th>';
+      html += '</tr></thead><tbody>';
+      
+      data.transitions.slice(0, 50).forEach(t => {
+        const fromValuable = t.fromIsValuable ? ' <span style="color:#28a745;">✓</span>' : '';
+        const toValuable = t.toIsValuable ? ' <span style="color:#28a745;">✓</span>' : '';
+        html += '<tr style="border-bottom:1px solid #eee;">';
+        html += '<td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(t.fromSubject) + '">' + escapeHtml(t.fromSubject.substring(0, 40)) + fromValuable + '</td>';
+        html += '<td style="padding:8px;text-align:center;color:#999;">→</td>';
+        html += '<td style="padding:8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(t.toSubject) + '">' + escapeHtml(t.toSubject.substring(0, 40)) + toValuable + '</td>';
+        html += '<td style="padding:8px;text-align:right;font-weight:bold;">' + t.userCount + '</td>';
+        html += '<td style="padding:8px;text-align:right;color:#666;">' + t.transitionRatio.toFixed(1) + '%</td>';
+        html += '</tr>';
+      });
+      
+      html += '</tbody></table>';
+      if (data.transitions.length > 50) {
+        html += '<p style="color:#999;text-align:center;margin-top:10px;">显示前 50 条转移记录</p>';
+      }
+      container.innerHTML = html;
+    }
+
+    async function showValuableAnalysis(merchantId, domain) {
+      document.getElementById('flow-title').textContent = '有价值活动分析 - ' + domain;
+      document.getElementById('campaign-flow-section').style.display = 'block';
+      document.getElementById('campaigns-section').style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId + '/valuable-analysis', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderValuableAnalysis(data);
+      } catch (e) {
+        document.getElementById('flow-container').innerHTML = '<p style="color:#999;text-align:center;">加载失败或暂无数据</p>';
+      }
+    }
+
+    function renderValuableAnalysis(data) {
+      const container = document.getElementById('flow-container');
+      if (!data.valuableCampaigns || data.valuableCampaigns.length === 0) {
+        container.innerHTML = '<p style="color:#999;text-align:center;">暂无有价值活动数据。请先标记一些活动为有价值。</p>';
+        return;
+      }
+      
+      let html = '<div style="margin-bottom:15px;color:#666;">有价值活动总数: ' + data.totalValuableCampaigns + '</div>';
+      
+      data.valuableCampaigns.forEach(vc => {
+        html += '<div style="background:#f8f9fa;border:1px solid #ddd;border-radius:8px;padding:15px;margin-bottom:15px;">';
+        html += '<div style="font-weight:bold;margin-bottom:10px;color:#28a745;">✓ ' + escapeHtml(vc.subject) + '</div>';
+        html += '<div style="font-size:12px;color:#666;margin-bottom:10px;">层级: ' + vc.level + ' | 收件人: ' + vc.recipientCount + ' (' + vc.percentage.toFixed(1) + '%)</div>';
+        
+        // Predecessors
+        if (vc.commonPredecessors && vc.commonPredecessors.length > 0) {
+          html += '<div style="margin-top:10px;"><strong style="font-size:12px;color:#555;">常见前驱活动:</strong>';
+          html += '<ul style="margin:5px 0 0 20px;padding:0;font-size:12px;">';
+          vc.commonPredecessors.forEach(p => {
+            const valuable = p.isValuable ? ' <span style="color:#28a745;">✓</span>' : '';
+            html += '<li style="margin-bottom:3px;">' + escapeHtml(p.subject.substring(0, 50)) + valuable + ' (' + p.transitionCount + '人, ' + p.transitionRatio.toFixed(1) + '%)</li>';
+          });
+          html += '</ul></div>';
+        }
+        
+        // Successors
+        if (vc.commonSuccessors && vc.commonSuccessors.length > 0) {
+          html += '<div style="margin-top:10px;"><strong style="font-size:12px;color:#555;">常见后续活动:</strong>';
+          html += '<ul style="margin:5px 0 0 20px;padding:0;font-size:12px;">';
+          vc.commonSuccessors.forEach(s => {
+            const valuable = s.isValuable ? ' <span style="color:#28a745;">✓</span>' : '';
+            html += '<li style="margin-bottom:3px;">' + escapeHtml(s.subject.substring(0, 50)) + valuable + ' (' + s.transitionCount + '人, ' + s.transitionRatio.toFixed(1) + '%)</li>';
+          });
+          html += '</ul></div>';
+        }
+        
+        html += '</div>';
+      });
+      
       container.innerHTML = html;
     }
 

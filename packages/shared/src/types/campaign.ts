@@ -105,6 +105,103 @@ export interface LevelCampaign {
 }
 
 // ============================================
+// Transition Analysis Types (活动转移路径)
+// ============================================
+
+/**
+ * Campaign transition - represents a transition from one campaign to another
+ * 活动转移关系
+ */
+export interface CampaignTransition {
+  fromCampaignId: string;
+  fromSubject: string;
+  fromIsValuable: boolean;
+  toCampaignId: string;
+  toSubject: string;
+  toIsValuable: boolean;
+  userCount: number;
+  transitionRatio: number; // Percentage of users who made this transition
+}
+
+/**
+ * Campaign transitions result
+ */
+export interface CampaignTransitionsResult {
+  merchantId: string;
+  totalRecipients: number;
+  transitions: CampaignTransition[];
+}
+
+/**
+ * Path branch analysis - identifies main and secondary paths
+ * 路径分支分析
+ */
+export interface PathBranch {
+  path: string[]; // Array of campaign IDs in order
+  subjects: string[]; // Corresponding subjects
+  userCount: number;
+  percentage: number;
+  hasValuable: boolean; // Whether this path contains valuable campaigns
+  valuableCampaignIds: string[]; // IDs of valuable campaigns in this path
+}
+
+/**
+ * Path branch analysis result
+ */
+export interface PathBranchAnalysis {
+  merchantId: string;
+  totalRecipients: number;
+  mainPaths: PathBranch[]; // High frequency paths
+  secondaryPaths: PathBranch[]; // Lower frequency paths
+  valuablePaths: PathBranch[]; // Paths containing valuable campaigns
+}
+
+/**
+ * Valuable campaign path analysis
+ * 有价值活动路径视图
+ */
+export interface ValuableCampaignPath {
+  campaignId: string;
+  subject: string;
+  level: number; // Calculated level in DAG
+  recipientCount: number;
+  percentage: number;
+  commonPredecessors: PredecessorInfo[]; // Common campaigns that lead to this one
+  commonSuccessors: SuccessorInfo[]; // Common campaigns that follow this one
+}
+
+/**
+ * Predecessor campaign info
+ */
+export interface PredecessorInfo {
+  campaignId: string;
+  subject: string;
+  isValuable: boolean;
+  transitionCount: number;
+  transitionRatio: number;
+}
+
+/**
+ * Successor campaign info
+ */
+export interface SuccessorInfo {
+  campaignId: string;
+  subject: string;
+  isValuable: boolean;
+  transitionCount: number;
+  transitionRatio: number;
+}
+
+/**
+ * Valuable campaigns analysis result
+ */
+export interface ValuableCampaignsAnalysis {
+  merchantId: string;
+  totalValuableCampaigns: number;
+  valuableCampaigns: ValuableCampaignPath[];
+}
+
+// ============================================
 // Flow Analysis Types
 // ============================================
 

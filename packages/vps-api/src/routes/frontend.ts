@@ -539,10 +539,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 <th>时间</th>
                 <th>类型</th>
                 <th>规则</th>
-                <th>状态变化</th>
-                <th>间隔</th>
-                <th>发送状态</th>
-                <th>操作</th>
+                <th style="white-space:nowrap;">状态变化</th>
+                <th style="white-space:nowrap;">间隔</th>
+                <th style="white-space:nowrap;">发送状态</th>
+                <th style="white-space:nowrap;">操作</th>
               </tr>
             </thead>
             <tbody id="monitoring-alerts-table"></tbody>
@@ -3240,7 +3240,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           default:
             typeIcon = '❓'; typeText = a.alertType;
         }
-        const sentStatus = a.sentAt ? '<span class="status status-enabled">已发送</span>' : '<span class="status status-disabled">未发送</span>';
+        const sentStatus = a.sentAt ? '<span class="status status-enabled" style="white-space:nowrap;">已发送</span>' : '<span class="status status-disabled" style="white-space:nowrap;">未发送</span>';
         const time = new Date(a.createdAt).toLocaleString('zh-CN');
         
         // Different display for signal vs ratio alerts

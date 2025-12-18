@@ -990,9 +990,79 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  // ============================================
-  // User Statistics Routes (新老用户统计)
-  // ============================================
+  /**
+   * POST /api/campaign/merchants/:id/rebuild-paths
+   * Rebuild recipient paths from campaign_emails data
+   * 
+   * Requirements: 3.1, 3.4
+   */
+  fastify.post('/merchants/:id/rebuild-paths', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      // Get workerNames from request body (optional array)
+      const body = request.body as { workerNames?: string[] } | undefined;
+      const workerNames = Array.isArray(body?.workerNames) ? body.workerNames : undefined;
+
+      const result = service.rebuildRecipientPaths(request.params.id, workerNames);
+
+      return reply.send({
+        merchantId: request.params.id,
+        pathsDeleted: result.pathsDeleted,
+        pathsCreated: result.pathsCreated,
+        recipientsProcessed: result.recipientsProcessed,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error rebuilding recipient paths');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/merchants/:id/cleanup-old-customers
+   * Clean up old customer path data (recipients whose first email was not from a Root campaign)
+   * Preserves campaign_emails records, only removes recipient_paths entries
+   * 
+   * Requirements: 7.4, 7.6
+   */
+  fastify.post('/merchants/:id/cleanup-old-customers', async (
+    request: FastifyRequest<{ Params: MerchantParams }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchant = service.getMerchantById(request.params.id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      // Get workerNames from request body (optional array)
+      const body = request.body as { workerNames?: string[] } | undefined;
+      const workerNames = Array.isArray(body?.workerNames) ? body.workerNames : undefined;
+
+      const result = service.cleanupOldCustomerPaths(request.params.id, workerNames);
+
+      return reply.send({
+        merchantId: request.params.id,
+        pathsDeleted: result.pathsDeleted,
+        recipientsAffected: result.recipientsAffected,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error cleaning up old customer paths');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 
   /**
    * GET /api/campaign/merchants/:id/user-stats
@@ -1079,23 +1149,34 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
    * GET /api/campaign/merchants/:id/path-analysis
    * Get complete path analysis (综合路径分析)
    * Returns all analysis data in one request
-   * Query params: workerName (optional) - filter by worker instance
+   * Query params: 
+   *   - workerNames (optional) - comma-separated list of worker names for multi-worker filtering
+   *   - workerName (optional, deprecated) - single worker name for backward compatibility
+   * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
    */
   fastify.get('/merchants/:id/path-analysis', async (
-    request: FastifyRequest<{ Params: MerchantParams; Querystring: { workerName?: string } }>,
+    request: FastifyRequest<{ Params: MerchantParams; Querystring: { workerName?: string; workerNames?: string } }>,
     reply: FastifyReply
   ) => {
     try {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
-      const { workerName } = request.query;
+      const { workerName, workerNames: workerNamesParam } = request.query;
 
       const merchant = service.getMerchantById(request.params.id);
       if (!merchant) {
         return reply.status(404).send({ error: 'Merchant not found' });
       }
 
-      const analysis = service.getPathAnalysis(request.params.id, workerName);
+      // Parse workerNames from comma-separated string, or use single workerName for backward compatibility
+      let workerNames: string[] | undefined;
+      if (workerNamesParam) {
+        workerNames = workerNamesParam.split(',').map(w => w.trim()).filter(w => w.length > 0);
+      } else if (workerName) {
+        workerNames = [workerName];
+      }
+
+      const analysis = service.getPathAnalysis(request.params.id, workerNames);
 
       return reply.send(analysis);
     } catch (error) {
@@ -1351,6 +1432,15 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Invalid request', message: 'workerName is required' });
     }
 
+    // Validate workerNames if provided
+    let workerNames: string[] | undefined;
+    if (body.workerNames !== undefined) {
+      if (!Array.isArray(body.workerNames) || !body.workerNames.every((w: unknown) => typeof w === 'string')) {
+        return reply.status(400).send({ error: 'Invalid request', message: 'workerNames must be an array of strings' });
+      }
+      workerNames = body.workerNames as string[];
+    }
+
     try {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
@@ -1359,6 +1449,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
         name: body.name.trim(),
         merchantId: body.merchantId,
         workerName: body.workerName,
+        workerNames,
         note: typeof body.note === 'string' ? body.note : undefined,
       };
 
@@ -1406,6 +1497,13 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
 
       if (body?.note !== undefined) {
         data.note = typeof body.note === 'string' ? body.note : undefined;
+      }
+
+      if (body?.workerNames !== undefined) {
+        if (!Array.isArray(body.workerNames) || !body.workerNames.every((w: unknown) => typeof w === 'string')) {
+          return reply.status(400).send({ error: 'Invalid request', message: 'workerNames must be an array of strings' });
+        }
+        data.workerNames = body.workerNames as string[];
       }
 
       const project = service.updateAnalysisProject(request.params.id, data);

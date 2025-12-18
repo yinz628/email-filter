@@ -5236,4 +5236,1677 @@ describe('Statistics Update After Delete', () => {
       );
     });
   });
+
+  /**
+   * **Feature: path-analysis-enhancement, Property 1: Path Rebuild Consistency**
+   * **Validates: Requirements 3.2**
+   * 
+   * For any merchant with campaign_emails data, rebuilding paths should create paths
+   * that match the chronological order of emails for each recipient.
+   */
+  describe('Property 1: Path Rebuild Consistency', () => {
+    /**
+     * Test service extension with rebuildRecipientPaths support for sql.js
+     */
+    class TestServiceWithRebuild extends TestCampaignAnalyticsService {
+      rebuildRecipientPaths(
+        merchantId: string,
+        workerNames?: string[]
+      ): { pathsDeleted: number; pathsCreated: number; recipientsProcessed: number } {
+        // Get all campaign emails for this merchant, ordered by recipient and received_at
+        let emailsQuery = `
+          SELECT ce.recipient, ce.campaign_id, ce.received_at, c.merchant_id
+          FROM campaign_emails ce
+          JOIN campaigns c ON ce.campaign_id = c.id
+          WHERE c.merchant_id = ?
+        `;
+        const params: any[] = [merchantId];
+
+        // Filter by worker names if provided and non-empty
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          emailsQuery += ` AND ce.worker_name IN (${placeholders})`;
+          params.push(...workerNames);
+        }
+
+        emailsQuery += ' ORDER BY ce.recipient, ce.received_at ASC';
+
+        const result = this.db.exec(emailsQuery, params);
+        const emails: Array<{
+          recipient: string;
+          campaign_id: string;
+          received_at: string;
+          merchant_id: string;
+        }> = [];
+
+        if (result.length > 0) {
+          const columns = result[0].columns;
+          for (const row of result[0].values) {
+            const obj: any = {};
+            columns.forEach((col, i) => {
+              obj[col] = row[i];
+            });
+            emails.push({
+              recipient: obj.recipient,
+              campaign_id: obj.campaign_id,
+              received_at: obj.received_at,
+              merchant_id: obj.merchant_id,
+            });
+          }
+        }
+
+        // Count paths before deletion
+        const countBefore = this.db.exec(
+          'SELECT COUNT(*) as count FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+        
+        const pathsDeleted = countBefore.length > 0 && countBefore[0].values.length > 0 
+          ? countBefore[0].values[0][0] as number 
+          : 0;
+
+        // Delete existing paths for this merchant
+        this.db.run('DELETE FROM recipient_paths WHERE merchant_id = ?', [merchantId]);
+
+        // Group emails by recipient
+        const recipientEmails = new Map<
+          string,
+          Array<{ campaign_id: string; received_at: string }>
+        >();
+        for (const email of emails) {
+          if (!recipientEmails.has(email.recipient)) {
+            recipientEmails.set(email.recipient, []);
+          }
+          recipientEmails.get(email.recipient)!.push({
+            campaign_id: email.campaign_id,
+            received_at: email.received_at,
+          });
+        }
+
+        // Rebuild paths for each recipient
+        let pathsCreated = 0;
+
+        for (const [recipient, emailList] of recipientEmails) {
+          // Track which campaigns we've already added to the path
+          const addedCampaigns = new Set<string>();
+          let sequenceOrder = 1;
+
+          for (const email of emailList) {
+            if (!addedCampaigns.has(email.campaign_id)) {
+              this.db.run(
+                `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, first_received_at)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [merchantId, recipient, email.campaign_id, sequenceOrder, email.received_at]
+              );
+              addedCampaigns.add(email.campaign_id);
+              sequenceOrder++;
+              pathsCreated++;
+            }
+          }
+        }
+
+        return {
+          pathsDeleted,
+          pathsCreated,
+          recipientsProcessed: recipientEmails.size,
+        };
+      }
+
+      getEmailsForMerchant(merchantId: string, workerNames?: string[]): Array<{
+        recipient: string;
+        campaign_id: string;
+        received_at: string;
+        worker_name: string;
+      }> {
+        let query = `
+          SELECT ce.recipient, ce.campaign_id, ce.received_at, ce.worker_name
+          FROM campaign_emails ce
+          JOIN campaigns c ON ce.campaign_id = c.id
+          WHERE c.merchant_id = ?
+        `;
+        const params: any[] = [merchantId];
+
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          query += ` AND ce.worker_name IN (${placeholders})`;
+          params.push(...workerNames);
+        }
+
+        query += ' ORDER BY ce.recipient, ce.received_at ASC';
+
+        const result = this.db.exec(query, params);
+        const emails: Array<{
+          recipient: string;
+          campaign_id: string;
+          received_at: string;
+          worker_name: string;
+        }> = [];
+
+        if (result.length > 0) {
+          const columns = result[0].columns;
+          for (const row of result[0].values) {
+            const obj: any = {};
+            columns.forEach((col, i) => {
+              obj[col] = row[i];
+            });
+            emails.push({
+              recipient: obj.recipient,
+              campaign_id: obj.campaign_id,
+              received_at: obj.received_at,
+              worker_name: obj.worker_name,
+            });
+          }
+        }
+
+        return emails;
+      }
+
+      getPathsForMerchant(merchantId: string): Array<{
+        recipient: string;
+        campaign_id: string;
+        sequence_order: number;
+        first_received_at: string;
+      }> {
+        const result = this.db.exec(
+          `SELECT recipient, campaign_id, sequence_order, first_received_at
+           FROM recipient_paths
+           WHERE merchant_id = ?
+           ORDER BY recipient, sequence_order ASC`,
+          [merchantId]
+        );
+
+        const paths: Array<{
+          recipient: string;
+          campaign_id: string;
+          sequence_order: number;
+          first_received_at: string;
+        }> = [];
+
+        if (result.length > 0) {
+          const columns = result[0].columns;
+          for (const row of result[0].values) {
+            const obj: any = {};
+            columns.forEach((col, i) => {
+              obj[col] = row[i];
+            });
+            paths.push({
+              recipient: obj.recipient,
+              campaign_id: obj.campaign_id,
+              sequence_order: obj.sequence_order,
+              first_received_at: obj.first_received_at,
+            });
+          }
+        }
+
+        return paths;
+      }
+    }
+
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker-a'),
+      fc.constant('worker-b'),
+      fc.constant('worker-c')
+    );
+
+    // Generate valid email addresses
+    const validEmailArb = fc.emailAddress();
+
+    it('should rebuild paths in chronological order matching email timestamps', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.array(fc.string({ minLength: 1, maxLength: 30 }), { minLength: 2, maxLength: 5 }), // subjects
+          validEmailArb, // recipient
+          workerNameArb,
+          fc.array(fc.integer({ min: 0, max: 86400000 }), { minLength: 2, maxLength: 5 }), // time offsets in ms
+          (sender, subjects, recipient, workerName, timeOffsets) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+
+            const service = new TestServiceWithRebuild(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              const baseTime = new Date('2024-01-01T00:00:00Z').getTime();
+              let merchantId: string | null = null;
+
+              // Track emails with different timestamps
+              const trackedEmails: Array<{ subject: string; receivedAt: Date }> = [];
+              for (let i = 0; i < Math.min(subjects.length, timeOffsets.length); i++) {
+                const receivedAt = new Date(baseTime + timeOffsets[i]);
+                const result = service.trackEmail({
+                  sender,
+                  subject: subjects[i],
+                  recipient,
+                  receivedAt: receivedAt.toISOString(),
+                  workerName,
+                });
+                merchantId = result.merchantId;
+                trackedEmails.push({ subject: subjects[i], receivedAt });
+              }
+
+              if (!merchantId) return;
+
+              // Rebuild paths
+              const rebuildResult = service.rebuildRecipientPaths(merchantId);
+
+              // Get rebuilt paths
+              const paths = service.getPathsForMerchant(merchantId);
+
+              // Filter paths for this recipient
+              const recipientPaths = paths.filter(p => p.recipient === recipient);
+
+              // Verify paths are in chronological order
+              for (let i = 1; i < recipientPaths.length; i++) {
+                const prevTime = new Date(recipientPaths[i - 1].first_received_at).getTime();
+                const currTime = new Date(recipientPaths[i].first_received_at).getTime();
+                expect(currTime).toBeGreaterThanOrEqual(prevTime);
+              }
+
+              // Verify sequence order is correct (1-indexed, sequential)
+              for (let i = 0; i < recipientPaths.length; i++) {
+                expect(recipientPaths[i].sequence_order).toBe(i + 1);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-enhancement, Property 2: Worker Filter Isolation**
+   * **Validates: Requirements 3.3, 4.1, 4.2**
+   * 
+   * For any rebuild operation with specified workerNames, the resulting paths
+   * should only contain data from those workers.
+   */
+  describe('Property 2: Worker Filter Isolation', () => {
+    /**
+     * Test service extension with rebuildRecipientPaths support for sql.js
+     */
+    class TestServiceWithRebuild extends TestCampaignAnalyticsService {
+      rebuildRecipientPaths(
+        merchantId: string,
+        workerNames?: string[]
+      ): { pathsDeleted: number; pathsCreated: number; recipientsProcessed: number } {
+        // Get all campaign emails for this merchant, ordered by recipient and received_at
+        let emailsQuery = `
+          SELECT ce.recipient, ce.campaign_id, ce.received_at, c.merchant_id
+          FROM campaign_emails ce
+          JOIN campaigns c ON ce.campaign_id = c.id
+          WHERE c.merchant_id = ?
+        `;
+        const params: any[] = [merchantId];
+
+        // Filter by worker names if provided and non-empty
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          emailsQuery += ` AND ce.worker_name IN (${placeholders})`;
+          params.push(...workerNames);
+        }
+
+        emailsQuery += ' ORDER BY ce.recipient, ce.received_at ASC';
+
+        const result = this.db.exec(emailsQuery, params);
+        const emails: Array<{
+          recipient: string;
+          campaign_id: string;
+          received_at: string;
+          merchant_id: string;
+        }> = [];
+
+        if (result.length > 0) {
+          const columns = result[0].columns;
+          for (const row of result[0].values) {
+            const obj: any = {};
+            columns.forEach((col, i) => {
+              obj[col] = row[i];
+            });
+            emails.push({
+              recipient: obj.recipient,
+              campaign_id: obj.campaign_id,
+              received_at: obj.received_at,
+              merchant_id: obj.merchant_id,
+            });
+          }
+        }
+
+        // Count paths before deletion
+        const countBefore = this.db.exec(
+          'SELECT COUNT(*) as count FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+        
+        this.db.run('DELETE FROM recipient_paths WHERE merchant_id = ?', [merchantId]);
+        
+        const pathsDeleted = countBefore.length > 0 && countBefore[0].values.length > 0 
+          ? countBefore[0].values[0][0] as number 
+          : 0;
+
+        // Group emails by recipient
+        const recipientEmails = new Map<
+          string,
+          Array<{ campaign_id: string; received_at: string }>
+        >();
+        for (const email of emails) {
+          if (!recipientEmails.has(email.recipient)) {
+            recipientEmails.set(email.recipient, []);
+          }
+          recipientEmails.get(email.recipient)!.push({
+            campaign_id: email.campaign_id,
+            received_at: email.received_at,
+          });
+        }
+
+        // Rebuild paths for each recipient
+        let pathsCreated = 0;
+
+        for (const [recipient, emailList] of recipientEmails) {
+          const addedCampaigns = new Set<string>();
+          let sequenceOrder = 1;
+
+          for (const email of emailList) {
+            if (!addedCampaigns.has(email.campaign_id)) {
+              this.db.run(
+                `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, first_received_at)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [merchantId, recipient, email.campaign_id, sequenceOrder, email.received_at]
+              );
+              addedCampaigns.add(email.campaign_id);
+              sequenceOrder++;
+              pathsCreated++;
+            }
+          }
+        }
+
+        return {
+          pathsDeleted,
+          pathsCreated,
+          recipientsProcessed: recipientEmails.size,
+        };
+      }
+
+      getEmailsForMerchantByWorker(merchantId: string, workerName: string): Array<{
+        recipient: string;
+        campaign_id: string;
+      }> {
+        const result = this.db.exec(
+          `SELECT ce.recipient, ce.campaign_id
+           FROM campaign_emails ce
+           JOIN campaigns c ON ce.campaign_id = c.id
+           WHERE c.merchant_id = ? AND ce.worker_name = ?`,
+          [merchantId, workerName]
+        );
+
+        const emails: Array<{ recipient: string; campaign_id: string }> = [];
+
+        if (result.length > 0) {
+          const columns = result[0].columns;
+          for (const row of result[0].values) {
+            const obj: any = {};
+            columns.forEach((col, i) => {
+              obj[col] = row[i];
+            });
+            emails.push({
+              recipient: obj.recipient,
+              campaign_id: obj.campaign_id,
+            });
+          }
+        }
+
+        return emails;
+      }
+
+      getPathsForMerchant(merchantId: string): Array<{
+        recipient: string;
+        campaign_id: string;
+        sequence_order: number;
+      }> {
+        const result = this.db.exec(
+          `SELECT recipient, campaign_id, sequence_order
+           FROM recipient_paths
+           WHERE merchant_id = ?
+           ORDER BY recipient, sequence_order ASC`,
+          [merchantId]
+        );
+
+        const paths: Array<{
+          recipient: string;
+          campaign_id: string;
+          sequence_order: number;
+        }> = [];
+
+        if (result.length > 0) {
+          const columns = result[0].columns;
+          for (const row of result[0].values) {
+            const obj: any = {};
+            columns.forEach((col, i) => {
+              obj[col] = row[i];
+            });
+            paths.push({
+              recipient: obj.recipient,
+              campaign_id: obj.campaign_id,
+              sequence_order: obj.sequence_order,
+            });
+          }
+        }
+
+        return paths;
+      }
+    }
+
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker-a'),
+      fc.constant('worker-b'),
+      fc.constant('worker-c')
+    );
+
+    // Generate valid email addresses
+    const validEmailArb = fc.emailAddress();
+
+    it('should only include data from specified workers when rebuilding paths', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 30 }), // subject for worker A
+          fc.string({ minLength: 1, maxLength: 30 }), // subject for worker B
+          validEmailArb, // recipient for worker A
+          validEmailArb, // recipient for worker B
+          (sender, subjectA, subjectB, recipientA, recipientB) => {
+            // Ensure subjects are different
+            if (subjectA === subjectB) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+
+            const service = new TestServiceWithRebuild(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email for worker-a
+              const resultA = service.trackEmail({
+                sender,
+                subject: subjectA,
+                recipient: recipientA,
+                workerName: 'worker-a',
+              });
+
+              // Track email for worker-b
+              service.trackEmail({
+                sender,
+                subject: subjectB,
+                recipient: recipientB,
+                workerName: 'worker-b',
+              });
+
+              const merchantId = resultA.merchantId;
+
+              // Rebuild paths with only worker-a filter
+              service.rebuildRecipientPaths(merchantId, ['worker-a']);
+
+              // Get rebuilt paths
+              const paths = service.getPathsForMerchant(merchantId);
+
+              // Get emails from worker-a only
+              const workerAEmails = service.getEmailsForMerchantByWorker(merchantId, 'worker-a');
+              const workerARecipients = new Set(workerAEmails.map(e => e.recipient));
+              const workerACampaigns = new Set(workerAEmails.map(e => e.campaign_id));
+
+              // Verify all paths are from worker-a data only
+              for (const path of paths) {
+                expect(workerARecipients.has(path.recipient)).toBe(true);
+                expect(workerACampaigns.has(path.campaign_id)).toBe(true);
+              }
+
+              // Verify worker-b recipient is not in paths (if different from worker-a recipient)
+              if (recipientA !== recipientB) {
+                const pathRecipients = new Set(paths.map(p => p.recipient));
+                expect(pathRecipients.has(recipientB)).toBe(false);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should include all workers when workerNames is empty or undefined', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 30 }), // subject for worker A
+          fc.string({ minLength: 1, maxLength: 30 }), // subject for worker B
+          validEmailArb, // recipient
+          (sender, subjectA, subjectB, recipient) => {
+            // Ensure subjects are different
+            if (subjectA === subjectB) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+
+            const service = new TestServiceWithRebuild(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email for worker-a
+              const resultA = service.trackEmail({
+                sender,
+                subject: subjectA,
+                recipient,
+                workerName: 'worker-a',
+              });
+
+              // Track email for worker-b (same recipient, different subject)
+              service.trackEmail({
+                sender,
+                subject: subjectB,
+                recipient,
+                workerName: 'worker-b',
+              });
+
+              const merchantId = resultA.merchantId;
+
+              // Rebuild paths without worker filter (should include all)
+              service.rebuildRecipientPaths(merchantId);
+
+              // Get rebuilt paths
+              const paths = service.getPathsForMerchant(merchantId);
+
+              // Should have paths from both workers (2 campaigns for the same recipient)
+              const recipientPaths = paths.filter(p => p.recipient === recipient);
+              expect(recipientPaths.length).toBe(2);
+
+              // Rebuild with empty array (should also include all)
+              service.rebuildRecipientPaths(merchantId, []);
+              const pathsAfterEmpty = service.getPathsForMerchant(merchantId);
+              const recipientPathsAfterEmpty = pathsAfterEmpty.filter(p => p.recipient === recipient);
+              expect(recipientPathsAfterEmpty.length).toBe(2);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-enhancement, Property 3: Old Customer Identification**
+   * **Validates: Requirements 7.1, 7.2**
+   * 
+   * For any recipient whose first email is not from a Root campaign,
+   * that recipient should be identified as an old customer.
+   */
+  describe('Property 3: Old Customer Identification', () => {
+    /**
+     * Test service extension with old customer cleanup support for sql.js
+     */
+    class TestServiceWithCleanup extends TestCampaignAnalyticsService {
+      setRootCampaign(campaignId: string): void {
+        this.db.run('UPDATE campaigns SET is_root = 1 WHERE id = ?', [campaignId]);
+      }
+
+      recalculateAllNewUsers(merchantId: string): void {
+        // Reset all new user flags
+        this.db.run(
+          `UPDATE recipient_paths SET is_new_user = 0, first_root_campaign_id = NULL WHERE merchant_id = ?`,
+          [merchantId]
+        );
+
+        // Get all confirmed root campaigns
+        const rootResult = this.db.exec(
+          'SELECT id FROM campaigns WHERE merchant_id = ? AND is_root = 1',
+          [merchantId]
+        );
+        
+        const rootCampaignIds = new Set<string>();
+        if (rootResult.length > 0) {
+          for (const row of rootResult[0].values) {
+            rootCampaignIds.add(row[0] as string);
+          }
+        }
+
+        if (rootCampaignIds.size === 0) return;
+
+        // Get all recipients
+        const recipientsResult = this.db.exec(
+          'SELECT DISTINCT recipient FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+
+        if (recipientsResult.length === 0) return;
+
+        for (const row of recipientsResult[0].values) {
+          const recipient = row[0] as string;
+          
+          // Get this recipient's FIRST campaign (sequence_order = 0, 0-indexed)
+          // A new user is one whose FIRST email is from a root campaign
+          const pathResult = this.db.exec(
+            `SELECT campaign_id FROM recipient_paths 
+             WHERE merchant_id = ? AND recipient = ? ORDER BY sequence_order ASC LIMIT 1`,
+            [merchantId, recipient]
+          );
+
+          if (pathResult.length === 0 || pathResult[0].values.length === 0) continue;
+
+          const firstCampaignId = pathResult[0].values[0][0] as string;
+          
+          // Only mark as new user if their FIRST campaign is a root campaign
+          if (rootCampaignIds.has(firstCampaignId)) {
+            this.db.run(
+              `UPDATE recipient_paths SET is_new_user = 1, first_root_campaign_id = ? 
+               WHERE merchant_id = ? AND recipient = ?`,
+              [firstCampaignId, merchantId, recipient]
+            );
+          }
+        }
+      }
+
+      getRecipientNewUserStatus(merchantId: string, recipient: string): boolean {
+        const result = this.db.exec(
+          `SELECT MAX(is_new_user) as is_new FROM recipient_paths WHERE merchant_id = ? AND recipient = ?`,
+          [merchantId, recipient]
+        );
+        if (result.length === 0 || result[0].values.length === 0) return false;
+        return result[0].values[0][0] === 1;
+      }
+
+      getFirstCampaignForRecipient(merchantId: string, recipient: string): string | null {
+        const result = this.db.exec(
+          `SELECT campaign_id FROM recipient_paths 
+           WHERE merchant_id = ? AND recipient = ? 
+           ORDER BY sequence_order ASC LIMIT 1`,
+          [merchantId, recipient]
+        );
+        if (result.length === 0 || result[0].values.length === 0) return null;
+        return result[0].values[0][0] as string;
+      }
+
+      isRootCampaign(campaignId: string): boolean {
+        const result = this.db.exec(
+          'SELECT is_root FROM campaigns WHERE id = ?',
+          [campaignId]
+        );
+        if (result.length === 0 || result[0].values.length === 0) return false;
+        return result[0].values[0][0] === 1;
+      }
+    }
+
+    // Generate valid email addresses
+    const validEmailArb = fc.emailAddress();
+
+    it('should identify recipients whose first email is not from Root as old customers', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 30 }), // root campaign subject
+          fc.string({ minLength: 1, maxLength: 30 }), // non-root campaign subject
+          validEmailArb, // new customer recipient
+          validEmailArb, // old customer recipient
+          (sender, rootSubject, nonRootSubject, newCustomer, oldCustomer) => {
+            // Ensure subjects and recipients are different
+            if (rootSubject === nonRootSubject) return;
+            if (newCustomer === oldCustomer) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+
+            // Add migration columns for root campaign and new user tracking
+            db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+            db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+            db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+            db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+            db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+            const service = new TestServiceWithCleanup(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track root campaign email for new customer (first email)
+              const rootResult = service.trackEmail({
+                sender,
+                subject: rootSubject,
+                recipient: newCustomer,
+                workerName: 'worker-a',
+              });
+
+              const merchantId = rootResult.merchantId;
+              const rootCampaignId = rootResult.campaignId;
+
+              // Track non-root campaign email for old customer (first email)
+              service.trackEmail({
+                sender,
+                subject: nonRootSubject,
+                recipient: oldCustomer,
+                workerName: 'worker-a',
+              });
+
+              // Set root campaign
+              service.setRootCampaign(rootCampaignId);
+
+              // Recalculate new users
+              service.recalculateAllNewUsers(merchantId);
+
+              // Verify new customer is identified as new user
+              const newCustomerStatus = service.getRecipientNewUserStatus(merchantId, newCustomer);
+              expect(newCustomerStatus).toBe(true);
+
+              // Verify old customer is identified as old user
+              const oldCustomerStatus = service.getRecipientNewUserStatus(merchantId, oldCustomer);
+              expect(oldCustomerStatus).toBe(false);
+
+              // Verify first campaign for old customer is not a root campaign
+              const firstCampaign = service.getFirstCampaignForRecipient(merchantId, oldCustomer);
+              expect(firstCampaign).not.toBeNull();
+              expect(service.isRootCampaign(firstCampaign!)).toBe(false);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-enhancement, Property 4: Old Customer Cleanup Preservation**
+   * **Validates: Requirements 7.5**
+   * 
+   * For any cleanup operation, campaign_emails records should be preserved
+   * while only recipient_paths entries are removed.
+   */
+  describe('Property 4: Old Customer Cleanup Preservation', () => {
+    /**
+     * Test service extension with old customer cleanup support for sql.js
+     */
+    class TestServiceWithCleanup extends TestCampaignAnalyticsService {
+      setRootCampaign(campaignId: string): void {
+        this.db.run('UPDATE campaigns SET is_root = 1 WHERE id = ?', [campaignId]);
+      }
+
+      recalculateAllNewUsers(merchantId: string): void {
+        // Reset all new user flags
+        this.db.run(
+          `UPDATE recipient_paths SET is_new_user = 0, first_root_campaign_id = NULL WHERE merchant_id = ?`,
+          [merchantId]
+        );
+
+        // Get all confirmed root campaigns for Property 4
+        const rootResult = this.db.exec(
+          'SELECT id FROM campaigns WHERE merchant_id = ? AND is_root = 1',
+          [merchantId]
+        );
+        
+        const rootCampaignIds = new Set<string>();
+        if (rootResult.length > 0) {
+          for (const row of rootResult[0].values) {
+            rootCampaignIds.add(row[0] as string);
+          }
+        }
+
+        if (rootCampaignIds.size === 0) return;
+
+        // Get all recipients
+        const recipientsResult = this.db.exec(
+          'SELECT DISTINCT recipient FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+
+        if (recipientsResult.length === 0) return;
+
+        for (const row of recipientsResult[0].values) {
+          const recipient = row[0] as string;
+          
+          // Get this recipient's FIRST campaign (sequence_order = 0, 0-indexed)
+          // A new user is one whose FIRST email is from a root campaign
+          const pathResult = this.db.exec(
+            `SELECT campaign_id FROM recipient_paths 
+             WHERE merchant_id = ? AND recipient = ? ORDER BY sequence_order ASC LIMIT 1`,
+            [merchantId, recipient]
+          );
+
+          if (pathResult.length === 0 || pathResult[0].values.length === 0) continue;
+
+          const firstCampaignId = pathResult[0].values[0][0] as string;
+          
+          // Only mark as new user if their FIRST campaign is a root campaign
+          if (rootCampaignIds.has(firstCampaignId)) {
+            this.db.run(
+              `UPDATE recipient_paths SET is_new_user = 1, first_root_campaign_id = ? 
+               WHERE merchant_id = ? AND recipient = ?`,
+              [firstCampaignId, merchantId, recipient]
+            );
+          }
+        }
+      }
+
+      cleanupOldCustomerPaths(
+        merchantId: string,
+        workerNames?: string[]
+      ): { pathsDeleted: number; recipientsAffected: number } {
+        // Get all recipients who are old customers (is_new_user = 0 or NULL)
+        let oldCustomersQuery = `
+          SELECT DISTINCT recipient
+          FROM recipient_paths
+          WHERE merchant_id = ?
+            AND (is_new_user = 0 OR is_new_user IS NULL)
+        `;
+        const params: any[] = [merchantId];
+
+        // If workerNames is provided and non-empty, filter by workers
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          oldCustomersQuery += `
+            AND recipient IN (
+              SELECT DISTINCT ce.recipient
+              FROM campaign_emails ce
+              JOIN campaigns c ON ce.campaign_id = c.id
+              WHERE c.merchant_id = ? AND ce.worker_name IN (${placeholders})
+            )
+          `;
+          params.push(merchantId, ...workerNames);
+        }
+
+        const oldCustomersResult = this.db.exec(oldCustomersQuery, params);
+        const oldCustomers: string[] = [];
+        
+        if (oldCustomersResult.length > 0) {
+          for (const row of oldCustomersResult[0].values) {
+            oldCustomers.push(row[0] as string);
+          }
+        }
+
+        const recipientsAffected = oldCustomers.length;
+
+        if (recipientsAffected === 0) {
+          return { pathsDeleted: 0, recipientsAffected: 0 };
+        }
+
+        // Count paths before deletion
+        const recipientPlaceholders = oldCustomers.map(() => '?').join(', ');
+        const countResult = this.db.exec(
+          `SELECT COUNT(*) as count FROM recipient_paths WHERE merchant_id = ? AND recipient IN (${recipientPlaceholders})`,
+          [merchantId, ...oldCustomers]
+        );
+        
+        const pathsToDelete = countResult.length > 0 && countResult[0].values.length > 0
+          ? countResult[0].values[0][0] as number
+          : 0;
+
+        // Delete paths for old customers
+        this.db.run(
+          `DELETE FROM recipient_paths WHERE merchant_id = ? AND recipient IN (${recipientPlaceholders})`,
+          [merchantId, ...oldCustomers]
+        );
+
+        return {
+          pathsDeleted: pathsToDelete,
+          recipientsAffected,
+        };
+      }
+
+      getEmailCountForMerchant(merchantId: string): number {
+        const result = this.db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails ce
+           JOIN campaigns c ON ce.campaign_id = c.id
+           WHERE c.merchant_id = ?`,
+          [merchantId]
+        );
+        if (result.length === 0 || result[0].values.length === 0) return 0;
+        return result[0].values[0][0] as number;
+      }
+
+      getPathCountForMerchant(merchantId: string): number {
+        const result = this.db.exec(
+          'SELECT COUNT(*) as count FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+        if (result.length === 0 || result[0].values.length === 0) return 0;
+        return result[0].values[0][0] as number;
+      }
+
+      getEmailsForRecipient(merchantId: string, recipient: string): number {
+        const result = this.db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails ce
+           JOIN campaigns c ON ce.campaign_id = c.id
+           WHERE c.merchant_id = ? AND ce.recipient = ?`,
+          [merchantId, recipient]
+        );
+        if (result.length === 0 || result[0].values.length === 0) return 0;
+        return result[0].values[0][0] as number;
+      }
+    }
+
+    // Generate valid email addresses
+    const validEmailArb = fc.emailAddress();
+
+    it('should preserve campaign_emails while removing recipient_paths for old customers', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 30 }), // root campaign subject
+          fc.string({ minLength: 1, maxLength: 30 }), // non-root campaign subject
+          validEmailArb, // old customer recipient
+          (sender, rootSubject, nonRootSubject, oldCustomer) => {
+            // Ensure subjects are different
+            if (rootSubject === nonRootSubject) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+
+            // Add migration columns for root campaign and new user tracking
+            db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+            db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+            db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+            db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+            db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+            const service = new TestServiceWithCleanup(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track non-root campaign email for old customer (first email)
+              const result = service.trackEmail({
+                sender,
+                subject: nonRootSubject,
+                recipient: oldCustomer,
+                workerName: 'worker-a',
+              });
+
+              const merchantId = result.merchantId;
+
+              // Track root campaign email (but old customer already has non-root as first)
+              const rootResult = service.trackEmail({
+                sender,
+                subject: rootSubject,
+                recipient: oldCustomer,
+                workerName: 'worker-a',
+              });
+
+              // Set root campaign
+              service.setRootCampaign(rootResult.campaignId);
+
+              // Recalculate new users
+              service.recalculateAllNewUsers(merchantId);
+
+              // Get counts before cleanup
+              const emailsBefore = service.getEmailCountForMerchant(merchantId);
+              const pathsBefore = service.getPathCountForMerchant(merchantId);
+              const oldCustomerEmailsBefore = service.getEmailsForRecipient(merchantId, oldCustomer);
+
+              expect(emailsBefore).toBeGreaterThan(0);
+              expect(pathsBefore).toBeGreaterThan(0);
+              expect(oldCustomerEmailsBefore).toBeGreaterThan(0);
+
+              // Cleanup old customer paths
+              const cleanupResult = service.cleanupOldCustomerPaths(merchantId);
+
+              // Verify paths were deleted
+              expect(cleanupResult.recipientsAffected).toBe(1);
+              expect(cleanupResult.pathsDeleted).toBeGreaterThan(0);
+
+              // Verify campaign_emails are preserved (Property 4)
+              const emailsAfter = service.getEmailCountForMerchant(merchantId);
+              expect(emailsAfter).toBe(emailsBefore);
+
+              // Verify old customer's emails are still there
+              const oldCustomerEmailsAfter = service.getEmailsForRecipient(merchantId, oldCustomer);
+              expect(oldCustomerEmailsAfter).toBe(oldCustomerEmailsBefore);
+
+              // Verify paths for old customer are removed
+              const pathsAfter = service.getPathCountForMerchant(merchantId);
+              expect(pathsAfter).toBe(0); // All paths removed since only old customer existed
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-enhancement, Property 5: Level Stats Completeness**
+   * **Validates: Requirements 1.1, 5.1, 8.1, 8.2, 8.3, 8.4**
+   * 
+   * For any path analysis result, all campaigns with new users should appear in levelStats
+   * with correct level assignments.
+   */
+  describe('Property 5: Level Stats Completeness', () => {
+    /**
+     * Test service extension with getPathAnalysis support for sql.js
+     */
+    class TestServiceWithPathAnalysis extends TestCampaignAnalyticsService {
+      getUserTypeStats(merchantId: string, workerNames?: string[]): {
+        merchantId: string;
+        totalRecipients: number;
+        newUsers: number;
+        oldUsers: number;
+        newUserPercentage: number;
+      } {
+        let query: string;
+        let params: any[];
+
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          query = `
+            SELECT 
+              COUNT(DISTINCT rp.recipient) as total,
+              SUM(CASE WHEN rp.is_new_user = 1 THEN 1 ELSE 0 END) as new_users
+            FROM (
+              SELECT rp.recipient, MAX(rp.is_new_user) as is_new_user
+              FROM recipient_paths rp
+              JOIN campaigns c ON rp.campaign_id = c.id
+              JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
+              WHERE rp.merchant_id = ? AND ce.worker_name IN (${placeholders})
+              GROUP BY rp.recipient
+            ) rp
+          `;
+          params = [merchantId, ...workerNames];
+        } else {
+          query = `
+            SELECT 
+              COUNT(DISTINCT recipient) as total,
+              SUM(CASE WHEN is_new_user = 1 THEN 1 ELSE 0 END) as new_users
+            FROM (
+              SELECT recipient, MAX(is_new_user) as is_new_user
+              FROM recipient_paths
+              WHERE merchant_id = ?
+              GROUP BY recipient
+            )
+          `;
+          params = [merchantId];
+        }
+
+        const result = this.db.exec(query, params);
+        let total = 0;
+        let newUsers = 0;
+
+        if (result.length > 0 && result[0].values.length > 0) {
+          total = (result[0].values[0][0] as number) || 0;
+          newUsers = (result[0].values[0][1] as number) || 0;
+        }
+
+        const oldUsers = total - newUsers;
+
+        return {
+          merchantId,
+          totalRecipients: total,
+          newUsers,
+          oldUsers,
+          newUserPercentage: total > 0 ? (newUsers / total) * 100 : 0,
+        };
+      }
+
+      getCampaignsWithNewUsers(merchantId: string, workerNames?: string[]): string[] {
+        let query: string;
+        let params: any[];
+
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          query = `
+            SELECT DISTINCT rp.campaign_id
+            FROM recipient_paths rp
+            JOIN campaign_emails ce ON rp.campaign_id = ce.campaign_id AND rp.recipient = ce.recipient
+            WHERE rp.merchant_id = ? AND rp.is_new_user = 1 AND ce.worker_name IN (${placeholders})
+          `;
+          params = [merchantId, ...workerNames];
+        } else {
+          query = `
+            SELECT DISTINCT campaign_id
+            FROM recipient_paths
+            WHERE merchant_id = ? AND is_new_user = 1
+          `;
+          params = [merchantId];
+        }
+
+        const result = this.db.exec(query, params);
+        if (result.length === 0) return [];
+
+        return result[0].values.map(row => row[0] as string);
+      }
+
+      getLevelStats(merchantId: string, workerNames?: string[]): Array<{
+        campaignId: string;
+        level: number;
+        userCount: number;
+      }> {
+        const userStats = this.getUserTypeStats(merchantId, workerNames);
+        
+        // Get campaigns with new users and their counts
+        let query: string;
+        let params: any[];
+
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          query = `
+            SELECT 
+              c.id,
+              c.subject,
+              COUNT(DISTINCT CASE WHEN rp.is_new_user = 1 AND ce.worker_name IN (${placeholders}) THEN rp.recipient END) as new_user_count
+            FROM campaigns c
+            LEFT JOIN recipient_paths rp ON c.id = rp.campaign_id
+            LEFT JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
+            WHERE c.merchant_id = ?
+            GROUP BY c.id
+            HAVING new_user_count > 0
+          `;
+          params = [...workerNames, merchantId];
+        } else {
+          query = `
+            SELECT 
+              c.id,
+              c.subject,
+              COUNT(DISTINCT CASE WHEN rp.is_new_user = 1 THEN rp.recipient END) as new_user_count
+            FROM campaigns c
+            LEFT JOIN recipient_paths rp ON c.id = rp.campaign_id
+            WHERE c.merchant_id = ?
+            GROUP BY c.id
+            HAVING new_user_count > 0
+          `;
+          params = [merchantId];
+        }
+
+        const result = this.db.exec(query, params);
+        if (result.length === 0) return [];
+
+        return result[0].values.map(row => ({
+          campaignId: row[0] as string,
+          level: 1,
+          userCount: row[2] as number,
+        }));
+      }
+    }
+
+    it('should include all campaigns with new users in levelStats', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            numCampaigns: fc.integer({ min: 1, max: 5 }),
+            numRecipients: fc.integer({ min: 1, max: 10 }),
+            workerName: fc.constantFrom('worker1', 'worker2'),
+          }),
+          async ({ numCampaigns, numRecipients, workerName }) => {
+            const SQL = await initSqlJs();
+            const db = new SQL.Database();
+            
+            try {
+              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+
+              // Add migration columns for root campaign and new user tracking
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+              db.run('ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+              const service = new TestServiceWithPathAnalysis(db);
+              const { merchant } = service.getOrCreateMerchant('test.com');
+
+              const campaignIds: string[] = [];
+              for (let i = 0; i < numCampaigns; i++) {
+                const campaignId = uuidv4();
+                campaignIds.push(campaignId);
+                db.run(
+                  `INSERT INTO campaigns (id, merchant_id, subject, subject_hash, unique_recipients, first_seen_at, last_seen_at, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 0, datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+                  [campaignId, merchant.id, `Campaign ${i}`, `hash${i}`]
+                );
+              }
+
+              if (campaignIds.length > 0) {
+                db.run('UPDATE campaigns SET is_root = 1 WHERE id = ?', [campaignIds[0]]);
+              }
+
+              for (let i = 0; i < numRecipients; i++) {
+                const recipient = `user${i}@test.com`;
+                const numEmails = Math.min(numCampaigns, Math.floor(Math.random() * numCampaigns) + 1);
+                for (let j = 0; j < numEmails; j++) {
+                  const campaignId = campaignIds[j];
+                  
+                  db.run(
+                    `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                     VALUES (?, ?, ?, datetime('now', '+' || ? || ' minutes'))`,
+                    [campaignId, recipient, workerName, j]
+                  );
+
+                  const isNewUser = j === 0 ? 1 : 0;
+                  db.run(
+                    `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                     VALUES (?, ?, ?, ?, ?, datetime('now', '+' || ? || ' minutes'))`,
+                    [merchant.id, recipient, campaignId, j + 1, isNewUser, j]
+                  );
+                }
+              }
+
+              const campaignsWithNewUsers = service.getCampaignsWithNewUsers(merchant.id, [workerName]);
+              const levelStats = service.getLevelStats(merchant.id, [workerName]);
+              const levelStatsCampaignIds = new Set(levelStats.map(ls => ls.campaignId));
+
+              for (const campaignId of campaignsWithNewUsers) {
+                expect(levelStatsCampaignIds.has(campaignId)).toBe(true);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+
+    it('should have positive userCount for all campaigns in levelStats', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            numCampaigns: fc.integer({ min: 1, max: 3 }),
+            numRecipients: fc.integer({ min: 1, max: 5 }),
+          }),
+          async ({ numCampaigns, numRecipients }) => {
+            const SQL = await initSqlJs();
+            const db = new SQL.Database();
+            
+            try {
+              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+
+              // Add migration columns
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+              db.run('ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+              const service = new TestServiceWithPathAnalysis(db);
+              const { merchant } = service.getOrCreateMerchant('test.com');
+
+              for (let i = 0; i < numCampaigns; i++) {
+                const campaignId = uuidv4();
+                db.run(
+                  `INSERT INTO campaigns (id, merchant_id, subject, subject_hash, unique_recipients, first_seen_at, last_seen_at, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 0, datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+                  [campaignId, merchant.id, `Campaign ${i}`, `hash${i}`]
+                );
+
+                for (let j = 0; j < numRecipients; j++) {
+                  const recipient = `user${j}@test.com`;
+                  db.run(
+                    `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                     VALUES (?, ?, ?, datetime('now'))`,
+                    [campaignId, recipient, 'worker1']
+                  );
+                  db.run(
+                    `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                     VALUES (?, ?, ?, 1, 1, datetime('now'))`,
+                    [merchant.id, recipient, campaignId]
+                  );
+                }
+              }
+
+              const levelStats = service.getLevelStats(merchant.id);
+
+              for (const stat of levelStats) {
+                expect(stat.userCount).toBeGreaterThan(0);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-enhancement, Property 6: User Statistics Accuracy**
+   * **Validates: Requirements 8.1, 8.2, 8.3, 8.4**
+   * 
+   * For any path analysis result, the sum of newUsers and oldUsers should equal totalRecipients.
+   */
+  describe('Property 6: User Statistics Accuracy', () => {
+    class TestServiceWithUserStats extends TestCampaignAnalyticsService {
+      getUserTypeStats(merchantId: string, workerNames?: string[]): {
+        merchantId: string;
+        totalRecipients: number;
+        newUsers: number;
+        oldUsers: number;
+        newUserPercentage: number;
+      } {
+        let query: string;
+        let params: any[];
+
+        if (workerNames && workerNames.length > 0) {
+          const placeholders = workerNames.map(() => '?').join(', ');
+          query = `
+            SELECT 
+              COUNT(DISTINCT rp.recipient) as total,
+              SUM(CASE WHEN rp.is_new_user = 1 THEN 1 ELSE 0 END) as new_users
+            FROM (
+              SELECT rp.recipient, MAX(rp.is_new_user) as is_new_user
+              FROM recipient_paths rp
+              JOIN campaigns c ON rp.campaign_id = c.id
+              JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
+              WHERE rp.merchant_id = ? AND ce.worker_name IN (${placeholders})
+              GROUP BY rp.recipient
+            ) rp
+          `;
+          params = [merchantId, ...workerNames];
+        } else {
+          query = `
+            SELECT 
+              COUNT(DISTINCT recipient) as total,
+              SUM(CASE WHEN is_new_user = 1 THEN 1 ELSE 0 END) as new_users
+            FROM (
+              SELECT recipient, MAX(is_new_user) as is_new_user
+              FROM recipient_paths
+              WHERE merchant_id = ?
+              GROUP BY recipient
+            )
+          `;
+          params = [merchantId];
+        }
+
+        const result = this.db.exec(query, params);
+        let total = 0;
+        let newUsers = 0;
+
+        if (result.length > 0 && result[0].values.length > 0) {
+          total = (result[0].values[0][0] as number) || 0;
+          newUsers = (result[0].values[0][1] as number) || 0;
+        }
+
+        const oldUsers = total - newUsers;
+
+        return {
+          merchantId,
+          totalRecipients: total,
+          newUsers,
+          oldUsers,
+          newUserPercentage: total > 0 ? (newUsers / total) * 100 : 0,
+        };
+      }
+    }
+
+    it('should have newUsers + oldUsers equal totalRecipients', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            numNewUsers: fc.integer({ min: 0, max: 10 }),
+            numOldUsers: fc.integer({ min: 0, max: 10 }),
+            workerName: fc.constantFrom('worker1', 'worker2', undefined),
+          }),
+          async ({ numNewUsers, numOldUsers, workerName }) => {
+            const SQL = await initSqlJs();
+            const db = new SQL.Database();
+            
+            try {
+              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+
+              // Add migration columns
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+              db.run('ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+              const service = new TestServiceWithUserStats(db);
+              const { merchant } = service.getOrCreateMerchant('test.com');
+
+              const campaignId = uuidv4();
+              db.run(
+                `INSERT INTO campaigns (id, merchant_id, subject, subject_hash, unique_recipients, first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?, ?, 'Test Campaign', 'hash1', 0, datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+                [campaignId, merchant.id]
+              );
+
+              const actualWorkerName = workerName || 'worker1';
+
+              for (let i = 0; i < numNewUsers; i++) {
+                const recipient = `newuser${i}@test.com`;
+                db.run(
+                  `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                   VALUES (?, ?, ?, datetime('now'))`,
+                  [campaignId, recipient, actualWorkerName]
+                );
+                db.run(
+                  `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                   VALUES (?, ?, ?, 1, 1, datetime('now'))`,
+                  [merchant.id, recipient, campaignId]
+                );
+              }
+
+              for (let i = 0; i < numOldUsers; i++) {
+                const recipient = `olduser${i}@test.com`;
+                db.run(
+                  `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                   VALUES (?, ?, ?, datetime('now'))`,
+                  [campaignId, recipient, actualWorkerName]
+                );
+                db.run(
+                  `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                   VALUES (?, ?, ?, 1, 0, datetime('now'))`,
+                  [merchant.id, recipient, campaignId]
+                );
+              }
+
+              const workerNames = workerName ? [workerName] : undefined;
+              const stats = service.getUserTypeStats(merchant.id, workerNames);
+
+              expect(stats.newUsers + stats.oldUsers).toBe(stats.totalRecipients);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should have newUserPercentage between 0 and 100', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            numNewUsers: fc.integer({ min: 0, max: 10 }),
+            numOldUsers: fc.integer({ min: 0, max: 10 }),
+          }),
+          async ({ numNewUsers, numOldUsers }) => {
+            const SQL = await initSqlJs();
+            const db = new SQL.Database();
+            
+            try {
+              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+
+              // Add migration columns
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+              db.run('ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+              const service = new TestServiceWithUserStats(db);
+              const { merchant } = service.getOrCreateMerchant('test.com');
+
+              const campaignId = uuidv4();
+              db.run(
+                `INSERT INTO campaigns (id, merchant_id, subject, subject_hash, unique_recipients, first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?, ?, 'Test Campaign', 'hash1', 0, datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+                [campaignId, merchant.id]
+              );
+
+              for (let i = 0; i < numNewUsers; i++) {
+                const recipient = `newuser${i}@test.com`;
+                db.run(
+                  `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                   VALUES (?, ?, 'worker1', datetime('now'))`,
+                  [campaignId, recipient]
+                );
+                db.run(
+                  `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                   VALUES (?, ?, ?, 1, 1, datetime('now'))`,
+                  [merchant.id, recipient, campaignId]
+                );
+              }
+
+              for (let i = 0; i < numOldUsers; i++) {
+                const recipient = `olduser${i}@test.com`;
+                db.run(
+                  `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                   VALUES (?, ?, 'worker1', datetime('now'))`,
+                  [campaignId, recipient]
+                );
+                db.run(
+                  `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                   VALUES (?, ?, ?, 1, 0, datetime('now'))`,
+                  [merchant.id, recipient, campaignId]
+                );
+              }
+
+              const stats = service.getUserTypeStats(merchant.id);
+
+              expect(stats.newUserPercentage).toBeGreaterThanOrEqual(0);
+              expect(stats.newUserPercentage).toBeLessThanOrEqual(100);
+
+              if (stats.totalRecipients > 0) {
+                const expectedPercentage = (stats.newUsers / stats.totalRecipients) * 100;
+                expect(stats.newUserPercentage).toBeCloseTo(expectedPercentage, 5);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should correctly filter by workerNames for user statistics', async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            numUsersWorker1: fc.integer({ min: 1, max: 5 }),
+            numUsersWorker2: fc.integer({ min: 1, max: 5 }),
+          }),
+          async ({ numUsersWorker1, numUsersWorker2 }) => {
+            const SQL = await initSqlJs();
+            const db = new SQL.Database();
+            
+            try {
+              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+
+              // Add migration columns
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+              db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+              db.run('ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+              db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+
+              const service = new TestServiceWithUserStats(db);
+              const { merchant } = service.getOrCreateMerchant('test.com');
+
+              const campaignId = uuidv4();
+              db.run(
+                `INSERT INTO campaigns (id, merchant_id, subject, subject_hash, unique_recipients, first_seen_at, last_seen_at, created_at, updated_at)
+                 VALUES (?, ?, 'Test Campaign', 'hash1', 0, datetime('now'), datetime('now'), datetime('now'), datetime('now'))`,
+                [campaignId, merchant.id]
+              );
+
+              for (let i = 0; i < numUsersWorker1; i++) {
+                const recipient = `worker1user${i}@test.com`;
+                db.run(
+                  `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                   VALUES (?, ?, 'worker1', datetime('now'))`,
+                  [campaignId, recipient]
+                );
+                db.run(
+                  `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                   VALUES (?, ?, ?, 1, 1, datetime('now'))`,
+                  [merchant.id, recipient, campaignId]
+                );
+              }
+
+              for (let i = 0; i < numUsersWorker2; i++) {
+                const recipient = `worker2user${i}@test.com`;
+                db.run(
+                  `INSERT INTO campaign_emails (campaign_id, recipient, worker_name, received_at)
+                   VALUES (?, ?, 'worker2', datetime('now'))`,
+                  [campaignId, recipient]
+                );
+                db.run(
+                  `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, is_new_user, first_received_at)
+                   VALUES (?, ?, ?, 1, 1, datetime('now'))`,
+                  [merchant.id, recipient, campaignId]
+                );
+              }
+
+              const statsWorker1 = service.getUserTypeStats(merchant.id, ['worker1']);
+              expect(statsWorker1.totalRecipients).toBe(numUsersWorker1);
+
+              const statsWorker2 = service.getUserTypeStats(merchant.id, ['worker2']);
+              expect(statsWorker2.totalRecipients).toBe(numUsersWorker2);
+
+              const statsBoth = service.getUserTypeStats(merchant.id, ['worker1', 'worker2']);
+              expect(statsBoth.totalRecipients).toBe(numUsersWorker1 + numUsersWorker2);
+
+              const statsAll = service.getUserTypeStats(merchant.id);
+              expect(statsAll.totalRecipients).toBe(numUsersWorker1 + numUsersWorker2);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+  });
 });

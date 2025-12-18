@@ -516,6 +516,7 @@ export interface AnalysisProject {
   name: string;
   merchantId: string;
   workerName: string;
+  workerNames?: string[];  // 多 Worker 列表（新增），空数组或 undefined 表示使用 workerName
   status: AnalysisProjectStatus;
   note?: string;
   // Computed fields from merchant
@@ -533,6 +534,7 @@ export interface CreateAnalysisProjectDTO {
   name: string;
   merchantId: string;
   workerName: string;
+  workerNames?: string[];  // 多 Worker 列表（新增），支持单选、多选、全选模式
   note?: string;
 }
 
@@ -542,6 +544,7 @@ export interface CreateAnalysisProjectDTO {
 export interface UpdateAnalysisProjectDTO {
   name?: string;
   status?: AnalysisProjectStatus;
+  workerNames?: string[];  // 多 Worker 列表（新增）
   note?: string;
 }
 
@@ -553,6 +556,7 @@ export interface AnalysisProjectRow {
   name: string;
   merchant_id: string;
   worker_name: string;
+  worker_names: string | null;  // JSON 数组字符串
   status: string;
   note: string | null;
   created_at: string;
@@ -696,11 +700,22 @@ export const ROOT_CAMPAIGN_KEYWORDS = [
  * Convert AnalysisProjectRow to AnalysisProject
  */
 export function toAnalysisProject(row: AnalysisProjectRow): AnalysisProject {
+  // Parse worker_names JSON string to array
+  let workerNames: string[] | undefined;
+  if (row.worker_names) {
+    try {
+      workerNames = JSON.parse(row.worker_names);
+    } catch {
+      workerNames = undefined;
+    }
+  }
+
   return {
     id: row.id,
     name: row.name,
     merchantId: row.merchant_id,
     workerName: row.worker_name,
+    workerNames,
     status: (row.status as AnalysisProjectStatus) || 'active',
     note: row.note ?? undefined,
     merchantDomain: row.merchant_domain ?? undefined,

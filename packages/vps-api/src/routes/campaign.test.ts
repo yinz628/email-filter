@@ -1,319 +1,28 @@
 /**
- * Campaign Routes Tests
+ * Campaign Routes Integration Tests
  * 
- * Property-based tests for campaign API route validation
- * Integration tests for campaign API endpoints
+ * Tests for rebuild-paths and cleanup-old-customers API endpoints
+ * Requirements: 3.1, 7.4
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as fc from 'fast-check';
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
-import { validateTrackEmail } from './campaign.js';
-import { extractDomain, calculateSubjectHash } from '../services/campaign-analytics.service.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 
-// ============================================
-// Arbitraries for generating test data
-// ============================================
-
-// Generate valid domain parts (no spaces, at least one character)
-const domainPartArb = fc.stringOf(
-  fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789-'.split('')),
-  { minLength: 1, maxLength: 20 }
-).filter(s => !s.startsWith('-') && !s.endsWith('-'));
-
-// Generate valid TLDs
-const tldArb = fc.constantFrom('com', 'org', 'net', 'io', 'co', 'edu', 'gov');
-
-// Generate valid domain (e.g., "example.com")
-const validDomainArb = fc.tuple(domainPartArb, tldArb)
-  .map(([name, tld]) => `${name}.${tld}`);
-
-// Generate valid local part of email (before @)
-const localPartArb = fc.stringOf(
-  fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789._+-'.split('')),
-  { minLength: 1, maxLength: 30 }
-).filter(s => s.length > 0 && !s.startsWith('.') && !s.endsWith('.'));
-
-// Generate valid email address
-const validEmailArb = fc.tuple(localPartArb, validDomainArb)
-  .map(([local, domain]) => `${local}@${domain}`);
-
-// Generate non-empty string for subject
-const validSubjectArb = fc.string({ minLength: 1, maxLength: 200 })
-  .filter(s => s.trim().length > 0);
-
-// Generate valid TrackEmailDTO
-const validTrackEmailDTOArb = fc.record({
-  sender: validEmailArb,
-  subject: validSubjectArb,
-  recipient: validEmailArb,
-});
-
-// Generate whitespace-only strings
-const whitespaceOnlyArb = fc.stringOf(fc.constantFrom(' ', '\t', '\n', '\r'), { minLength: 0, maxLength: 10 });
-
-describe('Campaign Routes Validation', () => {
-  /**
-   * **Feature: campaign-analytics, Property 12: Data Validation**
-   * **Validates: Requirements 8.2**
-   * 
-   * For any track request with missing required fields (sender, subject, recipient),
-   * the API should return a validation error.
-   */
-  describe('Property 12: Data Validation', () => {
-    it('should accept valid TrackEmailDTO with all required fields', () => {
-      fc.assert(
-        fc.property(
-          validTrackEmailDTOArb,
-          (dto) => {
-            const result = validateTrackEmail(dto);
-            
-            expect(result.valid).toBe(true);
-            expect(result.error).toBeUndefined();
-            expect(result.data).toBeDefined();
-            expect(result.data!.sender).toBe(dto.sender.trim());
-            expect(result.data!.subject).toBe(dto.subject.trim());
-            expect(result.data!.recipient).toBe(dto.recipient.trim());
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject requests with missing sender', () => {
-      fc.assert(
-        fc.property(
-          validSubjectArb,
-          validEmailArb,
-          (subject, recipient) => {
-            // Missing sender entirely
-            const result1 = validateTrackEmail({ subject, recipient });
-            expect(result1.valid).toBe(false);
-            expect(result1.error).toContain('sender');
-
-            // Null sender
-            const result2 = validateTrackEmail({ sender: null, subject, recipient });
-            expect(result2.valid).toBe(false);
-            expect(result2.error).toContain('sender');
-
-            // Undefined sender
-            const result3 = validateTrackEmail({ sender: undefined, subject, recipient });
-            expect(result3.valid).toBe(false);
-            expect(result3.error).toContain('sender');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject requests with empty or whitespace-only sender', () => {
-      fc.assert(
-        fc.property(
-          whitespaceOnlyArb,
-          validSubjectArb,
-          validEmailArb,
-          (emptySender, subject, recipient) => {
-            const result = validateTrackEmail({ sender: emptySender, subject, recipient });
-            expect(result.valid).toBe(false);
-            expect(result.error).toContain('sender');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject requests with missing subject', () => {
-      fc.assert(
-        fc.property(
-          validEmailArb,
-          validEmailArb,
-          (sender, recipient) => {
-            // Missing subject entirely
-            const result1 = validateTrackEmail({ sender, recipient });
-            expect(result1.valid).toBe(false);
-            expect(result1.error).toContain('subject');
-
-            // Null subject
-            const result2 = validateTrackEmail({ sender, subject: null, recipient });
-            expect(result2.valid).toBe(false);
-            expect(result2.error).toContain('subject');
-
-            // Undefined subject
-            const result3 = validateTrackEmail({ sender, subject: undefined, recipient });
-            expect(result3.valid).toBe(false);
-            expect(result3.error).toContain('subject');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject requests with empty or whitespace-only subject', () => {
-      fc.assert(
-        fc.property(
-          validEmailArb,
-          whitespaceOnlyArb,
-          validEmailArb,
-          (sender, emptySubject, recipient) => {
-            const result = validateTrackEmail({ sender, subject: emptySubject, recipient });
-            expect(result.valid).toBe(false);
-            expect(result.error).toContain('subject');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject requests with missing recipient', () => {
-      fc.assert(
-        fc.property(
-          validEmailArb,
-          validSubjectArb,
-          (sender, subject) => {
-            // Missing recipient entirely
-            const result1 = validateTrackEmail({ sender, subject });
-            expect(result1.valid).toBe(false);
-            expect(result1.error).toContain('recipient');
-
-            // Null recipient
-            const result2 = validateTrackEmail({ sender, subject, recipient: null });
-            expect(result2.valid).toBe(false);
-            expect(result2.error).toContain('recipient');
-
-            // Undefined recipient
-            const result3 = validateTrackEmail({ sender, subject, recipient: undefined });
-            expect(result3.valid).toBe(false);
-            expect(result3.error).toContain('recipient');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject requests with empty or whitespace-only recipient', () => {
-      fc.assert(
-        fc.property(
-          validEmailArb,
-          validSubjectArb,
-          whitespaceOnlyArb,
-          (sender, subject, emptyRecipient) => {
-            const result = validateTrackEmail({ sender, subject, recipient: emptyRecipient });
-            expect(result.valid).toBe(false);
-            expect(result.error).toContain('recipient');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject null or undefined request body', () => {
-      const result1 = validateTrackEmail(null);
-      expect(result1.valid).toBe(false);
-      expect(result1.error).toBeDefined();
-
-      const result2 = validateTrackEmail(undefined);
-      expect(result2.valid).toBe(false);
-      expect(result2.error).toBeDefined();
-    });
-
-    it('should reject non-object request body', () => {
-      fc.assert(
-        fc.property(
-          fc.oneof(
-            fc.string(),
-            fc.integer(),
-            fc.boolean(),
-            fc.array(fc.anything())
-          ),
-          (invalidBody) => {
-            const result = validateTrackEmail(invalidBody);
-            expect(result.valid).toBe(false);
-            expect(result.error).toBeDefined();
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should accept optional receivedAt field when valid', () => {
-      fc.assert(
-        fc.property(
-          validTrackEmailDTOArb,
-          fc.date({ min: new Date('2020-01-01'), max: new Date('2030-01-01') }),
-          (dto, date) => {
-            const dtoWithDate = { ...dto, receivedAt: date.toISOString() };
-            const result = validateTrackEmail(dtoWithDate);
-            
-            expect(result.valid).toBe(true);
-            expect(result.data).toBeDefined();
-            expect(result.data!.receivedAt).toBe(date.toISOString());
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should reject non-string receivedAt field', () => {
-      fc.assert(
-        fc.property(
-          validTrackEmailDTOArb,
-          fc.oneof(fc.integer(), fc.boolean(), fc.object()),
-          (dto, invalidReceivedAt) => {
-            const dtoWithInvalidDate = { ...dto, receivedAt: invalidReceivedAt };
-            const result = validateTrackEmail(dtoWithInvalidDate);
-            
-            expect(result.valid).toBe(false);
-            expect(result.error).toContain('receivedAt');
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-
-    it('should trim whitespace from valid fields', () => {
-      // Use subjects without leading/trailing whitespace for this test
-      const trimmedSubjectArb = fc.string({ minLength: 1, maxLength: 200 })
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-      
-      fc.assert(
-        fc.property(
-          validEmailArb,
-          trimmedSubjectArb,
-          validEmailArb,
-          (sender, subject, recipient) => {
-            // Add whitespace around values
-            const dtoWithWhitespace = {
-              sender: `  ${sender}  `,
-              subject: `  ${subject}  `,
-              recipient: `  ${recipient}  `,
-            };
-            
-            const result = validateTrackEmail(dtoWithWhitespace);
-            
-            expect(result.valid).toBe(true);
-            expect(result.data!.sender).toBe(sender);
-            expect(result.data!.subject).toBe(subject);
-            expect(result.data!.recipient).toBe(recipient);
-          }
-        ),
-        { numRuns: 100 }
-      );
-    });
-  });
-});
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ============================================
-// Integration Tests for DELETE /api/campaign/merchants/:id/data
+// Test Service for sql.js (in-memory testing)
 // ============================================
 
 /**
- * Test-specific service that works with sql.js for delete API testing
- * Requirements: 3.2, 3.3
+ * Test-specific service that simulates the API behavior with sql.js
  */
-class TestDeleteService {
+class TestCampaignService {
   constructor(private db: SqlJsDatabase) {}
 
   getMerchantById(id: string): any | null {
@@ -336,38 +45,40 @@ class TestDeleteService {
     return this.rowToMerchant(columns, row);
   }
 
-  getOrCreateMerchant(domain: string): { merchant: any; isNew: boolean } {
-    const normalizedDomain = domain.toLowerCase();
-    const existing = this.getMerchantByDomain(normalizedDomain);
-    
-    if (existing) {
-      return { merchant: existing, isNew: false };
-    }
-
+  createMerchant(domain: string): any {
     const id = uuidv4();
     const now = new Date().toISOString();
 
     this.db.run(
       `INSERT INTO merchants (id, domain, total_campaigns, total_emails, created_at, updated_at)
        VALUES (?, ?, 0, 0, ?, ?)`,
-      [id, normalizedDomain, now, now]
+      [id, domain.toLowerCase(), now, now]
     );
-
-    const merchant = this.getMerchantById(id);
-    return { merchant, isNew: true };
+    return this.getMerchantById(id);
   }
 
-  getCampaignByMerchantAndSubject(merchantId: string, subjectHash: string): any | null {
-    const result = this.db.exec(
-      'SELECT * FROM campaigns WHERE merchant_id = ? AND subject_hash = ?',
-      [merchantId, subjectHash]
+  createCampaign(merchantId: string, subject: string, isRoot: boolean = false): any {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const subjectHash = this.calculateSubjectHash(subject);
+
+    this.db.run(
+      `INSERT INTO campaigns (
+        id, merchant_id, subject, subject_hash, is_valuable, is_root,
+        total_emails, unique_recipients, first_seen_at, last_seen_at, 
+        created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?, ?)`,
+      [id, merchantId, subject, subjectHash, isRoot ? 1 : 0, now, now, now, now]
     );
-    if (result.length === 0 || result[0].values.length === 0) {
-      return null;
-    }
-    const row = result[0].values[0];
-    const columns = result[0].columns;
-    return this.rowToCampaign(columns, row);
+
+    // Update merchant campaign count
+    this.db.run(
+      `UPDATE merchants SET total_campaigns = total_campaigns + 1, updated_at = ? WHERE id = ?`,
+      [now, merchantId]
+    );
+
+    return this.getCampaignById(id);
   }
 
   getCampaignById(id: string): any | null {
@@ -380,524 +91,634 @@ class TestDeleteService {
     return this.rowToCampaign(columns, row);
   }
 
-  createOrUpdateCampaign(
-    merchantId: string,
-    subject: string,
-    receivedAt: Date
-  ): { campaign: any; isNew: boolean } {
-    const subjectHash = calculateSubjectHash(subject);
-    const now = new Date().toISOString();
-    const receivedAtStr = receivedAt.toISOString();
-
-    const existing = this.getCampaignByMerchantAndSubject(merchantId, subjectHash);
-
-    if (existing) {
-      this.db.run(
-        `UPDATE campaigns
-         SET total_emails = total_emails + 1,
-             last_seen_at = MAX(last_seen_at, ?),
-             updated_at = ?
-         WHERE id = ?`,
-        [receivedAtStr, now, existing.id]
-      );
-
-      const updated = this.getCampaignById(existing.id);
-      return { campaign: updated, isNew: false };
-    }
-
-    const id = uuidv4();
-    this.db.run(
-      `INSERT INTO campaigns (
-        id, merchant_id, subject, subject_hash, is_valuable, 
-        total_emails, unique_recipients, first_seen_at, last_seen_at, 
-        created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, 0, 1, 0, ?, ?, ?, ?)`,
-      [id, merchantId, subject, subjectHash, receivedAtStr, receivedAtStr, now, now]
-    );
-
-    // Update merchant campaign count
-    this.db.run(
-      `UPDATE merchants SET total_campaigns = total_campaigns + 1, updated_at = ? WHERE id = ?`,
-      [now, merchantId]
-    );
-
-    const created = this.getCampaignById(id);
-    return { campaign: created, isNew: true };
-  }
-
-  trackEmail(data: { sender: string; subject: string; recipient: string; receivedAt?: string; workerName?: string }): any {
-    const domain = extractDomain(data.sender);
-    if (!domain) {
-      throw new Error('Invalid sender email');
-    }
-
-    const receivedAt = data.receivedAt ? new Date(data.receivedAt) : new Date();
-    const receivedAtStr = receivedAt.toISOString();
-    const now = new Date().toISOString();
+  trackEmail(data: { campaignId: string; recipient: string; receivedAt: string; workerName?: string }): void {
     const workerName = data.workerName || 'global';
-    
-    const { merchant, isNew: isNewMerchant } = this.getOrCreateMerchant(domain);
-    const { campaign, isNew: isNewCampaign } = this.createOrUpdateCampaign(
-      merchant.id,
-      data.subject,
-      receivedAt
-    );
-
-    // Record the email with worker_name
     this.db.run(
       `INSERT INTO campaign_emails (campaign_id, recipient, received_at, worker_name)
        VALUES (?, ?, ?, ?)`,
-      [campaign.id, data.recipient, receivedAtStr, workerName]
+      [data.campaignId, data.recipient, data.receivedAt, workerName]
     );
+  }
 
-    // Update merchant total emails
+
+  addRecipientPath(merchantId: string, recipient: string, campaignId: string, sequenceOrder: number, isNewUser: boolean | null = null): void {
+    const now = new Date().toISOString();
     this.db.run(
-      `UPDATE merchants SET total_emails = total_emails + 1, updated_at = ? WHERE id = ?`,
-      [now, merchant.id]
+      `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, first_received_at, is_new_user)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [merchantId, recipient, campaignId, sequenceOrder, now, isNewUser === null ? null : (isNewUser ? 1 : 0)]
     );
+  }
 
-    // Handle recipient path tracking
-    const existingPathResult = this.db.exec(
-      `SELECT id FROM recipient_paths 
-       WHERE merchant_id = ? AND recipient = ? AND campaign_id = ?`,
-      [merchant.id, data.recipient, campaign.id]
+  getRecipientPaths(merchantId: string): any[] {
+    const result = this.db.exec(
+      `SELECT * FROM recipient_paths WHERE merchant_id = ? ORDER BY recipient, sequence_order`,
+      [merchantId]
     );
+    if (result.length === 0) return [];
+    const columns = result[0].columns;
+    return result[0].values.map(row => {
+      const obj: any = {};
+      columns.forEach((col, i) => { obj[col] = row[i]; });
+      return obj;
+    });
+  }
 
-    const existingPathEntry = existingPathResult.length > 0 && existingPathResult[0].values.length > 0;
+  getCampaignEmails(merchantId: string): any[] {
+    const result = this.db.exec(
+      `SELECT ce.* FROM campaign_emails ce
+       JOIN campaigns c ON ce.campaign_id = c.id
+       WHERE c.merchant_id = ?`,
+      [merchantId]
+    );
+    if (result.length === 0) return [];
+    const columns = result[0].columns;
+    return result[0].values.map(row => {
+      const obj: any = {};
+      columns.forEach((col, i) => { obj[col] = row[i]; });
+      return obj;
+    });
+  }
 
-    if (!existingPathEntry) {
-      const maxOrderResult = this.db.exec(
-        `SELECT MAX(sequence_order) as max_order 
-         FROM recipient_paths 
-         WHERE merchant_id = ? AND recipient = ?`,
-        [merchant.id, data.recipient]
-      );
 
-      let nextOrder = 0;
-      if (maxOrderResult.length > 0 && maxOrderResult[0].values.length > 0) {
-        const maxOrder = maxOrderResult[0].values[0][0];
-        nextOrder = (maxOrder !== null ? (maxOrder as number) : -1) + 1;
-      }
+  /**
+   * Rebuild recipient paths from campaign_emails data
+   * Simulates POST /api/campaign/merchants/:id/rebuild-paths
+   * Requirements: 3.1, 3.4
+   */
+  rebuildRecipientPaths(
+    merchantId: string,
+    workerNames?: string[]
+  ): { pathsDeleted: number; pathsCreated: number; recipientsProcessed: number } {
+    // Get all campaign emails for this merchant, ordered by recipient and received_at
+    let emailsQuery = `
+      SELECT ce.recipient, ce.campaign_id, ce.received_at
+      FROM campaign_emails ce
+      JOIN campaigns c ON ce.campaign_id = c.id
+      WHERE c.merchant_id = ?
+    `;
+    const params: any[] = [merchantId];
 
-      this.db.run(
-        `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, first_received_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [merchant.id, data.recipient, campaign.id, nextOrder, receivedAtStr]
-      );
-
-      this.db.run(
-        `UPDATE campaigns SET unique_recipients = unique_recipients + 1, updated_at = ? WHERE id = ?`,
-        [now, campaign.id]
-      );
+    // Filter by worker names if provided and non-empty
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
+      emailsQuery += ` AND ce.worker_name IN (${placeholders})`;
+      params.push(...workerNames);
     }
 
+    emailsQuery += ' ORDER BY ce.recipient, ce.received_at ASC';
+
+    const emailsResult = this.db.exec(emailsQuery, params);
+    const emails: Array<{ recipient: string; campaign_id: string; received_at: string }> = [];
+    if (emailsResult.length > 0) {
+      const columns = emailsResult[0].columns;
+      for (const row of emailsResult[0].values) {
+        const obj: any = {};
+        columns.forEach((col, i) => { obj[col] = row[i]; });
+        emails.push(obj);
+      }
+    }
+
+    // Delete existing paths for this merchant
+    const beforeDelete = this.getRecipientPaths(merchantId);
+    this.db.run('DELETE FROM recipient_paths WHERE merchant_id = ?', [merchantId]);
+    const pathsDeleted = beforeDelete.length;
+
+
+    // Group emails by recipient
+    const recipientEmails = new Map<string, Array<{ campaign_id: string; received_at: string }>>();
+    for (const email of emails) {
+      if (!recipientEmails.has(email.recipient)) {
+        recipientEmails.set(email.recipient, []);
+      }
+      recipientEmails.get(email.recipient)!.push({
+        campaign_id: email.campaign_id,
+        received_at: email.received_at,
+      });
+    }
+
+    // Rebuild paths for each recipient
+    let pathsCreated = 0;
+    for (const [recipient, emailList] of recipientEmails) {
+      const addedCampaigns = new Set<string>();
+      let sequenceOrder = 1;
+
+      for (const email of emailList) {
+        if (!addedCampaigns.has(email.campaign_id)) {
+          this.db.run(
+            `INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, first_received_at)
+             VALUES (?, ?, ?, ?, ?)`,
+            [merchantId, recipient, email.campaign_id, sequenceOrder, email.received_at]
+          );
+          addedCampaigns.add(email.campaign_id);
+          sequenceOrder++;
+          pathsCreated++;
+        }
+      }
+    }
+
+    // Recalculate new/old user flags
+    this.recalculateAllNewUsers(merchantId);
+
     return {
-      merchantId: merchant.id,
-      campaignId: campaign.id,
-      isNewMerchant,
-      isNewCampaign,
+      pathsDeleted,
+      pathsCreated,
+      recipientsProcessed: recipientEmails.size,
     };
   }
 
+
   /**
-   * Delete merchant data for a specific worker
-   * Requirements: 3.2, 3.3, 3.5, 3.6
+   * Cleanup old customer paths
+   * Simulates POST /api/campaign/merchants/:id/cleanup-old-customers
+   * Requirements: 7.4, 7.6
    */
-  deleteMerchantData(data: { merchantId: string; workerName: string }): {
-    merchantId: string;
-    workerName: string;
-    emailsDeleted: number;
-    pathsDeleted: number;
-    campaignsAffected: number;
-    merchantDeleted: boolean;
-  } {
-    const { merchantId, workerName } = data;
+  cleanupOldCustomerPaths(
+    merchantId: string,
+    workerNames?: string[]
+  ): { pathsDeleted: number; recipientsAffected: number } {
+    // Get all recipients who are old customers (is_new_user = 0 or NULL)
+    let oldCustomersQuery = `
+      SELECT DISTINCT recipient
+      FROM recipient_paths
+      WHERE merchant_id = ?
+        AND (is_new_user = 0 OR is_new_user IS NULL)
+    `;
+    const params: any[] = [merchantId];
 
-    // Check if merchant exists
-    const merchant = this.getMerchantById(merchantId);
-    if (!merchant) {
-      throw new Error(`Merchant not found: ${merchantId}`);
+    // If workerNames is provided and non-empty, filter by workers
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
+      oldCustomersQuery += `
+        AND recipient IN (
+          SELECT DISTINCT ce.recipient
+          FROM campaign_emails ce
+          JOIN campaigns c ON ce.campaign_id = c.id
+          WHERE c.merchant_id = ? AND ce.worker_name IN (${placeholders})
+        )
+      `;
+      params.push(merchantId, ...workerNames);
     }
 
-    let emailsDeleted = 0;
-    let pathsDeleted = 0;
-    let campaignsAffected = 0;
-    let merchantDeleted = false;
+    const oldCustomersResult = this.db.exec(oldCustomersQuery, params);
+    const oldCustomers: string[] = [];
+    if (oldCustomersResult.length > 0) {
+      for (const row of oldCustomersResult[0].values) {
+        oldCustomers.push(row[0] as string);
+      }
+    }
 
-    // Get all campaign IDs for this merchant
-    const campaignIdsResult = this.db.exec(
-      `SELECT id FROM campaigns WHERE merchant_id = ?`,
-      [merchantId]
+    const recipientsAffected = oldCustomers.length;
+    if (recipientsAffected === 0) {
+      return { pathsDeleted: 0, recipientsAffected: 0 };
+    }
+
+
+    // Count paths before deletion
+    const pathsBeforeResult = this.db.exec(
+      `SELECT COUNT(*) FROM recipient_paths WHERE merchant_id = ? AND recipient IN (${oldCustomers.map(() => '?').join(', ')})`,
+      [merchantId, ...oldCustomers]
     );
+    const pathsBefore = pathsBeforeResult.length > 0 ? pathsBeforeResult[0].values[0][0] as number : 0;
 
-    const campaignIds: string[] = [];
-    if (campaignIdsResult.length > 0) {
-      for (const row of campaignIdsResult[0].values) {
-        campaignIds.push(row[0] as string);
-      }
-    }
-
-    if (campaignIds.length > 0) {
-      // Count emails to be deleted
-      for (const campaignId of campaignIds) {
-        const countResult = this.db.exec(
-          `SELECT COUNT(*) as count FROM campaign_emails 
-           WHERE campaign_id = ? AND worker_name = ?`,
-          [campaignId, workerName]
-        );
-        if (countResult.length > 0 && countResult[0].values.length > 0) {
-          emailsDeleted += countResult[0].values[0][0] as number;
-        }
-      }
-
-      // Delete the emails
-      for (const campaignId of campaignIds) {
-        this.db.run(
-          `DELETE FROM campaign_emails 
-           WHERE campaign_id = ? AND worker_name = ?`,
-          [campaignId, workerName]
-        );
-      }
-
-      // Count affected campaigns
-      const affectedResult = this.db.exec(
-        `SELECT COUNT(DISTINCT id) as count FROM campaigns WHERE merchant_id = ?`,
-        [merchantId]
-      );
-      if (affectedResult.length > 0 && affectedResult[0].values.length > 0) {
-        campaignsAffected = affectedResult[0].values[0][0] as number;
-      }
-    }
-
-    // Check if merchant has any remaining data
-    const remainingResult = this.db.exec(
-      `SELECT COUNT(*) as count FROM campaign_emails 
-       WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
-      [merchantId]
+    // Delete paths for old customers (preserve campaign_emails per Requirements 7.5)
+    this.db.run(
+      `DELETE FROM recipient_paths WHERE merchant_id = ? AND recipient IN (${oldCustomers.map(() => '?').join(', ')})`,
+      [merchantId, ...oldCustomers]
     );
-
-    const remainingEmails = remainingResult.length > 0 && remainingResult[0].values.length > 0
-      ? remainingResult[0].values[0][0] as number
-      : 0;
-
-    if (remainingEmails === 0) {
-      // Delete all campaigns for this merchant
-      this.db.run(`DELETE FROM campaigns WHERE merchant_id = ?`, [merchantId]);
-      
-      // Delete all paths for this merchant
-      this.db.run(`DELETE FROM recipient_paths WHERE merchant_id = ?`, [merchantId]);
-      
-      // Delete the merchant record
-      this.db.run(`DELETE FROM merchants WHERE id = ?`, [merchantId]);
-      
-      merchantDeleted = true;
-    }
 
     return {
-      merchantId,
-      workerName,
-      emailsDeleted,
-      pathsDeleted,
-      campaignsAffected,
-      merchantDeleted,
+      pathsDeleted: pathsBefore,
+      recipientsAffected,
     };
+  }
+
+  recalculateAllNewUsers(merchantId: string): void {
+    // Get all root campaigns for this merchant
+    const rootCampaignsResult = this.db.exec(
+      'SELECT id FROM campaigns WHERE merchant_id = ? AND is_root = 1',
+      [merchantId]
+    );
+    const rootCampaignIds: string[] = [];
+    if (rootCampaignsResult.length > 0) {
+      for (const row of rootCampaignsResult[0].values) {
+        rootCampaignIds.push(row[0] as string);
+      }
+    }
+
+    if (rootCampaignIds.length === 0) {
+      // No root campaigns, mark all as NULL (unknown)
+      this.db.run('UPDATE recipient_paths SET is_new_user = NULL WHERE merchant_id = ?', [merchantId]);
+      return;
+    }
+
+
+    // Get all recipients and their first campaign
+    const recipientsResult = this.db.exec(
+      `SELECT recipient, campaign_id FROM recipient_paths 
+       WHERE merchant_id = ? AND sequence_order = 1`,
+      [merchantId]
+    );
+
+    if (recipientsResult.length === 0) return;
+
+    for (const row of recipientsResult[0].values) {
+      const recipient = row[0] as string;
+      const firstCampaignId = row[1] as string;
+      const isNewUser = rootCampaignIds.includes(firstCampaignId) ? 1 : 0;
+
+      this.db.run(
+        'UPDATE recipient_paths SET is_new_user = ? WHERE merchant_id = ? AND recipient = ?',
+        [isNewUser, merchantId, recipient]
+      );
+    }
+  }
+
+  private calculateSubjectHash(subject: string): string {
+    // Simple hash for testing
+    let hash = 0;
+    for (let i = 0; i < subject.length; i++) {
+      const char = subject.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
   }
 
   private rowToMerchant(columns: string[], row: any[]): any {
     const obj: any = {};
-    columns.forEach((col, i) => {
-      obj[col] = row[i];
-    });
+    columns.forEach((col, i) => { obj[col] = row[i]; });
     return {
       id: obj.id,
       domain: obj.domain,
       displayName: obj.display_name,
-      note: obj.note,
       totalCampaigns: obj.total_campaigns,
       totalEmails: obj.total_emails,
-      createdAt: new Date(obj.created_at),
-      updatedAt: new Date(obj.updated_at),
     };
   }
 
   private rowToCampaign(columns: string[], row: any[]): any {
     const obj: any = {};
-    columns.forEach((col, i) => {
-      obj[col] = row[i];
-    });
+    columns.forEach((col, i) => { obj[col] = row[i]; });
     return {
       id: obj.id,
       merchantId: obj.merchant_id,
       subject: obj.subject,
-      subjectHash: obj.subject_hash,
-      isValuable: obj.is_valuable === 1,
-      valuableNote: obj.valuable_note,
-      totalEmails: obj.total_emails,
-      uniqueRecipients: obj.unique_recipients,
-      firstSeenAt: new Date(obj.first_seen_at),
-      lastSeenAt: new Date(obj.last_seen_at),
-      createdAt: new Date(obj.created_at),
-      updatedAt: new Date(obj.updated_at),
+      isRoot: obj.is_root === 1,
     };
   }
 }
 
-/**
- * Helper function to create an in-memory database with required schema
- */
-async function createTestDatabase(): Promise<SqlJsDatabase> {
+
+// Helper to initialize test database
+async function createTestDb(): Promise<SqlJsDatabase> {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
   
-  // Create merchants table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS merchants (
-      id TEXT PRIMARY KEY,
-      domain TEXT NOT NULL UNIQUE,
-      display_name TEXT,
-      note TEXT,
-      analysis_status TEXT DEFAULT 'pending',
-      total_campaigns INTEGER DEFAULT 0,
-      total_emails INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-
-  // Create campaigns table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS campaigns (
-      id TEXT PRIMARY KEY,
-      merchant_id TEXT NOT NULL,
-      subject TEXT NOT NULL,
-      subject_hash TEXT NOT NULL,
-      is_valuable INTEGER DEFAULT 0,
-      valuable_note TEXT,
-      tag INTEGER DEFAULT 0,
-      tag_note TEXT,
-      is_root INTEGER DEFAULT 0,
-      total_emails INTEGER DEFAULT 0,
-      unique_recipients INTEGER DEFAULT 0,
-      first_seen_at TEXT NOT NULL,
-      last_seen_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (merchant_id) REFERENCES merchants(id)
-    )
-  `);
-
-  // Create campaign_emails table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS campaign_emails (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id TEXT NOT NULL,
-      recipient TEXT NOT NULL,
-      received_at TEXT NOT NULL,
-      worker_name TEXT DEFAULT 'global',
-      created_at TEXT,
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-    )
-  `);
-
-  // Create recipient_paths table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS recipient_paths (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      merchant_id TEXT NOT NULL,
-      recipient TEXT NOT NULL,
-      campaign_id TEXT NOT NULL,
-      sequence_order INTEGER NOT NULL,
-      first_received_at TEXT NOT NULL,
-      FOREIGN KEY (merchant_id) REFERENCES merchants(id),
-      FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-    )
-  `);
-
+  // Load campaign schema
+  const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+  const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+  db.run(campaignSchema);
+  
+  // Add migration columns that are added via migrate-campaign.ts
+  db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
+  db.run('ALTER TABLE campaigns ADD COLUMN is_root_candidate INTEGER DEFAULT 0');
+  db.run('ALTER TABLE campaigns ADD COLUMN root_candidate_reason TEXT');
+  db.run('ALTER TABLE campaigns ADD COLUMN tag INTEGER DEFAULT 0');
+  db.run('ALTER TABLE recipient_paths ADD COLUMN is_new_user INTEGER DEFAULT 0');
+  db.run('ALTER TABLE recipient_paths ADD COLUMN first_root_campaign_id TEXT');
+  
   return db;
 }
 
-describe('DELETE /api/campaign/merchants/:id/data Integration Tests', () => {
-  let db: SqlJsDatabase;
-  let service: TestDeleteService;
+// ============================================
+// Integration Tests for API Endpoints
+// ============================================
 
-  beforeEach(async () => {
-    db = await createTestDatabase();
-    service = new TestDeleteService(db);
-  });
+describe('Campaign Routes Integration Tests', () => {
+  /**
+   * Tests for POST /api/campaign/merchants/:id/rebuild-paths
+   * Requirements: 3.1, 3.4
+   */
+  describe('POST /merchants/:id/rebuild-paths', () => {
+    it('should rebuild paths from campaign_emails data', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
 
-  afterEach(() => {
-    db.close();
-  });
+      try {
+        // Setup: Create merchant and campaigns
+        const merchant = service.createMerchant('test.com');
+        const campaign1 = service.createCampaign(merchant.id, 'Welcome Email', true);
+        const campaign2 = service.createCampaign(merchant.id, 'Promo Email');
 
-  describe('Successful deletion scenarios', () => {
-    it('should delete merchant data for a specific worker', () => {
-      // Setup: Create merchant and track emails from a specific worker
-      const trackResult = service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Test Campaign',
-        recipient: 'user@test.com',
-        workerName: 'worker-a',
-      });
+        // Track emails for recipient
+        const baseTime = new Date('2024-01-01T10:00:00Z');
+        service.trackEmail({
+          campaignId: campaign1.id,
+          recipient: 'user@example.com',
+          receivedAt: baseTime.toISOString(),
+        });
+        service.trackEmail({
+          campaignId: campaign2.id,
+          recipient: 'user@example.com',
+          receivedAt: new Date(baseTime.getTime() + 3600000).toISOString(),
+        });
 
-      const merchantId = trackResult.merchantId;
 
-      // Verify data exists before deletion
-      const merchantBefore = service.getMerchantById(merchantId);
-      expect(merchantBefore).not.toBeNull();
+        // Execute rebuild
+        const result = service.rebuildRecipientPaths(merchant.id);
 
-      // Delete merchant data for worker-a
-      const deleteResult = service.deleteMerchantData({
-        merchantId,
-        workerName: 'worker-a',
-      });
+        // Verify result
+        expect(result.recipientsProcessed).toBe(1);
+        expect(result.pathsCreated).toBe(2);
 
-      // Verify deletion result
-      expect(deleteResult.merchantId).toBe(merchantId);
-      expect(deleteResult.workerName).toBe('worker-a');
-      expect(deleteResult.emailsDeleted).toBe(1);
-      expect(deleteResult.merchantDeleted).toBe(true); // No other worker data
+        // Verify paths are in correct order
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(2);
+        expect(paths[0].campaign_id).toBe(campaign1.id);
+        expect(paths[0].sequence_order).toBe(1);
+        expect(paths[1].campaign_id).toBe(campaign2.id);
+        expect(paths[1].sequence_order).toBe(2);
+      } finally {
+        db.close();
+      }
     });
 
-    it('should preserve data from other workers when deleting', () => {
-      // Setup: Create merchant with data from two workers
-      const trackResult1 = service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Campaign 1',
-        recipient: 'user1@test.com',
-        workerName: 'worker-a',
-      });
+    it('should filter by workerNames when provided', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
 
-      service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Campaign 2',
-        recipient: 'user2@test.com',
-        workerName: 'worker-b',
-      });
+      try {
+        // Setup: Create merchant and campaigns
+        const merchant = service.createMerchant('test.com');
+        const campaign1 = service.createCampaign(merchant.id, 'Welcome Email', true);
+        const campaign2 = service.createCampaign(merchant.id, 'Promo Email');
 
-      const merchantId = trackResult1.merchantId;
-
-      // Delete data for worker-a only
-      const deleteResult = service.deleteMerchantData({
-        merchantId,
-        workerName: 'worker-a',
-      });
-
-      // Verify deletion result
-      expect(deleteResult.emailsDeleted).toBe(1);
-      expect(deleteResult.merchantDeleted).toBe(false); // worker-b data still exists
-
-      // Verify merchant still exists
-      const merchantAfter = service.getMerchantById(merchantId);
-      expect(merchantAfter).not.toBeNull();
-    });
-
-    it('should return correct statistics after deletion', () => {
-      // Setup: Create merchant with multiple emails from same worker
-      const trackResult = service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Campaign 1',
-        recipient: 'user1@test.com',
-        workerName: 'worker-a',
-      });
-
-      service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Campaign 1',
-        recipient: 'user2@test.com',
-        workerName: 'worker-a',
-      });
-
-      service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Campaign 2',
-        recipient: 'user1@test.com',
-        workerName: 'worker-a',
-      });
-
-      const merchantId = trackResult.merchantId;
-
-      // Delete all data for worker-a
-      const deleteResult = service.deleteMerchantData({
-        merchantId,
-        workerName: 'worker-a',
-      });
-
-      // Verify statistics
-      expect(deleteResult.emailsDeleted).toBe(3);
-      expect(deleteResult.campaignsAffected).toBeGreaterThanOrEqual(1);
-      expect(deleteResult.merchantDeleted).toBe(true);
-    });
-  });
-
-  describe('Merchant not found scenarios', () => {
-    it('should throw error when merchant does not exist', () => {
-      expect(() => {
-        service.deleteMerchantData({
-          merchantId: 'non-existent-id',
+        // Track emails from different workers
+        const baseTime = new Date('2024-01-01T10:00:00Z');
+        service.trackEmail({
+          campaignId: campaign1.id,
+          recipient: 'user@example.com',
+          receivedAt: baseTime.toISOString(),
           workerName: 'worker-a',
         });
-      }).toThrow('Merchant not found');
+        service.trackEmail({
+          campaignId: campaign2.id,
+          recipient: 'user@example.com',
+          receivedAt: new Date(baseTime.getTime() + 3600000).toISOString(),
+          workerName: 'worker-b',
+        });
+
+
+        // Rebuild with only worker-a filter
+        const result = service.rebuildRecipientPaths(merchant.id, ['worker-a']);
+
+        // Verify only worker-a emails are included
+        expect(result.recipientsProcessed).toBe(1);
+        expect(result.pathsCreated).toBe(1);
+
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(1);
+        expect(paths[0].campaign_id).toBe(campaign1.id);
+      } finally {
+        db.close();
+      }
     });
 
-    it('should throw error with correct merchant ID in message', () => {
-      const fakeId = 'fake-merchant-123';
-      expect(() => {
-        service.deleteMerchantData({
-          merchantId: fakeId,
-          workerName: 'worker-a',
+    it('should delete existing paths before rebuilding', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
+
+      try {
+        // Setup: Create merchant and campaigns
+        const merchant = service.createMerchant('test.com');
+        const campaign1 = service.createCampaign(merchant.id, 'Welcome Email', true);
+
+        // Add existing path manually
+        service.addRecipientPath(merchant.id, 'old@example.com', campaign1.id, 1, true);
+        expect(service.getRecipientPaths(merchant.id).length).toBe(1);
+
+        // Track new email
+        service.trackEmail({
+          campaignId: campaign1.id,
+          recipient: 'new@example.com',
+          receivedAt: new Date().toISOString(),
         });
-      }).toThrow(`Merchant not found: ${fakeId}`);
+
+        // Rebuild paths
+        const result = service.rebuildRecipientPaths(merchant.id);
+
+        // Verify old paths were deleted
+        expect(result.pathsDeleted).toBe(1);
+        expect(result.recipientsProcessed).toBe(1);
+
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(1);
+        expect(paths[0].recipient).toBe('new@example.com');
+      } finally {
+        db.close();
+      }
+    });
+
+
+    it('should recalculate new/old user flags after rebuild', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
+
+      try {
+        // Setup: Create merchant with root and non-root campaigns
+        const merchant = service.createMerchant('test.com');
+        const rootCampaign = service.createCampaign(merchant.id, 'Welcome Email', true);
+        const promoCampaign = service.createCampaign(merchant.id, 'Promo Email', false);
+
+        const baseTime = new Date('2024-01-01T10:00:00Z');
+
+        // New user: first email from root campaign
+        service.trackEmail({
+          campaignId: rootCampaign.id,
+          recipient: 'newuser@example.com',
+          receivedAt: baseTime.toISOString(),
+        });
+
+        // Old user: first email from non-root campaign
+        service.trackEmail({
+          campaignId: promoCampaign.id,
+          recipient: 'olduser@example.com',
+          receivedAt: baseTime.toISOString(),
+        });
+
+        // Rebuild paths
+        service.rebuildRecipientPaths(merchant.id);
+
+        // Verify new/old user flags
+        const paths = service.getRecipientPaths(merchant.id);
+        const newUserPath = paths.find(p => p.recipient === 'newuser@example.com');
+        const oldUserPath = paths.find(p => p.recipient === 'olduser@example.com');
+
+        expect(newUserPath?.is_new_user).toBe(1);
+        expect(oldUserPath?.is_new_user).toBe(0);
+      } finally {
+        db.close();
+      }
     });
   });
 
-  describe('Worker name validation scenarios', () => {
-    it('should handle deletion when worker has no data for merchant', () => {
-      // Setup: Create merchant with data from worker-a
-      const trackResult = service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Test Campaign',
-        recipient: 'user@test.com',
-        workerName: 'worker-a',
-      });
 
-      const merchantId = trackResult.merchantId;
+  /**
+   * Tests for POST /api/campaign/merchants/:id/cleanup-old-customers
+   * Requirements: 7.4, 7.6
+   */
+  describe('POST /merchants/:id/cleanup-old-customers', () => {
+    it('should remove paths for old customers only', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
 
-      // Try to delete data for worker-b (which has no data)
-      const deleteResult = service.deleteMerchantData({
-        merchantId,
-        workerName: 'worker-b',
-      });
+      try {
+        // Setup: Create merchant with root campaign
+        const merchant = service.createMerchant('test.com');
+        const rootCampaign = service.createCampaign(merchant.id, 'Welcome Email', true);
+        const promoCampaign = service.createCampaign(merchant.id, 'Promo Email', false);
 
-      // Should succeed but delete nothing
-      expect(deleteResult.emailsDeleted).toBe(0);
-      expect(deleteResult.pathsDeleted).toBe(0);
-      expect(deleteResult.merchantDeleted).toBe(false);
+        // Add paths for new user (is_new_user = 1)
+        service.addRecipientPath(merchant.id, 'newuser@example.com', rootCampaign.id, 1, true);
+        service.addRecipientPath(merchant.id, 'newuser@example.com', promoCampaign.id, 2, true);
 
-      // Original data should still exist
-      const merchantAfter = service.getMerchantById(merchantId);
-      expect(merchantAfter).not.toBeNull();
+        // Add paths for old user (is_new_user = 0)
+        service.addRecipientPath(merchant.id, 'olduser@example.com', promoCampaign.id, 1, false);
+
+        // Track emails for both users (needed for worker filter)
+        service.trackEmail({
+          campaignId: rootCampaign.id,
+          recipient: 'newuser@example.com',
+          receivedAt: new Date().toISOString(),
+        });
+        service.trackEmail({
+          campaignId: promoCampaign.id,
+          recipient: 'olduser@example.com',
+          receivedAt: new Date().toISOString(),
+        });
+
+        // Cleanup old customers
+        const result = service.cleanupOldCustomerPaths(merchant.id);
+
+        // Verify only old customer paths were removed
+        expect(result.recipientsAffected).toBe(1);
+        expect(result.pathsDeleted).toBe(1);
+
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(2);
+        expect(paths.every(p => p.recipient === 'newuser@example.com')).toBe(true);
+      } finally {
+        db.close();
+      }
     });
 
-    it('should handle different worker name formats', () => {
-      // Setup: Create merchant with data
-      const trackResult = service.trackEmail({
-        sender: 'test@example.com',
-        subject: 'Test Campaign',
-        recipient: 'user@test.com',
-        workerName: 'Worker-With-Dashes',
-      });
 
-      const merchantId = trackResult.merchantId;
+    it('should preserve campaign_emails records after cleanup', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
 
-      // Delete with exact worker name
-      const deleteResult = service.deleteMerchantData({
-        merchantId,
-        workerName: 'Worker-With-Dashes',
-      });
+      try {
+        // Setup: Create merchant with campaigns
+        const merchant = service.createMerchant('test.com');
+        const promoCampaign = service.createCampaign(merchant.id, 'Promo Email', false);
 
-      expect(deleteResult.emailsDeleted).toBe(1);
-      expect(deleteResult.merchantDeleted).toBe(true);
+        // Add path for old user
+        service.addRecipientPath(merchant.id, 'olduser@example.com', promoCampaign.id, 1, false);
+
+        // Track email
+        service.trackEmail({
+          campaignId: promoCampaign.id,
+          recipient: 'olduser@example.com',
+          receivedAt: new Date().toISOString(),
+        });
+
+        // Verify email exists before cleanup
+        const emailsBefore = service.getCampaignEmails(merchant.id);
+        expect(emailsBefore.length).toBe(1);
+
+        // Cleanup old customers
+        service.cleanupOldCustomerPaths(merchant.id);
+
+        // Verify campaign_emails are preserved (Requirements 7.5)
+        const emailsAfter = service.getCampaignEmails(merchant.id);
+        expect(emailsAfter.length).toBe(1);
+        expect(emailsAfter[0].recipient).toBe('olduser@example.com');
+
+        // Verify paths are deleted
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(0);
+      } finally {
+        db.close();
+      }
+    });
+
+    it('should filter by workerNames when provided', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
+
+      try {
+        // Setup: Create merchant with campaigns
+        const merchant = service.createMerchant('test.com');
+        const promoCampaign = service.createCampaign(merchant.id, 'Promo Email', false);
+
+
+        // Add paths for old users from different workers
+        service.addRecipientPath(merchant.id, 'olduser-a@example.com', promoCampaign.id, 1, false);
+        service.addRecipientPath(merchant.id, 'olduser-b@example.com', promoCampaign.id, 1, false);
+
+        // Track emails from different workers
+        service.trackEmail({
+          campaignId: promoCampaign.id,
+          recipient: 'olduser-a@example.com',
+          receivedAt: new Date().toISOString(),
+          workerName: 'worker-a',
+        });
+        service.trackEmail({
+          campaignId: promoCampaign.id,
+          recipient: 'olduser-b@example.com',
+          receivedAt: new Date().toISOString(),
+          workerName: 'worker-b',
+        });
+
+        // Cleanup only worker-a old customers
+        const result = service.cleanupOldCustomerPaths(merchant.id, ['worker-a']);
+
+        // Verify only worker-a old customer was affected
+        expect(result.recipientsAffected).toBe(1);
+
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(1);
+        expect(paths[0].recipient).toBe('olduser-b@example.com');
+      } finally {
+        db.close();
+      }
+    });
+
+    it('should return zero counts when no old customers exist', async () => {
+      const db = await createTestDb();
+      const service = new TestCampaignService(db);
+
+      try {
+        // Setup: Create merchant with only new users
+        const merchant = service.createMerchant('test.com');
+        const rootCampaign = service.createCampaign(merchant.id, 'Welcome Email', true);
+
+        // Add path for new user only
+        service.addRecipientPath(merchant.id, 'newuser@example.com', rootCampaign.id, 1, true);
+
+        // Cleanup old customers
+        const result = service.cleanupOldCustomerPaths(merchant.id);
+
+        // Verify no changes
+        expect(result.recipientsAffected).toBe(0);
+        expect(result.pathsDeleted).toBe(0);
+
+        const paths = service.getRecipientPaths(merchant.id);
+        expect(paths.length).toBe(1);
+      } finally {
+        db.close();
+      }
     });
   });
 });

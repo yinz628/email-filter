@@ -299,5 +299,23 @@ if (!analysisProjectsTableExists) {
   console.log('analysis_projects table already exists.');
 }
 
+// Migration: Add worker_names column to analysis_projects table for multi-worker support
+try {
+  const columns = db.prepare("PRAGMA table_info(analysis_projects)").all() as Array<{ name: string }>;
+  const hasWorkerNamesColumn = columns.some(col => col.name === 'worker_names');
+  
+  if (!hasWorkerNamesColumn) {
+    console.log('Adding worker_names column to analysis_projects table...');
+    db.exec(`
+      ALTER TABLE analysis_projects ADD COLUMN worker_names TEXT;
+    `);
+    console.log('worker_names column added to analysis_projects.');
+  } else {
+    console.log('worker_names column already exists in analysis_projects.');
+  }
+} catch (e) {
+  console.log('worker_names column migration skipped (may already exist).');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

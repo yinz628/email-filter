@@ -99,8 +99,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .value-tag-2 { background: #fff3cd; color: #856404; }
     .path-node { padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; background: #fff; }
     .path-node.highlighted { border-color: #27ae60; background: #e8f5e9; }
+    .path-node.highlighted.high-value { border-color: #ffc107; background: #fff8e1; }
     .path-node-title { font-weight: 600; margin-bottom: 4px; }
     .path-node-stats { font-size: 12px; color: #666; }
+    .btn-warning { background: #ffc107; color: #212529; border: 1px solid #ffc107; }
+    .btn-warning:hover { background: #e0a800; border-color: #d39e00; }
   </style>
 </head>
 <body>
@@ -490,6 +493,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <tr>
               <th>项目名称</th>
               <th>商户域名</th>
+              <th>Worker</th>
               <th>状态</th>
               <th>创建时间</th>
               <th>操作</th>
@@ -504,6 +508,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;" id="project-detail-title">项目详情</h2>
           <button class="btn btn-sm btn-secondary" onclick="closeProjectDetail()">✕ 关闭</button>
+        </div>
+        
+        <!-- 项目信息摘要 -->
+        <div id="project-info-summary" style="margin-bottom:15px;padding:12px;background:#f8f9fa;border-radius:6px;display:flex;gap:20px;flex-wrap:wrap;">
+          <div><strong>商户:</strong> <span id="project-info-merchant">-</span></div>
+          <div><strong>Worker 实例:</strong> <span id="project-info-workers">-</span></div>
+          <div><strong>状态:</strong> <span id="project-info-status">-</span></div>
         </div>
         
         <!-- 标签页导航 -->
@@ -587,8 +598,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <button class="btn btn-primary" onclick="switchProjectTab('root')">前往选择 Root</button>
           </div>
           <div id="path-analysis-container" style="display:none;">
-            <div style="margin-bottom:15px;">
-              <p style="color:#666;">基于 Root 的收件人路径流向分析。显示从 Root 开始的营销活动推送路径。</p>
+            <div style="margin-bottom:15px;display:flex;justify-content:space-between;align-items:center;">
+              <p style="color:#666;margin:0;">基于 Root 的收件人路径流向分析。显示从 Root 开始的营销活动推送路径。</p>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" onclick="recalculatePathsForProject()">🔄 重新分析路径</button>
+                <button class="btn btn-warning btn-sm" onclick="cleanupOldCustomersForProject()">🧹 清理老客户数据</button>
+              </div>
             </div>
             <div id="path-flow-container" style="min-height:300px;border:1px solid #eee;border-radius:6px;padding:16px;">
               加载中...
@@ -1361,12 +1376,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>商户域名</label>
           <input type="text" id="create-project-merchant-domain" disabled style="background:#f5f5f5">
         </div>
-        <div class="form-group" id="create-project-worker-group" style="display:none;">
-          <label>Worker 实例 *</label>
-          <select id="create-project-worker" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
-            <option value="">请选择实例</option>
-          </select>
-          <p id="create-project-worker-error" style="color:#e74c3c;font-size:12px;margin-top:5px;display:none;">请选择一个 Worker 实例</p>
+        <div class="form-group" id="create-project-worker-group">
+          <label>Worker 实例选择 *</label>
+          <div style="margin-bottom:8px;">
+            <label style="display:inline-flex;align-items:center;margin-right:15px;cursor:pointer;">
+              <input type="radio" name="worker-mode" value="single" checked onchange="updateWorkerSelectionMode()" style="margin-right:5px;">
+              <span>单个实例</span>
+            </label>
+            <label style="display:inline-flex;align-items:center;margin-right:15px;cursor:pointer;">
+              <input type="radio" name="worker-mode" value="multiple" onchange="updateWorkerSelectionMode()" style="margin-right:5px;">
+              <span>多个实例</span>
+            </label>
+            <label style="display:inline-flex;align-items:center;cursor:pointer;">
+              <input type="radio" name="worker-mode" value="all" onchange="updateWorkerSelectionMode()" style="margin-right:5px;">
+              <span>全部实例</span>
+            </label>
+          </div>
+          <div id="create-project-single-worker" style="display:block;">
+            <select id="create-project-worker" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">请选择实例</option>
+            </select>
+          </div>
+          <div id="create-project-multi-worker" style="display:none;max-height:150px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:8px;">
+            <!-- Checkboxes will be populated dynamically -->
+          </div>
+          <p id="create-project-worker-error" style="color:#e74c3c;font-size:12px;margin-top:5px;display:none;">请选择至少一个 Worker 实例</p>
         </div>
         <div class="form-group">
           <label>项目名称 *</label>
@@ -2443,6 +2477,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     let workerMerchantsData = [];
     let currentProjectId = null;
     let currentProjectWorkerName = null;
+    let currentProjectWorkerNames = null;
 
     async function loadCampaignAnalytics() {
       await loadProjects();
@@ -2515,9 +2550,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const isSelected = currentProjectId === p.id;
         const rowStyle = isSelected ? 'background:#e3f2fd;' : '';
         
+        // Format worker display
+        let workerDisplay = p.workerName || '-';
+        if (p.workerNames && p.workerNames.length > 1) {
+          workerDisplay = p.workerNames.length + '个实例';
+        }
+        
         return '<tr style="' + rowStyle + '">' +
           '<td><strong style="cursor:pointer;color:#1565c0;" onclick="openProject(\\'' + p.id + '\\')">' + escapeHtml(p.name) + '</strong></td>' +
           '<td>' + escapeHtml(p.merchantDomain || '-') + '</td>' +
+          '<td><span style="font-size:12px;color:#666;">' + escapeHtml(workerDisplay) + '</span></td>' +
           '<td>' + statusBadge + '</td>' +
           '<td>' + createdAt + '</td>' +
           '<td class="actions">' +
@@ -2642,6 +2684,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       renderMerchantList();
     }
 
+    // Store available workers for the modal
+    let availableWorkers = [];
+
     function showCreateProjectModal(merchantId, merchantDomain) {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       
@@ -2650,31 +2695,74 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('create-project-merchant-domain').value = merchantDomain;
       document.getElementById('create-project-name').value = merchantDomain;
       document.getElementById('create-project-name-error').style.display = 'none';
+      document.getElementById('create-project-worker-error').style.display = 'none';
       
-      // Show/hide worker selector based on current filter
-      const workerGroup = document.getElementById('create-project-worker-group');
+      // Populate worker options from the main filter
+      const mainFilter = document.getElementById('campaign-worker-filter');
       const workerSelect = document.getElementById('create-project-worker');
-      const workerError = document.getElementById('create-project-worker-error');
+      const multiWorkerDiv = document.getElementById('create-project-multi-worker');
       
-      if (!workerName) {
-        // No worker selected, show worker selector
-        workerGroup.style.display = 'block';
-        workerError.style.display = 'none';
-        // Populate worker options from the main filter
-        const mainFilter = document.getElementById('campaign-worker-filter');
-        workerSelect.innerHTML = '<option value="">请选择实例</option>';
-        Array.from(mainFilter.options).forEach(opt => {
-          if (opt.value) {
-            workerSelect.innerHTML += '<option value="' + opt.value + '">' + opt.text + '</option>';
-          }
-        });
-      } else {
-        // Worker already selected, hide selector
-        workerGroup.style.display = 'none';
+      availableWorkers = [];
+      workerSelect.innerHTML = '<option value="">请选择实例</option>';
+      multiWorkerDiv.innerHTML = '';
+      
+      Array.from(mainFilter.options).forEach(opt => {
+        if (opt.value) {
+          availableWorkers.push({ value: opt.value, text: opt.text });
+          workerSelect.innerHTML += '<option value="' + opt.value + '">' + opt.text + '</option>';
+          multiWorkerDiv.innerHTML += '<label style="display:block;padding:4px 0;cursor:pointer;">' +
+            '<input type="checkbox" class="multi-worker-checkbox" value="' + opt.value + '" style="margin-right:8px;">' +
+            opt.text + '</label>';
+        }
+      });
+      
+      // Set default mode based on current filter
+      if (workerName) {
+        // Pre-select the current worker
+        document.querySelector('input[name="worker-mode"][value="single"]').checked = true;
         workerSelect.value = workerName;
+      } else {
+        document.querySelector('input[name="worker-mode"][value="single"]').checked = true;
       }
       
+      updateWorkerSelectionMode();
       showModal('create-project-modal');
+    }
+
+    function updateWorkerSelectionMode() {
+      const mode = document.querySelector('input[name="worker-mode"]:checked')?.value || 'single';
+      const singleDiv = document.getElementById('create-project-single-worker');
+      const multiDiv = document.getElementById('create-project-multi-worker');
+      
+      if (mode === 'single') {
+        singleDiv.style.display = 'block';
+        multiDiv.style.display = 'none';
+      } else if (mode === 'multiple') {
+        singleDiv.style.display = 'none';
+        multiDiv.style.display = 'block';
+        // Uncheck all checkboxes
+        document.querySelectorAll('.multi-worker-checkbox').forEach(cb => cb.checked = false);
+      } else if (mode === 'all') {
+        singleDiv.style.display = 'none';
+        multiDiv.style.display = 'block';
+        // Check all checkboxes
+        document.querySelectorAll('.multi-worker-checkbox').forEach(cb => cb.checked = true);
+      }
+    }
+
+    function getSelectedWorkers() {
+      const mode = document.querySelector('input[name="worker-mode"]:checked')?.value || 'single';
+      
+      if (mode === 'single') {
+        const workerName = document.getElementById('create-project-worker')?.value || '';
+        return workerName ? { workerName, workerNames: null } : null;
+      } else {
+        const checkboxes = document.querySelectorAll('.multi-worker-checkbox:checked');
+        const workerNames = Array.from(checkboxes).map(cb => cb.value);
+        if (workerNames.length === 0) return null;
+        // Use first worker as primary workerName for backward compatibility
+        return { workerName: workerNames[0], workerNames };
+      }
     }
 
     // Project name validation function
@@ -2692,12 +2780,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const errorEl = document.getElementById('create-project-name-error');
       const workerErrorEl = document.getElementById('create-project-worker-error');
       
-      // Get worker name from filter or modal selector
-      let workerName = document.getElementById('campaign-worker-filter')?.value || '';
-      if (!workerName) {
-        workerName = document.getElementById('create-project-worker')?.value || '';
-      }
-      
       // Validate project name
       if (!validateProjectName(name)) {
         errorEl.style.display = 'block';
@@ -2705,18 +2787,29 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       errorEl.style.display = 'none';
       
-      // Validate worker selection
-      if (!workerName) {
+      // Get selected workers
+      const selectedWorkers = getSelectedWorkers();
+      if (!selectedWorkers) {
         if (workerErrorEl) workerErrorEl.style.display = 'block';
         return;
       }
       if (workerErrorEl) workerErrorEl.style.display = 'none';
       
       try {
+        const requestBody = { 
+          name: name.trim(), 
+          merchantId, 
+          workerName: selectedWorkers.workerName
+        };
+        // Only include workerNames if multiple workers selected
+        if (selectedWorkers.workerNames && selectedWorkers.workerNames.length > 1) {
+          requestBody.workerNames = selectedWorkers.workerNames;
+        }
+        
         const res = await fetch('/api/campaign/projects', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({ name: name.trim(), merchantId, workerName })
+          body: JSON.stringify(requestBody)
         });
         if (res.ok) {
           hideModal('create-project-modal');
@@ -2926,9 +3019,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       currentMerchantId = project.merchantId;
       currentProjectRootId = project.rootCampaignId || null;
       currentProjectWorkerName = project.workerName || null;
+      // Use workerNames array if available, otherwise fall back to single workerName
+      currentProjectWorkerNames = project.workerNames && project.workerNames.length > 0 
+        ? project.workerNames 
+        : (project.workerName ? [project.workerName] : null);
       
       // Update project detail title
       document.getElementById('project-detail-title').textContent = '项目详情 - ' + project.name;
+      
+      // Update project info summary
+      document.getElementById('project-info-merchant').textContent = project.merchantDomain || '-';
+      
+      // Display worker list
+      let workerDisplay = project.workerName || '-';
+      if (project.workerNames && project.workerNames.length > 0) {
+        if (project.workerNames.length === 1) {
+          workerDisplay = project.workerNames[0];
+        } else {
+          workerDisplay = project.workerNames.join(', ') + ' (' + project.workerNames.length + '个)';
+        }
+      }
+      document.getElementById('project-info-workers').textContent = workerDisplay;
+      
+      // Display status
+      const statusLabels = { active: '进行中', completed: '已完成', archived: '已归档' };
+      document.getElementById('project-info-status').textContent = statusLabels[project.status] || project.status;
       
       // Show project detail section
       document.getElementById('campaign-project-detail-section').style.display = 'block';
@@ -2945,6 +3060,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       currentMerchantId = null;
       currentProjectRootId = null;
       currentProjectWorkerName = null;
+      currentProjectWorkerNames = null;
       
       // Hide project detail section
       document.getElementById('campaign-project-detail-section').style.display = 'none';
@@ -3301,10 +3417,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       flowContainer.innerHTML = '加载中...';
       
       try {
-        // Use project's workerName for instance filtering
-        const workerName = currentProjectWorkerName || '';
+        // Use project's workerNames for multi-worker filtering (Requirements: 4.1, 4.2, 4.3, 4.4, 4.5)
         let url = '/api/campaign/merchants/' + currentMerchantId + '/path-analysis';
-        if (workerName) url += '?workerName=' + encodeURIComponent(workerName);
+        if (currentProjectWorkerNames && currentProjectWorkerNames.length > 0) {
+          url += '?workerNames=' + encodeURIComponent(currentProjectWorkerNames.join(','));
+        }
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
@@ -3324,6 +3441,28 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return;
       }
       
+      // Helper function to get tag marker based on tag value
+      // tag=1: green ★ (valuable), tag=2: gold ★★ (high-value)
+      function getTagMarker(tag, isValuable) {
+        if (tag === 2) return ' <span style="color:#ffc107;font-weight:500;">★★ 高价值</span>';
+        if (tag === 1 || isValuable) return ' <span style="color:#27ae60;font-weight:500;">★ 有价值</span>';
+        return '';
+      }
+      
+      // Helper function to get tag marker for tree nodes (shorter version)
+      function getTreeTagMarker(tag, isValuable) {
+        if (tag === 2) return ' <span style="color:#ffc107;">★★</span>';
+        if (tag === 1 || isValuable) return ' <span style="color:#27ae60;">★</span>';
+        return '';
+      }
+      
+      // Helper function to get highlight class based on tag
+      function getHighlightClass(tag, isValuable) {
+        if (tag === 2) return 'highlighted high-value';
+        if (tag === 1 || isValuable) return 'highlighted';
+        return '';
+      }
+      
       let html = '';
       
       // User Stats Section
@@ -3336,34 +3475,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#9c27b0;">' + (data.userStats.newUserPercentage || 0).toFixed(1) + '%</div><div style="font-size:11px;color:#666;">新用户比例</div></div>';
       html += '</div></div>';
       
-      // Level Stats Section - Path Nodes
+      // Level Stats Section - Path Nodes (no level limit - show all levels)
       html += '<div style="background:#f3e5f5;border:1px solid #ce93d8;border-radius:8px;padding:15px;margin-bottom:15px;">';
       html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#7b1fa2;">📈 活动层级 (基于新用户路径)</h4>';
       
       if (data.levelStats && data.levelStats.length > 0) {
-        // Group by level
+        // Group by level - no limit on number of levels
         const levelGroups = {};
         data.levelStats.forEach(ls => {
           if (!levelGroups[ls.level]) levelGroups[ls.level] = [];
           levelGroups[ls.level].push(ls);
         });
         
-        Object.keys(levelGroups).sort((a, b) => a - b).forEach(level => {
+        // Sort levels numerically and display all of them
+        Object.keys(levelGroups).sort((a, b) => parseInt(a) - parseInt(b)).forEach(level => {
           html += '<div style="margin-bottom:12px;">';
           html += '<div style="font-size:12px;font-weight:600;color:#7b1fa2;margin-bottom:6px;">第 ' + level + ' 层</div>';
           
           levelGroups[level].forEach(node => {
-            const isHighlighted = node.tag === 1 || node.tag === 2 || node.isValuable;
+            const highlightClass = getHighlightClass(node.tag, node.isValuable);
             const percentage = node.coverage ? node.coverage.toFixed(1) + '%' : '-';
+            const tagMarker = getTagMarker(node.tag, node.isValuable);
             
-            html += '<div class="path-node ' + (isHighlighted ? 'highlighted' : '') + '">';
+            html += '<div class="path-node ' + highlightClass + '">';
             html += '<div class="path-node-title">' + escapeHtml(node.subject || '未知主题');
             if (node.isRoot) html += ' <span style="color:#e65100;">🎯 Root</span>';
             html += '</div>';
             html += '<div class="path-node-stats">';
             html += '收件人: ' + (node.userCount || 0) + ' | ';
             html += '覆盖率: ' + percentage;
-            if (isHighlighted) html += ' | <span style="color:#27ae60;font-weight:500;">★ 有价值</span>';
+            html += tagMarker;
             html += '</div>';
             html += '</div>';
           });
@@ -3375,7 +3516,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       html += '</div>';
       
-      // Transitions Section - Tree View
+      // Transitions Section - Tree View (no depth limit)
       html += '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:15px;">';
       html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#2e7d32;">🔄 新用户转移路径</h4>';
       
@@ -3389,6 +3530,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             transitionMap[t.fromCampaignId] = {
               subject: t.fromSubject,
               isValuable: t.fromIsValuable,
+              tag: t.fromTag,
               children: []
             };
           }
@@ -3396,6 +3538,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             campaignId: t.toCampaignId,
             subject: t.toSubject,
             isValuable: t.toIsValuable,
+            tag: t.toTag,
             userCount: t.userCount,
             ratio: t.transitionRatio
           });
@@ -3412,33 +3555,33 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           if (sortedNodes.length > 0) rootNodes.push(sortedNodes[0][0]);
         }
         
-        // Render tree recursively
-        function renderTreeNode(campaignId, depth, maxDepth) {
-          if (depth > maxDepth || !transitionMap[campaignId]) return '';
+        // Track visited nodes to prevent infinite loops
+        const visited = new Set();
+        
+        // Render tree recursively - no depth limit
+        function renderTreeNode(campaignId, depth) {
+          if (!transitionMap[campaignId] || visited.has(campaignId)) return '';
+          visited.add(campaignId);
+          
           const node = transitionMap[campaignId];
           let nodeHtml = '';
           
-          node.children.sort((a, b) => b.userCount - a.userCount).slice(0, 5).forEach((child, idx, arr) => {
+          node.children.sort((a, b) => b.userCount - a.userCount).forEach((child, idx, arr) => {
             const isLast = idx === arr.length - 1;
             const prefix = depth > 0 ? '│'.repeat(depth - 1) + (isLast ? '└' : '├') : '';
             const bgColor = child.ratio >= 50 ? '#c8e6c9' : (child.ratio >= 20 ? '#fff9c4' : 'transparent');
-            const valuableMarker = child.isValuable ? ' <span style="color:#27ae60;">★</span>' : '';
+            const tagMarker = getTreeTagMarker(child.tag, child.isValuable);
             
             nodeHtml += '<div style="padding:3px 0;font-size:12px;font-family:monospace;background:' + bgColor + ';border-radius:3px;margin:2px 0;">';
             nodeHtml += '<span style="color:#999;">' + prefix + '→ </span>';
-            nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>' + valuableMarker;
+            nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>' + tagMarker;
             nodeHtml += '<span style="color:#2e7d32;font-weight:bold;margin-left:8px;">' + child.userCount + '人</span>';
             nodeHtml += '<span style="color:#666;margin-left:5px;">(' + child.ratio.toFixed(1) + '%)</span>';
             nodeHtml += '</div>';
             
-            // Recursively render children
-            nodeHtml += renderTreeNode(child.campaignId, depth + 1, maxDepth);
+            // Recursively render children - no depth limit
+            nodeHtml += renderTreeNode(child.campaignId, depth + 1);
           });
-          
-          if (node.children.length > 5) {
-            const prefix = depth > 0 ? '│'.repeat(depth - 1) + '└' : '';
-            nodeHtml += '<div style="padding:3px 0;font-size:11px;color:#999;font-family:monospace;">' + prefix + '... +' + (node.children.length - 5) + ' 更多</div>';
-          }
           
           return nodeHtml;
         }
@@ -3447,21 +3590,102 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         rootNodes.forEach(rootId => {
           const rootNode = transitionMap[rootId];
           if (rootNode) {
-            const rootValuable = rootNode.isValuable ? ' <span style="color:#27ae60;">★</span>' : '';
+            const rootTagMarker = getTreeTagMarker(rootNode.tag, rootNode.isValuable);
             html += '<div style="margin-bottom:10px;padding:10px;background:#fff;border-radius:6px;border:1px solid #c8e6c9;">';
-            html += '<div style="font-weight:bold;font-size:12px;color:#1b5e20;margin-bottom:6px;">🎯 ' + escapeHtml(rootNode.subject.substring(0, 40)) + rootValuable + '</div>';
-            html += renderTreeNode(rootId, 0, 4);
+            html += '<div style="font-weight:bold;font-size:12px;color:#1b5e20;margin-bottom:6px;">🎯 ' + escapeHtml(rootNode.subject.substring(0, 40)) + rootTagMarker + '</div>';
+            visited.clear(); // Clear visited for each root tree
+            html += renderTreeNode(rootId, 0);
             html += '</div>';
           }
         });
         
-        html += '<p style="color:#888;font-size:10px;margin-top:8px;margin-bottom:0;">💡 绿色背景=主路径(≥50%) | 黄色背景=次级路径(≥20%) | ★=有价值活动</p>';
+        html += '<p style="color:#888;font-size:10px;margin-top:8px;margin-bottom:0;">💡 绿色背景=主路径(≥50%) | 黄色背景=次级路径(≥20%) | <span style="color:#27ae60;">★</span>=有价值 | <span style="color:#ffc107;">★★</span>=高价值</p>';
       } else {
         html += '<div style="text-align:center;color:#999;padding:20px;">暂无转移数据</div>';
       }
       html += '</div>';
       
       flowContainer.innerHTML = html;
+    }
+
+    async function recalculatePathsForProject() {
+      if (!currentMerchantId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      // Use currentProjectWorkerNames for multi-worker support (Requirements: 4.6)
+      const workerNames = currentProjectWorkerNames || [];
+      const confirmMsg = workerNames.length > 0
+        ? '确定要重新分析实例 "' + workerNames.join(', ') + '" 的路径数据吗？这将删除现有路径并重新计算。'
+        : '确定要重新分析所有实例的路径数据吗？这将删除现有路径并重新计算。';
+      
+      if (!confirm(confirmMsg)) return;
+      
+      const flowContainer = document.getElementById('path-flow-container');
+      flowContainer.innerHTML = '<div style="text-align:center;padding:40px;color:#666;">正在重新分析路径...</div>';
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/rebuild-paths', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ workerNames: workerNames.length > 0 ? workerNames : undefined })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('路径重建完成: 删除 ' + data.pathsDeleted + ' 条旧路径, 创建 ' + data.pathsCreated + ' 条新路径, 处理 ' + data.recipientsProcessed + ' 个收件人', 'success');
+          await loadPathAnalysis();
+        } else {
+          const error = await res.json();
+          showAlert('重建失败: ' + (error.error || '未知错误'), 'error');
+          await loadPathAnalysis();
+        }
+      } catch (e) {
+        console.error('Error rebuilding paths:', e);
+        showAlert('重建失败', 'error');
+        await loadPathAnalysis();
+      }
+    }
+
+    async function cleanupOldCustomersForProject() {
+      if (!currentMerchantId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      // Use currentProjectWorkerNames for multi-worker support (Requirements: 4.6)
+      const workerNames = currentProjectWorkerNames || [];
+      const confirmMsg = workerNames.length > 0
+        ? '确定要清理实例 "' + workerNames.join(', ') + '" 中老客户的路径数据吗？此操作将删除非 Root 起始用户的路径记录。'
+        : '确定要清理所有实例中老客户的路径数据吗？此操作将删除非 Root 起始用户的路径记录。';
+      
+      if (!confirm(confirmMsg)) return;
+      
+      const flowContainer = document.getElementById('path-flow-container');
+      flowContainer.innerHTML = '<div style="text-align:center;padding:40px;color:#666;">正在清理老客户数据...</div>';
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/cleanup-old-customers', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ workerNames: workerNames.length > 0 ? workerNames : undefined })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('清理完成: 删除 ' + data.pathsDeleted + ' 条老客户路径, 影响 ' + data.recipientsAffected + ' 个收件人', 'success');
+          await loadPathAnalysis();
+        } else {
+          const error = await res.json();
+          showAlert('清理失败: ' + (error.error || '未知错误'), 'error');
+          await loadPathAnalysis();
+        }
+      } catch (e) {
+        console.error('Error cleaning up old customers:', e);
+        showAlert('清理失败', 'error');
+        await loadPathAnalysis();
+      }
     }
 
     async function loadDataStats() {

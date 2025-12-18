@@ -1592,25 +1592,26 @@ export class CampaignAnalyticsService {
    * Shows common predecessors and successors for each valuable campaign
    * 
    * @param merchantId - Merchant ID to analyze
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns ValuableCampaignsAnalysis with detailed path info for valuable campaigns
    */
-  getValuableCampaignsAnalysis(merchantId: string, workerName?: string): ValuableCampaignsAnalysis {
+  getValuableCampaignsAnalysis(merchantId: string, workerNames?: string[]): ValuableCampaignsAnalysis {
     // Get all valuable campaigns for this merchant
-    // When workerName is provided, only include campaigns that have emails from this worker
+    // When workerNames is provided, only include campaigns that have emails from these workers
     let valuableCampaigns: Array<{ id: string; subject: string; unique_recipients: number }>;
     let totalRecipients: number;
 
-    if (workerName) {
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
       const valuableCampaignsStmt = this.db.prepare(`
         SELECT DISTINCT c.id, c.subject, 
-          (SELECT COUNT(DISTINCT ce2.recipient) FROM campaign_emails ce2 WHERE ce2.campaign_id = c.id AND ce2.worker_name = ?) as unique_recipients
+          (SELECT COUNT(DISTINCT ce2.recipient) FROM campaign_emails ce2 WHERE ce2.campaign_id = c.id AND ce2.worker_name IN (${placeholders})) as unique_recipients
         FROM campaigns c
         JOIN campaign_emails ce ON c.id = ce.campaign_id
-        WHERE c.merchant_id = ? AND c.is_valuable = 1 AND ce.worker_name = ?
+        WHERE c.merchant_id = ? AND c.is_valuable = 1 AND ce.worker_name IN (${placeholders})
         ORDER BY unique_recipients DESC
       `);
-      valuableCampaigns = valuableCampaignsStmt.all(workerName, merchantId, workerName) as Array<{
+      valuableCampaigns = valuableCampaignsStmt.all(...workerNames, merchantId, ...workerNames) as Array<{
         id: string;
         subject: string;
         unique_recipients: number;
@@ -1621,9 +1622,9 @@ export class CampaignAnalyticsService {
         FROM recipient_paths rp
         JOIN campaigns c ON rp.campaign_id = c.id
         JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
-        WHERE rp.merchant_id = ? AND ce.worker_name = ?
+        WHERE rp.merchant_id = ? AND ce.worker_name IN (${placeholders})
       `);
-      const totalResult = totalRecipientsStmt.get(merchantId, workerName) as { total: number };
+      const totalResult = totalRecipientsStmt.get(merchantId, ...workerNames) as { total: number };
       totalRecipients = totalResult.total;
     } else {
       const valuableCampaignsStmt = this.db.prepare(`
@@ -1790,13 +1791,14 @@ export class CampaignAnalyticsService {
    * Returns both confirmed and candidate root campaigns
    * 
    * @param merchantId - Merchant ID
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns Array of RootCampaign
    */
-  getRootCampaigns(merchantId: string, workerName?: string): RootCampaign[] {
+  getRootCampaigns(merchantId: string, workerNames?: string[]): RootCampaign[] {
     // Get campaigns marked as root or candidate
-    // When workerName is provided, only count new users from that worker
-    if (workerName) {
+    // When workerNames is provided, only count new users from those workers
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
       const stmt = this.db.prepare(`
         SELECT 
           c.id,
@@ -1806,7 +1808,7 @@ export class CampaignAnalyticsService {
           c.root_candidate_reason,
           c.updated_at,
           COUNT(DISTINCT CASE 
-            WHEN ce.worker_name = ? THEN rp.recipient 
+            WHEN ce.worker_name IN (${placeholders}) THEN rp.recipient 
             ELSE NULL 
           END) as new_user_count
         FROM campaigns c
@@ -1817,7 +1819,7 @@ export class CampaignAnalyticsService {
         ORDER BY c.is_root DESC, new_user_count DESC
       `);
 
-      const rows = stmt.all(workerName, merchantId) as Array<{
+      const rows = stmt.all(...workerNames, merchantId) as Array<{
         id: string;
         subject: string;
         is_root: number;
@@ -2025,6 +2027,173 @@ export class CampaignAnalyticsService {
     }
   }
 
+  /**
+   * Rebuild recipient paths for a merchant from campaign_emails data
+   * This will delete all existing paths and recreate them based on email timestamps
+   * Includes all campaigns (valuable campaigns will be highlighted in UI)
+   * 
+   * @param merchantId - Merchant ID
+   * @param workerNames - Optional array of worker names to filter by. Empty array or undefined includes all workers.
+   * @returns Statistics about the rebuild operation
+   * 
+   * Requirements: 3.2, 3.3, 4.2, 4.3, 4.6
+   */
+  rebuildRecipientPaths(
+    merchantId: string,
+    workerNames?: string[]
+  ): { pathsDeleted: number; pathsCreated: number; recipientsProcessed: number } {
+    // Get all campaign emails for this merchant, ordered by recipient and received_at
+    let emailsQuery = `
+      SELECT ce.recipient, ce.campaign_id, ce.received_at, c.merchant_id
+      FROM campaign_emails ce
+      JOIN campaigns c ON ce.campaign_id = c.id
+      WHERE c.merchant_id = ?
+    `;
+    const params: (string | number)[] = [merchantId];
+
+    // Filter by worker names if provided and non-empty
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
+      emailsQuery += ` AND ce.worker_name IN (${placeholders})`;
+      params.push(...workerNames);
+    }
+
+    emailsQuery += ' ORDER BY ce.recipient, ce.received_at ASC';
+
+    const emails = this.db.prepare(emailsQuery).all(...params) as Array<{
+      recipient: string;
+      campaign_id: string;
+      received_at: string;
+      merchant_id: string;
+    }>;
+
+    // Delete existing paths for this merchant
+    let deleteQuery = 'DELETE FROM recipient_paths WHERE merchant_id = ?';
+    const deleteParams: string[] = [merchantId];
+
+    const deleteResult = this.db.prepare(deleteQuery).run(...deleteParams);
+    const pathsDeleted = deleteResult.changes;
+
+    // Group emails by recipient
+    const recipientEmails = new Map<
+      string,
+      Array<{ campaign_id: string; received_at: string }>
+    >();
+    for (const email of emails) {
+      if (!recipientEmails.has(email.recipient)) {
+        recipientEmails.set(email.recipient, []);
+      }
+      recipientEmails.get(email.recipient)!.push({
+        campaign_id: email.campaign_id,
+        received_at: email.received_at,
+      });
+    }
+
+    // Rebuild paths for each recipient
+    let pathsCreated = 0;
+    const insertStmt = this.db.prepare(`
+      INSERT INTO recipient_paths (merchant_id, recipient, campaign_id, sequence_order, first_received_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    for (const [recipient, emailList] of recipientEmails) {
+      // Track which campaigns we've already added to the path
+      const addedCampaigns = new Set<string>();
+      let sequenceOrder = 1;
+
+      for (const email of emailList) {
+        if (!addedCampaigns.has(email.campaign_id)) {
+          insertStmt.run(
+            merchantId,
+            recipient,
+            email.campaign_id,
+            sequenceOrder,
+            email.received_at
+          );
+          addedCampaigns.add(email.campaign_id);
+          sequenceOrder++;
+          pathsCreated++;
+        }
+      }
+    }
+
+    // Recalculate new/old user flags based on Root campaigns
+    // Requirements: 4.6
+    this.recalculateAllNewUsers(merchantId);
+
+    return {
+      pathsDeleted,
+      pathsCreated,
+      recipientsProcessed: recipientEmails.size,
+    };
+  }
+
+  /**
+   * Cleanup old customer paths for a merchant
+   * Removes recipient_paths entries for recipients identified as old customers
+   * (recipients whose first email was NOT from a Root campaign)
+   * Preserves campaign_emails records.
+   * 
+   * @param merchantId - Merchant ID
+   * @param workerNames - Optional array of worker names to filter by. Empty array or undefined includes all workers.
+   * @returns Statistics about the cleanup operation
+   * 
+   * Requirements: 7.4, 7.5, 7.6
+   */
+  cleanupOldCustomerPaths(
+    merchantId: string,
+    workerNames?: string[]
+  ): { pathsDeleted: number; recipientsAffected: number } {
+    // Get all recipients who are old customers (is_new_user = 0 or NULL)
+    // Old customers are those whose first email was NOT from a Root campaign
+    let oldCustomersQuery = `
+      SELECT DISTINCT rp.recipient
+      FROM recipient_paths rp
+      WHERE rp.merchant_id = ?
+        AND (rp.is_new_user = 0 OR rp.is_new_user IS NULL)
+    `;
+    const params: (string | number)[] = [merchantId];
+
+    // If workerNames is provided and non-empty, filter by workers
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
+      oldCustomersQuery += `
+        AND rp.recipient IN (
+          SELECT DISTINCT ce.recipient
+          FROM campaign_emails ce
+          JOIN campaigns c ON ce.campaign_id = c.id
+          WHERE c.merchant_id = ? AND ce.worker_name IN (${placeholders})
+        )
+      `;
+      params.push(merchantId, ...workerNames);
+    }
+
+    const oldCustomers = this.db.prepare(oldCustomersQuery).all(...params) as Array<{ recipient: string }>;
+    const recipientsAffected = oldCustomers.length;
+
+    if (recipientsAffected === 0) {
+      return { pathsDeleted: 0, recipientsAffected: 0 };
+    }
+
+    // Delete paths for old customers
+    // Note: We preserve campaign_emails records as per Requirements 7.5
+    const recipientList = oldCustomers.map(r => r.recipient);
+    const recipientPlaceholders = recipientList.map(() => '?').join(', ');
+    
+    const deleteStmt = this.db.prepare(`
+      DELETE FROM recipient_paths
+      WHERE merchant_id = ? AND recipient IN (${recipientPlaceholders})
+    `);
+    
+    const deleteResult = deleteStmt.run(merchantId, ...recipientList);
+    const pathsDeleted = deleteResult.changes;
+
+    return {
+      pathsDeleted,
+      recipientsAffected,
+    };
+  }
+
   // ============================================
   // New/Old User Statistics (新老用户统计)
   // ============================================
@@ -2033,12 +2202,13 @@ export class CampaignAnalyticsService {
    * Get user type statistics for a merchant
    * 
    * @param merchantId - Merchant ID
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns UserTypeStats
    */
-  getUserTypeStats(merchantId: string, workerName?: string): UserTypeStats {
-    if (workerName) {
-      // Filter by worker - only count recipients who have emails from this worker
+  getUserTypeStats(merchantId: string, workerNames?: string[]): UserTypeStats {
+    if (workerNames && workerNames.length > 0) {
+      // Filter by workers - only count recipients who have emails from these workers
+      const placeholders = workerNames.map(() => '?').join(', ');
       const stmt = this.db.prepare(`
         SELECT 
           COUNT(DISTINCT rp.recipient) as total,
@@ -2048,12 +2218,12 @@ export class CampaignAnalyticsService {
           FROM recipient_paths rp
           JOIN campaigns c ON rp.campaign_id = c.id
           JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
-          WHERE rp.merchant_id = ? AND ce.worker_name = ?
+          WHERE rp.merchant_id = ? AND ce.worker_name IN (${placeholders})
           GROUP BY rp.recipient
         ) rp
       `);
 
-      const result = stmt.get(merchantId, workerName) as { total: number; new_users: number };
+      const result = stmt.get(merchantId, ...workerNames) as { total: number; new_users: number };
       const total = result.total || 0;
       const newUsers = result.new_users || 0;
       const oldUsers = total - newUsers;
@@ -2098,24 +2268,25 @@ export class CampaignAnalyticsService {
    * Get campaign coverage statistics
    * 
    * @param merchantId - Merchant ID
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns Array of CampaignCoverage
    */
-  getCampaignCoverage(merchantId: string, workerName?: string): CampaignCoverage[] {
-    const userStats = this.getUserTypeStats(merchantId, workerName);
+  getCampaignCoverage(merchantId: string, workerNames?: string[]): CampaignCoverage[] {
+    const userStats = this.getUserTypeStats(merchantId, workerNames);
     const levels = this.calculateDAGLevels(merchantId);
 
-    if (workerName) {
-      // Filter by worker - only count recipients who have emails from this worker
+    if (workerNames && workerNames.length > 0) {
+      // Filter by workers - only count recipients who have emails from these workers
+      const placeholders = workerNames.map(() => '?').join(', ');
       const stmt = this.db.prepare(`
         SELECT 
           c.id,
           c.subject,
           c.tag,
           c.is_valuable,
-          COUNT(DISTINCT CASE WHEN rp.is_new_user = 1 AND ce.worker_name = ? THEN rp.recipient END) as new_user_count,
-          COUNT(DISTINCT CASE WHEN (rp.is_new_user = 0 OR rp.is_new_user IS NULL) AND ce.worker_name = ? THEN rp.recipient END) as old_user_count,
-          COUNT(DISTINCT CASE WHEN ce.worker_name = ? THEN rp.recipient END) as total_count
+          COUNT(DISTINCT CASE WHEN rp.is_new_user = 1 AND ce.worker_name IN (${placeholders}) THEN rp.recipient END) as new_user_count,
+          COUNT(DISTINCT CASE WHEN (rp.is_new_user = 0 OR rp.is_new_user IS NULL) AND ce.worker_name IN (${placeholders}) THEN rp.recipient END) as old_user_count,
+          COUNT(DISTINCT CASE WHEN ce.worker_name IN (${placeholders}) THEN rp.recipient END) as total_count
         FROM campaigns c
         LEFT JOIN recipient_paths rp ON c.id = rp.campaign_id
         LEFT JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
@@ -2125,7 +2296,7 @@ export class CampaignAnalyticsService {
         ORDER BY new_user_count DESC
       `);
 
-      const rows = stmt.all(workerName, workerName, workerName, merchantId) as Array<{
+      const rows = stmt.all(...workerNames, ...workerNames, ...workerNames, merchantId) as Array<{
         id: string;
         subject: string;
         tag: number;
@@ -2212,16 +2383,17 @@ export class CampaignAnalyticsService {
    * Get campaign transitions for new users only
    * 
    * @param merchantId - Merchant ID
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns CampaignTransitionsResult
    */
-  getNewUserTransitions(merchantId: string, workerName?: string): CampaignTransitionsResult {
+  getNewUserTransitions(merchantId: string, workerNames?: string[]): CampaignTransitionsResult {
     // Get paths for new users only
     let pathsStmt;
     let rows;
 
-    if (workerName) {
-      // Filter by worker - only include recipients who have emails from this worker
+    if (workerNames && workerNames.length > 0) {
+      // Filter by workers - only include recipients who have emails from these workers
+      const placeholders = workerNames.map(() => '?').join(', ');
       pathsStmt = this.db.prepare(`
         SELECT DISTINCT
           rp.recipient,
@@ -2232,10 +2404,10 @@ export class CampaignAnalyticsService {
         FROM recipient_paths rp
         JOIN campaigns c ON rp.campaign_id = c.id
         JOIN campaign_emails ce ON c.id = ce.campaign_id AND rp.recipient = ce.recipient
-        WHERE rp.merchant_id = ? AND rp.is_new_user = 1 AND ce.worker_name = ?
+        WHERE rp.merchant_id = ? AND rp.is_new_user = 1 AND ce.worker_name IN (${placeholders})
         ORDER BY rp.recipient, rp.sequence_order ASC
       `);
-      rows = pathsStmt.all(merchantId, workerName) as Array<{
+      rows = pathsStmt.all(merchantId, ...workerNames) as Array<{
         recipient: string;
         campaign_id: string;
         sequence_order: number;
@@ -2342,22 +2514,22 @@ export class CampaignAnalyticsService {
    * Combines all analysis methods into a single comprehensive result
    * 
    * @param merchantId - Merchant ID
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns PathAnalysisResult
    */
-  getPathAnalysis(merchantId: string, workerName?: string): PathAnalysisResult {
-    const rootCampaigns = this.getRootCampaigns(merchantId, workerName);
-    const userStats = this.getUserTypeStats(merchantId, workerName);
-    const coverage = this.getCampaignCoverage(merchantId, workerName);
+  getPathAnalysis(merchantId: string, workerNames?: string[]): PathAnalysisResult {
+    const rootCampaigns = this.getRootCampaigns(merchantId, workerNames);
+    const userStats = this.getUserTypeStats(merchantId, workerNames);
+    const coverage = this.getCampaignCoverage(merchantId, workerNames);
     
     // Get transitions for new users - this determines the actual path graph
-    const newUserTransitions = this.getNewUserTransitions(merchantId, workerName);
+    const newUserTransitions = this.getNewUserTransitions(merchantId, workerNames);
     
     // Calculate levels based on new user transitions only
-    const newUserLevels = this.calculateNewUserDAGLevels(merchantId, workerName);
+    const newUserLevels = this.calculateNewUserDAGLevels(merchantId, workerNames);
     
     // Get valuable campaigns analysis
-    const valuableAnalysis = this.getValuableCampaignsAnalysis(merchantId, workerName);
+    const valuableAnalysis = this.getValuableCampaignsAnalysis(merchantId, workerNames);
 
     // Build level stats - ONLY include campaigns that new users actually received
     // Filter out campaigns with 0 new users (these are only received by old users)
@@ -2402,10 +2574,10 @@ export class CampaignAnalyticsService {
    * Other campaigns get levels based on their position in new user paths
    * 
    * @param merchantId - Merchant ID
-   * @param workerName - Optional worker name filter for instance-based filtering
+   * @param workerNames - Optional array of worker names for multi-worker filtering. Empty array or undefined includes all workers.
    * @returns Map of campaignId to level
    */
-  private calculateNewUserDAGLevels(merchantId: string, workerName?: string): Map<string, number> {
+  private calculateNewUserDAGLevels(merchantId: string, workerNames?: string[]): Map<string, number> {
     // Get confirmed root campaigns - these are always Level 1
     const rootCampaigns = this.db.prepare(`
       SELECT id FROM campaigns WHERE merchant_id = ? AND is_root = 1
@@ -2413,7 +2585,7 @@ export class CampaignAnalyticsService {
     const rootIds = new Set(rootCampaigns.map(r => r.id));
 
     // Get new user transitions
-    const transitions = this.getNewUserTransitions(merchantId, workerName);
+    const transitions = this.getNewUserTransitions(merchantId, workerNames);
     
     // Build adjacency list
     const outEdges = new Map<string, string[]>();
@@ -3100,12 +3272,17 @@ export class CampaignAnalyticsService {
       throw new Error('Merchant not found');
     }
 
+    // Serialize workerNames to JSON if provided
+    const workerNamesJson = data.workerNames && data.workerNames.length > 0 
+      ? JSON.stringify(data.workerNames) 
+      : null;
+
     const stmt = this.db.prepare(`
-      INSERT INTO analysis_projects (id, name, merchant_id, worker_name, status, note, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+      INSERT INTO analysis_projects (id, name, merchant_id, worker_name, worker_names, status, note, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
     `);
 
-    stmt.run(id, data.name, data.merchantId, data.workerName, data.note || null, now, now);
+    stmt.run(id, data.name, data.merchantId, data.workerName, workerNamesJson, data.note || null, now, now);
 
     return this.getAnalysisProjectById(id)!;
   }
@@ -3137,6 +3314,11 @@ export class CampaignAnalyticsService {
     if (data.status !== undefined) {
       updates.push('status = ?');
       params.push(data.status);
+    }
+
+    if (data.workerNames !== undefined) {
+      updates.push('worker_names = ?');
+      params.push(data.workerNames.length > 0 ? JSON.stringify(data.workerNames) : null);
     }
 
     if (data.note !== undefined) {

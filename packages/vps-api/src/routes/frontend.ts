@@ -3283,7 +3283,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tbody.innerHTML = sortedCampaigns.map(c => {
         const tag = c.tag || 0;
         const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值', 3: '无价值' };
-        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-0' };
+        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-3' };
         const tagBadge = '<span class="' + tagClasses[tag] + '" style="padding:2px 8px;border-radius:4px;font-size:11px;">' + tagLabels[tag] + '</span>';
         const firstSeen = (c.firstSeenAt || c.firstSeen) ? new Date(c.firstSeenAt || c.firstSeen).toLocaleDateString('zh-CN') : '-';
         
@@ -3294,9 +3294,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + tagBadge + '</td>' +
           '<td>' + firstSeen + '</td>' +
           '<td class="actions" onclick="event.stopPropagation()">' +
-            '<button class="btn btn-sm btn-success" onclick="tagCampaign(\\'' + c.id + '\\', 1)">有价值</button>' +
-            '<button class="btn btn-sm btn-warning" onclick="tagCampaign(\\'' + c.id + '\\', 2)">高价值</button>' +
-            '<button class="btn btn-sm btn-danger" onclick="tagCampaign(\\'' + c.id + '\\', 3)">无价值</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="tagCampaign(\\'' + c.id + '\\', 0)" style="font-size:11px;">清除</button>' +
+            '<button class="btn btn-sm btn-success" onclick="tagCampaign(\\'' + c.id + '\\', 1)" style="font-size:11px;">有价值</button>' +
+            '<button class="btn btn-sm btn-warning" onclick="tagCampaign(\\'' + c.id + '\\', 2)" style="font-size:11px;">高价值</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="tagCampaign(\\'' + c.id + '\\', 3)" style="font-size:11px;">无价值</button>' +
           '</td></tr>';
       }).join('');
     }
@@ -3317,7 +3318,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         
         const tag = campaign.tag || 0;
         const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值', 3: '无价值' };
-        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-0' };
+        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-3' };
         const firstSeen = campaign.firstSeenAt ? new Date(campaign.firstSeenAt).toLocaleString('zh-CN') : '-';
         const lastSeen = campaign.lastSeenAt ? new Date(campaign.lastSeenAt).toLocaleString('zh-CN') : '-';
         

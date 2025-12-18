@@ -487,7 +487,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <h2 style="margin:0;border:none;padding:0;">🔔 告警历史</h2>
           </div>
           <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
-            <select id="alert-rule-filter" onchange="filterAlerts()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+            <select id="alert-rule-filter" onchange="filterAlerts()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;max-width:200px;">
               <option value="">全部规则</option>
             </select>
             <select id="alert-rows-limit" onchange="loadMonitoringAlerts()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
@@ -3039,16 +3039,30 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!select) return;
       const currentValue = select.value;
       const ruleMap = new Map();
+      
+      // Build a lookup map from monitoring rules
+      const monitoringRuleMap = new Map();
+      monitoringRules.forEach(r => {
+        monitoringRuleMap.set(r.id, r.merchant + ' / ' + r.name);
+      });
+      
       allAlerts.forEach(a => {
-        if (a.source === 'signal' && a.rule) {
-          ruleMap.set(a.ruleId, a.rule.merchant + ' / ' + a.rule.name);
+        if (a.source === 'signal') {
+          // Try to get rule name from monitoring rules, fallback to alert data
+          const ruleName = monitoringRuleMap.get(a.ruleId) || (a.rule ? a.rule.merchant + ' / ' + a.rule.name : a.ruleId);
+          ruleMap.set(a.ruleId, '[信号] ' + ruleName);
         } else if (a.source === 'ratio') {
-          ruleMap.set(a.monitorId, a.message?.split(':')[0]?.replace(/[\\[\\]]/g, '') || a.monitorId);
+          // Extract monitor name from message or use monitorId
+          const monitorName = a.message?.match(/\\[.*?\\]\\s*(.+?)\\n/)?.[1] || a.monitorId;
+          ruleMap.set(a.monitorId, '[比例] ' + monitorName);
         }
       });
+      
       const options = ['<option value="">全部规则</option>'];
       ruleMap.forEach((label, id) => {
-        options.push('<option value="' + id + '"' + (id === currentValue ? ' selected' : '') + '>' + escapeHtml(label) + '</option>');
+        // Truncate long labels
+        const displayLabel = label.length > 30 ? label.substring(0, 27) + '...' : label;
+        options.push('<option value="' + id + '"' + (id === currentValue ? ' selected' : '') + ' title="' + escapeHtml(label) + '">' + escapeHtml(displayLabel) + '</option>');
       });
       select.innerHTML = options.join('');
     }

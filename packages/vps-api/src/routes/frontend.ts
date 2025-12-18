@@ -2701,7 +2701,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const res = await fetch('/api/campaign/merchants/' + merchantId + '/cleanup-old-user-paths', {
           method: 'POST',
-          headers: getHeaders()
+          headers: getHeaders(),
+          body: JSON.stringify({})
         });
         const data = await res.json();
         if (res.ok) {

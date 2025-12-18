@@ -2383,15 +2383,39 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">恢复分析</button>';
         }
         
+        // Display name with edit button
+        const displayNameHtml = '<span style="cursor:pointer;text-decoration:underline dotted;color:#1565c0;" onclick="editMerchantName(\\'' + m.id + '\\', \\'' + escapeHtml(m.displayName || '') + '\\')" title="点击编辑">' + escapeHtml(m.displayName || '-') + '</span>';
+        
         return '<tr>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
-          '<td>' + escapeHtml(m.displayName || '-') + '</td>' +
+          '<td>' + displayNameHtml + '</td>' +
           '<td>' + scopeBadge + '</td>' +
           '<td>' + statusBadge + '</td>' +
           '<td>' + m.totalCampaigns + '</td>' +
           '<td>' + m.totalEmails + '</td>' +
           '<td class="actions">' + actions + '</td></tr>';
       }).join('');
+    }
+
+    async function editMerchantName(merchantId, currentName) {
+      const newName = prompt('请输入商户显示名称:', currentName || '');
+      if (newName === null) return; // 用户取消
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + merchantId, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify({ displayName: newName || null })
+        });
+        if (res.ok) {
+          showAlert('显示名称已更新');
+          await loadMerchants();
+        } else {
+          showAlert('更新失败', 'error');
+        }
+      } catch (e) {
+        showAlert('更新失败', 'error');
+      }
     }
 
     async function setMerchantStatus(merchantId, status) {

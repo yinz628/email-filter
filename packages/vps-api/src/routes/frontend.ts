@@ -250,6 +250,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">系统日志</h2>
           <div style="display:flex;gap:10px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="logs-auto-refresh" onchange="toggleAutoRefresh('logs')">
+              <span>自动刷新</span>
+            </label>
+            <select id="logs-refresh-interval" onchange="updateAutoRefreshInterval('logs')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
+            </select>
             <select id="log-cleanup-days" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="1">1天前</option>
               <option value="3">3天前</option>
@@ -308,7 +317,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">统计信息</h2>
-          <button class="btn btn-secondary" onclick="loadStats()">🔄 刷新</button>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="stats-auto-refresh" onchange="toggleAutoRefresh('stats')">
+              <span>自动刷新</span>
+            </label>
+            <select id="stats-refresh-interval" onchange="updateAutoRefreshInterval('stats')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadStats()">🔄 刷新</button>
+          </div>
         </div>
         <div class="stats-grid" id="stats-container">
           <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">总处理数</div></div>
@@ -520,7 +540,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
               <input type="checkbox" id="alerts-auto-refresh" onchange="toggleAutoRefresh('alerts')">
-              <span>自动</span>
+              <span>自动刷新</span>
             </label>
             <select id="alerts-refresh-interval" onchange="updateAutoRefreshInterval('alerts')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
               <option value="30">30秒</option>
@@ -620,7 +640,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
               <input type="checkbox" id="status-auto-refresh" onchange="toggleAutoRefresh('status')">
-              <span>自动</span>
+              <span>自动刷新</span>
             </label>
             <select id="status-refresh-interval" onchange="updateAutoRefreshInterval('status')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
               <option value="30">30秒</option>
@@ -668,7 +688,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
               <input type="checkbox" id="funnel-auto-refresh" onchange="toggleAutoRefresh('funnel')">
-              <span>自动</span>
+              <span>自动刷新</span>
             </label>
             <select id="funnel-refresh-interval" onchange="updateAutoRefreshInterval('funnel')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
               <option value="30">30秒</option>
@@ -2918,7 +2938,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       funnel: () => { loadRatioMonitors(); checkRatioMonitors(); },
       heartbeat: () => triggerHeartbeat(),
       campaign: () => { loadMerchants(); updateCampaignStats(); },
-      dataStats: () => loadDataStats()
+      dataStats: () => loadDataStats(),
+      logs: () => loadLogs(),
+      stats: () => { loadStats(); loadTrendingRules(); }
     };
 
     function toggleAutoRefresh(type) {
@@ -2928,18 +2950,55 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (checkbox && checkbox.checked) {
         const interval = parseInt(intervalSelect?.value || '60', 10) * 1000;
         startAutoRefresh(type, interval);
+        saveAutoRefreshSettings(type, true, intervalSelect?.value || '60');
       } else {
         stopAutoRefresh(type);
+        saveAutoRefreshSettings(type, false, intervalSelect?.value || '60');
       }
     }
 
     function updateAutoRefreshInterval(type) {
       const checkbox = document.getElementById(type + '-auto-refresh');
+      const intervalSelect = document.getElementById(type + '-refresh-interval');
+      const interval = parseInt(intervalSelect?.value || '60', 10) * 1000;
+      
       if (checkbox && checkbox.checked) {
-        const intervalSelect = document.getElementById(type + '-refresh-interval');
-        const interval = parseInt(intervalSelect?.value || '60', 10) * 1000;
         stopAutoRefresh(type);
         startAutoRefresh(type, interval);
+      }
+      saveAutoRefreshSettings(type, checkbox?.checked || false, intervalSelect?.value || '60');
+    }
+
+    function saveAutoRefreshSettings(type, enabled, interval) {
+      try {
+        const settings = JSON.parse(localStorage.getItem('autoRefreshSettings') || '{}');
+        settings[type] = { enabled, interval };
+        localStorage.setItem('autoRefreshSettings', JSON.stringify(settings));
+      } catch (e) {
+        console.error('Failed to save auto-refresh settings', e);
+      }
+    }
+
+    function restoreAutoRefreshSettings() {
+      try {
+        const settings = JSON.parse(localStorage.getItem('autoRefreshSettings') || '{}');
+        Object.keys(settings).forEach(type => {
+          const { enabled, interval } = settings[type];
+          const checkbox = document.getElementById(type + '-auto-refresh');
+          const intervalSelect = document.getElementById(type + '-refresh-interval');
+          
+          if (checkbox) {
+            checkbox.checked = enabled;
+          }
+          if (intervalSelect) {
+            intervalSelect.value = interval;
+          }
+          if (enabled) {
+            startAutoRefresh(type, parseInt(interval, 10) * 1000);
+          }
+        });
+      } catch (e) {
+        console.error('Failed to restore auto-refresh settings', e);
       }
     }
 
@@ -3956,6 +4015,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('api-status').textContent = 'API Token: 已配置';
       loadWorkers();
     }
+    // Restore auto-refresh settings from localStorage
+    restoreAutoRefreshSettings();
   </script>
 </body>
 </html>`;

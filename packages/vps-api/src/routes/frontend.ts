@@ -2442,6 +2442,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     let projectsData = [];
     let workerMerchantsData = [];
     let currentProjectId = null;
+    let currentProjectWorkerName = null;
 
     async function loadCampaignAnalytics() {
       await loadProjects();
@@ -2924,6 +2925,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       currentProjectId = projectId;
       currentMerchantId = project.merchantId;
       currentProjectRootId = project.rootCampaignId || null;
+      currentProjectWorkerName = project.workerName || null;
       
       // Update project detail title
       document.getElementById('project-detail-title').textContent = '项目详情 - ' + project.name;
@@ -2942,6 +2944,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       currentProjectId = null;
       currentMerchantId = null;
       currentProjectRootId = null;
+      currentProjectWorkerName = null;
       
       // Hide project detail section
       document.getElementById('campaign-project-detail-section').style.display = 'none';
@@ -3006,8 +3009,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tableContainer.style.display = 'none';
       
       try {
-        // Add workerName parameter for instance filtering
-        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        // Use project's workerName for instance filtering
+        const workerName = currentProjectWorkerName || '';
         const workerParam = workerName ? '?workerName=' + encodeURIComponent(workerName) : '';
         const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/root-campaigns' + workerParam, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
@@ -3122,7 +3125,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       try {
         const valueFilter = document.getElementById('campaign-valuable-filter')?.value || '';
-        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        // Use project's workerName instead of the page filter
+        const workerName = currentProjectWorkerName || '';
         let url = '/api/campaign/campaigns?merchantId=' + currentMerchantId;
         if (valueFilter) url += '&tag=' + valueFilter;
         if (workerName) url += '&workerName=' + encodeURIComponent(workerName);
@@ -3297,7 +3301,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       flowContainer.innerHTML = '加载中...';
       
       try {
-        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        // Use project's workerName for instance filtering
+        const workerName = currentProjectWorkerName || '';
         let url = '/api/campaign/merchants/' + currentMerchantId + '/path-analysis';
         if (workerName) url += '?workerName=' + encodeURIComponent(workerName);
         const res = await fetch(url, { headers: getHeaders() });

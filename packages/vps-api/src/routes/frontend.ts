@@ -86,6 +86,21 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       .actions { flex-wrap: wrap; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
+    /* Project Detail Tabs Styles */
+    .project-tab { padding: 10px 20px; border: none; background: transparent; cursor: pointer; font-size: 14px; font-weight: 500; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+    .project-tab:hover { color: #4a90d9; background: #f8f9fa; }
+    .project-tab.active { color: #4a90d9; border-bottom-color: #4a90d9; }
+    .tab-panel { animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .project-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #27ae60; margin-right: 6px; }
+    .root-badge { background: #4a90d9; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .value-tag-0 { background: #e9ecef; color: #666; }
+    .value-tag-1 { background: #d4edda; color: #155724; }
+    .value-tag-2 { background: #fff3cd; color: #856404; }
+    .path-node { padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; background: #fff; }
+    .path-node.highlighted { border-color: #27ae60; background: #e8f5e9; }
+    .path-node-title { font-weight: 600; margin-bottom: 4px; }
+    .path-node-stats { font-size: 12px; color: #666; }
   </style>
 </head>
 <body>
@@ -400,21 +415,54 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     <!-- Campaign Analytics Tab -->
     <div id="campaign-tab" class="tab-content hidden">
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+      <!-- 区域1: 标题区 (Title + Instance Selector) -->
+      <div class="card" id="campaign-header-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
           <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
           <div style="display:flex;gap:10px;align-items:center;">
             <select id="campaign-worker-filter" onchange="onWorkerFilterChange()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="">选择实例</option>
             </select>
-            <button class="btn btn-secondary" onclick="loadProjects(); loadWorkerMerchants();">🔄 刷新</button>
+            <button class="btn btn-secondary" onclick="refreshCampaignData()">🔄 刷新</button>
           </div>
         </div>
-        <p style="color:#666;margin-bottom:15px">选择 Worker 实例后，可以查看该实例的商户列表并创建分析项目。</p>
       </div>
-      
-      <!-- Analysis Projects Section -->
-      <div class="card">
+
+      <!-- 区域2: 数据管理区 - 商户列表 (Merchant List Card) -->
+      <div class="card" id="campaign-merchants-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">🏪 商户列表</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="merchant-sort-field" onchange="sortMerchantList()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="emails">按邮件数排序</option>
+              <option value="campaigns">按活动数排序</option>
+            </select>
+            <select id="merchant-sort-order" onchange="sortMerchantList()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="desc">降序</option>
+              <option value="asc">升序</option>
+            </select>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">选择实例后显示该实例的商户列表。点击"创建项目"开始分析。</p>
+        <div id="merchants-empty" style="text-align:center;color:#999;padding:40px;">
+          请先选择实例以加载商户列表。
+        </div>
+        <table id="merchants-table-container" style="display:none;">
+          <thead>
+            <tr>
+              <th>商户域名</th>
+              <th>营销活动数</th>
+              <th>邮件总数</th>
+              <th>已有项目</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="merchants-table"></tbody>
+        </table>
+      </div>
+
+      <!-- 区域3: 项目列表区 (Project List Card) -->
+      <div class="card" id="campaign-projects-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">📁 分析项目</h2>
           <div style="display:flex;gap:10px;align-items:center;">
@@ -434,10 +482,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <tr>
               <th>项目名称</th>
               <th>商户域名</th>
-              <th>实例</th>
               <th>状态</th>
-              <th>活动数</th>
-              <th>邮件数</th>
               <th>创建时间</th>
               <th>操作</th>
             </tr>
@@ -446,35 +491,105 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </table>
       </div>
 
-      <!-- Worker Merchants Section (for creating projects) -->
-      <div id="worker-merchants-section" class="card" style="display:none;">
+      <!-- 区域4: 项目详情区 (Project Details with Tab Navigation) - 默认隐藏 -->
+      <div class="card" id="campaign-project-detail-section" style="display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;" id="worker-merchants-title">商户列表</h2>
+          <h2 style="margin:0;border:none;padding:0;" id="project-detail-title">项目详情</h2>
+          <button class="btn btn-sm btn-secondary" onclick="closeProjectDetail()">✕ 关闭</button>
         </div>
-        <p style="color:#666;margin-bottom:15px">以下是该实例收到邮件的商户。点击"创建项目"开始分析。</p>
-        <table>
-          <thead>
-            <tr>
-              <th>商户域名</th>
-              <th>营销活动数</th>
-              <th>邮件总数</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="worker-merchants-table"></tbody>
-        </table>
+        
+        <!-- 标签页导航 -->
+        <div class="project-detail-tabs" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #eee;padding-bottom:0;">
+          <button class="project-tab active" id="tab-root" onclick="switchProjectTab('root')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">
+            🎯 Root确认
+          </button>
+          <button class="project-tab" id="tab-campaigns" onclick="switchProjectTab('campaigns')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">
+            📧 营销活动
+          </button>
+          <button class="project-tab" id="tab-path" onclick="switchProjectTab('path')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">
+            🔀 路径分析
+          </button>
+        </div>
+
+        <!-- Root确认标签页内容 -->
+        <div id="tab-content-root" class="tab-panel">
+          <div style="margin-bottom:15px;">
+            <p style="color:#666;">选择一个营销活动作为分析起点（Root）。Root 将作为路径分析的基准。</p>
+          </div>
+          <div id="root-current" style="margin-bottom:15px;padding:12px;background:#e8f5e9;border-radius:6px;display:none;">
+            <strong>当前 Root:</strong> <span id="root-current-name">-</span>
+          </div>
+          <div id="root-campaigns-empty" style="text-align:center;color:#999;padding:40px;">
+            加载中...
+          </div>
+          <table id="root-campaigns-table-container" style="display:none;">
+            <thead>
+              <tr>
+                <th>邮件主题</th>
+                <th>新用户数</th>
+                <th>确认状态</th>
+                <th>候选原因</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="root-campaigns-table"></tbody>
+          </table>
+        </div>
+
+        <!-- 营销活动标签页内容 -->
+        <div id="tab-content-campaigns" class="tab-panel" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+            <p style="color:#666;margin:0;">查看该商户的所有营销活动，可标记有价值的活动。</p>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <select id="campaign-valuable-filter" onchange="loadProjectCampaigns()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <option value="">全部活动</option>
+                <option value="1">有价值</option>
+                <option value="2">高价值</option>
+                <option value="0">未标记</option>
+              </select>
+              <select id="campaign-sort-field" onchange="sortCampaignList()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <option value="emails">按邮件数排序</option>
+                <option value="time">按时间排序</option>
+              </select>
+            </div>
+          </div>
+          <div id="campaigns-empty" style="text-align:center;color:#999;padding:40px;">
+            加载中...
+          </div>
+          <table id="campaigns-table-container" style="display:none;">
+            <thead>
+              <tr>
+                <th>邮件主题</th>
+                <th>邮件数</th>
+                <th>收件人数</th>
+                <th>价值标记</th>
+                <th>首次出现</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="campaigns-table"></tbody>
+          </table>
+        </div>
+
+        <!-- 路径分析标签页内容 -->
+        <div id="tab-content-path" class="tab-panel" style="display:none;">
+          <div id="path-no-root" style="text-align:center;color:#999;padding:40px;">
+            <p style="font-size:16px;margin-bottom:10px;">⚠️ 请先在"Root确认"标签页中选择分析起点</p>
+            <button class="btn btn-primary" onclick="switchProjectTab('root')">前往选择 Root</button>
+          </div>
+          <div id="path-analysis-container" style="display:none;">
+            <div style="margin-bottom:15px;">
+              <p style="color:#666;">基于 Root 的收件人路径流向分析。显示从 Root 开始的营销活动推送路径。</p>
+            </div>
+            <div id="path-flow-container" style="min-height:300px;border:1px solid #eee;border-radius:6px;padding:16px;">
+              加载中...
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Legacy sections (hidden by default, shown when viewing project) -->
-      <div id="legacy-campaign-sections" style="display:none;">
-        <div class="stats-grid" id="campaign-stats-container">
-          <div class="stat-card"><div class="stat-value" id="stat-merchants">-</div><div class="stat-label">商户数量</div></div>
-          <div class="stat-card"><div class="stat-value" id="stat-campaigns">-</div><div class="stat-label">营销活动</div></div>
-          <div class="stat-card"><div class="stat-value" id="stat-valuable">-</div><div class="stat-label">有价值活动</div></div>
-          <div class="stat-card"><div class="stat-value" id="stat-campaign-emails">-</div><div class="stat-label">追踪邮件</div></div>
-        </div>
-      </div>
-      <div class="card">
+      <!-- 旧版数据管理区域 (保留用于数据清理功能) -->
+      <div class="card" id="campaign-data-management-section" style="display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">🗄️ 数据管理</h2>
           <div style="display:flex;gap:10px;align-items:center;">
@@ -515,70 +630,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <p style="color:#888;font-size:12px;margin-top:10px;">
           💡 提示：已忽略的商户不会记录详细营销数据，仅统计邮件数量。清理操作不可恢复，请谨慎操作。
         </p>
-      </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
-          <h2 style="margin:0;border:none;padding:0;">商户列表</h2>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <select id="merchant-status-filter" onchange="loadMerchants()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
-              <option value="">全部商户</option>
-              <option value="active">分析中</option>
-              <option value="pending">等待分析</option>
-              <option value="ignored">已忽略</option>
-            </select>
-          </div>
-        </div>
-        <p style="color:#666;margin-bottom:15px">基于发件人域名自动识别的商户。新发现的商户默认为"等待分析"状态。</p>
-        <div id="merchants-empty" style="text-align:center;color:#999;padding:40px;">
-          暂无数据。当邮件被处理时，系统会自动追踪营销活动。
-        </div>
-        <table id="merchants-table-container" style="display:none;">
-          <thead>
-            <tr>
-              <th>商户域名</th>
-              <th>显示名称</th>
-              <th>数据范围</th>
-              <th>状态</th>
-              <th>营销活动数</th>
-              <th>邮件总数</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="merchants-table"></tbody>
-        </table>
-      </div>
-      <div id="campaigns-section" class="card" style="display:none;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;" id="campaigns-title">营销活动</h2>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <select id="campaign-valuable-filter" onchange="loadCampaigns(currentMerchantId)" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
-              <option value="">全部活动</option>
-              <option value="true">有价值</option>
-              <option value="false">未标记</option>
-            </select>
-            <button class="btn btn-sm btn-secondary" onclick="hideCampaigns()">返回商户列表</button>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>邮件主题</th>
-              <th>邮件数</th>
-              <th>收件人数</th>
-              <th>价值标记</th>
-              <th>首次出现</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="campaigns-table"></tbody>
-        </table>
-      </div>
-      <div id="campaign-flow-section" class="card" style="display:none;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
-          <h2 style="margin:0;border:none;padding:0;" id="flow-title">活动路径分析</h2>
-          <button class="btn btn-sm btn-secondary" onclick="hideFlow()">返回</button>
-        </div>
-        <div id="flow-container" style="min-height:200px;"></div>
       </div>
     </div>
 
@@ -938,6 +989,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Campaign Detail Modal -->
+  <div id="campaign-detail-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:600px;">
+      <div class="modal-header">
+        <h3>营销活动详情</h3>
+        <button class="modal-close" onclick="hideModal('campaign-detail-modal')">&times;</button>
+      </div>
+      <div id="campaign-detail-content"></div>
+    </div>
+  </div>
+
   <!-- Add Rule Modal -->
   <div id="add-rule-modal" class="modal hidden">
     <div class="modal-content">
@@ -1273,6 +1335,29 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div id="edit-funnel-steps-container"></div>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Project Modal -->
+  <div id="create-project-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>创建分析项目</h3>
+        <button class="modal-close" onclick="hideModal('create-project-modal')">&times;</button>
+      </div>
+      <form id="create-project-form">
+        <input type="hidden" id="create-project-merchant-id">
+        <div class="form-group">
+          <label>商户域名</label>
+          <input type="text" id="create-project-merchant-domain" disabled style="background:#f5f5f5">
+        </div>
+        <div class="form-group">
+          <label>项目名称 *</label>
+          <input type="text" id="create-project-name" required placeholder="请输入项目名称">
+          <p id="create-project-name-error" style="color:#e74c3c;font-size:12px;margin-top:5px;display:none;">项目名称不能为空或仅包含空格</p>
+        </div>
+        <button type="submit" class="btn btn-success">创建项目</button>
       </form>
     </div>
   </div>
@@ -2288,9 +2373,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       archived: { bg: '#e9ecef', text: '#495057', border: '#6c757d' }
     };
 
+    // Current active project detail tab
+    let activeProjectTab = 'root';
+    let currentProjectRootId = null;
+
     function onWorkerFilterChange() {
+      // Close project detail when switching instance
+      closeProjectDetail();
       loadProjects();
-      loadWorkerMerchants();
+      loadMerchantList();
+    }
+
+    function refreshCampaignData() {
+      loadProjects();
+      loadMerchantList();
     }
 
     async function loadProjects() {
@@ -2333,29 +2429,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const color = projectStatusColors[status] || projectStatusColors.active;
         const statusBadge = '<span style="background:' + color.bg + ';color:' + color.text + ';border:1px solid ' + color.border + ';padding:2px 8px;border-radius:4px;font-size:11px;">' + projectStatusLabels[status] + '</span>';
         const createdAt = new Date(p.createdAt).toLocaleDateString('zh-CN');
+        const isSelected = currentProjectId === p.id;
+        const rowStyle = isSelected ? 'background:#e3f2fd;' : '';
         
-        return '<tr>' +
+        return '<tr style="' + rowStyle + '">' +
           '<td><strong style="cursor:pointer;color:#1565c0;" onclick="openProject(\\'' + p.id + '\\')">' + escapeHtml(p.name) + '</strong></td>' +
           '<td>' + escapeHtml(p.merchantDomain || '-') + '</td>' +
-          '<td><span class="tag">' + escapeHtml(p.workerName) + '</span></td>' +
           '<td>' + statusBadge + '</td>' +
-          '<td>' + (p.totalCampaigns || 0) + '</td>' +
-          '<td>' + (p.totalEmails || 0) + '</td>' +
           '<td>' + createdAt + '</td>' +
           '<td class="actions">' +
             '<button class="btn btn-sm btn-primary" onclick="openProject(\\'' + p.id + '\\')">打开</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="editProject(\\'' + p.id + '\\')">编辑</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteProject(\\'' + p.id + '\\')">删除</button>' +
           '</td></tr>';
       }).join('');
     }
 
-    async function loadWorkerMerchants() {
+    // 区域2: 商户列表功能
+    async function loadMerchantList() {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
-      const section = document.getElementById('worker-merchants-section');
+      const emptyDiv = document.getElementById('merchants-empty');
+      const tableContainer = document.getElementById('merchants-table-container');
       
       if (!workerName) {
-        section.style.display = 'none';
+        emptyDiv.style.display = 'block';
+        emptyDiv.textContent = '请先选择实例以加载商户列表。';
+        tableContainer.style.display = 'none';
         return;
       }
       
@@ -2365,52 +2463,120 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         workerMerchantsData = data.merchants || [];
-        renderWorkerMerchants(workerName);
-        section.style.display = 'block';
+        renderMerchantList();
       } catch (e) {
-        console.error('Error loading worker merchants:', e);
+        console.error('Error loading merchants:', e);
+        emptyDiv.style.display = 'block';
+        emptyDiv.textContent = '加载商户列表失败。';
+        tableContainer.style.display = 'none';
       }
     }
 
-    function renderWorkerMerchants(workerName) {
-      document.getElementById('worker-merchants-title').textContent = '商户列表 - ' + workerName;
-      const tbody = document.getElementById('worker-merchants-table');
+    function renderMerchantList() {
+      const tbody = document.getElementById('merchants-table');
+      const emptyDiv = document.getElementById('merchants-empty');
+      const tableContainer = document.getElementById('merchants-table-container');
       
       if (workerMerchantsData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">该实例暂无商户数据</td></tr>';
+        emptyDiv.style.display = 'block';
+        emptyDiv.textContent = '该实例暂无商户数据。';
+        tableContainer.style.display = 'none';
         return;
       }
       
-      tbody.innerHTML = workerMerchantsData.map(m => {
+      emptyDiv.style.display = 'none';
+      tableContainer.style.display = 'table';
+      
+      // Sort merchants
+      const sortField = document.getElementById('merchant-sort-field')?.value || 'emails';
+      const sortOrder = document.getElementById('merchant-sort-order')?.value || 'desc';
+      const sortedMerchants = [...workerMerchantsData].sort((a, b) => {
+        const aVal = sortField === 'emails' ? a.totalEmails : a.totalCampaigns;
+        const bVal = sortField === 'emails' ? b.totalEmails : b.totalCampaigns;
+        return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+      });
+      
+      // Check which merchants have projects
+      const merchantsWithProjects = new Set(projectsData.map(p => p.merchantId));
+      
+      tbody.innerHTML = sortedMerchants.map(m => {
+        const hasProject = merchantsWithProjects.has(m.id);
+        const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
+        
         return '<tr>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
           '<td>' + m.totalCampaigns + '</td>' +
           '<td>' + m.totalEmails + '</td>' +
+          '<td>' + projectIndicator + (hasProject ? '是' : '-') + '</td>' +
           '<td class="actions">' +
-            '<button class="btn btn-sm btn-success" onclick="createProject(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
+            '<button class="btn btn-sm btn-success" onclick="showCreateProjectModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
           '</td></tr>';
       }).join('');
     }
 
-    async function createProject(merchantId, merchantDomain) {
+    function sortMerchantList() {
+      renderMerchantList();
+    }
+
+    function showCreateProjectModal(merchantId, merchantDomain) {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       if (!workerName) {
         showAlert('请先选择实例', 'error');
         return;
       }
       
-      const name = prompt('请输入项目名称:', merchantDomain);
-      if (!name) return;
+      // Set modal values
+      document.getElementById('create-project-merchant-id').value = merchantId;
+      document.getElementById('create-project-merchant-domain').value = merchantDomain;
+      document.getElementById('create-project-name').value = merchantDomain;
+      document.getElementById('create-project-name-error').style.display = 'none';
+      
+      showModal('create-project-modal');
+    }
+
+    // Project name validation function
+    function validateProjectName(name) {
+      if (!name || typeof name !== 'string') return false;
+      return name.trim().length > 0;
+    }
+
+    // Handle project creation form submission
+    document.getElementById('create-project-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const merchantId = document.getElementById('create-project-merchant-id').value;
+      const name = document.getElementById('create-project-name').value;
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      const errorEl = document.getElementById('create-project-name-error');
+      
+      // Validate project name
+      if (!validateProjectName(name)) {
+        errorEl.style.display = 'block';
+        return;
+      }
+      errorEl.style.display = 'none';
+      
+      if (!workerName) {
+        showAlert('请先选择实例', 'error');
+        return;
+      }
       
       try {
         const res = await fetch('/api/campaign/projects', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({ name, merchantId, workerName })
+          body: JSON.stringify({ name: name.trim(), merchantId, workerName })
         });
         if (res.ok) {
+          hideModal('create-project-modal');
           showAlert('项目创建成功');
+          const data = await res.json();
           await loadProjects();
+          await loadMerchantList();
+          // Auto-select the newly created project
+          if (data.project && data.project.id) {
+            openProject(data.project.id);
+          }
         } else {
           const err = await res.json();
           showAlert('创建失败: ' + (err.message || '未知错误'), 'error');
@@ -2418,6 +2584,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } catch (e) {
         showAlert('创建失败', 'error');
       }
+    });
+
+    // Legacy function for backward compatibility
+    async function loadWorkerMerchants() {
+      await loadMerchantList();
+    }
+
+    function renderWorkerMerchants(workerName) {
+      renderMerchantList();
+    }
+
+    async function createProject(merchantId, merchantDomain) {
+      // This function is now deprecated, use showCreateProjectModal instead
+      showCreateProjectModal(merchantId, merchantDomain);
     }
 
     async function editProject(projectId) {
@@ -2454,7 +2634,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         });
         if (res.ok) {
           showAlert('项目已删除');
+          // Clear selection if the deleted project was selected
+          if (currentProjectId === projectId) {
+            closeProjectDetail();
+          }
           await loadProjects();
+          await loadMerchantList(); // Refresh merchant list to update project indicators
         } else {
           showAlert('删除失败', 'error');
         }
@@ -2469,14 +2654,505 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       currentProjectId = projectId;
       currentMerchantId = project.merchantId;
+      currentProjectRootId = project.rootCampaignId || null;
       
-      // Show legacy sections for analysis
-      document.getElementById('legacy-campaign-sections').style.display = 'block';
+      // Update project detail title
+      document.getElementById('project-detail-title').textContent = '项目详情 - ' + project.name;
       
-      // Load campaigns for this merchant/worker
-      await loadCampaigns(project.merchantId);
+      // Show project detail section
+      document.getElementById('campaign-project-detail-section').style.display = 'block';
       
-      showAlert('已打开项目: ' + project.name);
+      // Re-render projects to show selection
+      renderProjects();
+      
+      // Switch to default tab (root) and load data
+      switchProjectTab('root');
+    }
+
+    function closeProjectDetail() {
+      currentProjectId = null;
+      currentMerchantId = null;
+      currentProjectRootId = null;
+      
+      // Hide project detail section
+      document.getElementById('campaign-project-detail-section').style.display = 'none';
+      
+      // Re-render projects to clear selection
+      renderProjects();
+    }
+
+    function switchProjectTab(tabName) {
+      activeProjectTab = tabName;
+      
+      // Update tab button styles
+      document.querySelectorAll('.project-tab').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.color = '#666';
+        btn.style.borderBottomColor = 'transparent';
+      });
+      const activeBtn = document.getElementById('tab-' + tabName);
+      if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.color = '#4a90d9';
+        activeBtn.style.borderBottomColor = '#4a90d9';
+      }
+      
+      // Hide all tab panels
+      document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.style.display = 'none';
+      });
+      
+      // Show selected tab panel
+      const activePanel = document.getElementById('tab-content-' + tabName);
+      if (activePanel) {
+        activePanel.style.display = 'block';
+      }
+      
+      // Load data for the selected tab
+      if (tabName === 'root') {
+        loadRootCampaigns();
+      } else if (tabName === 'campaigns') {
+        loadProjectCampaigns();
+      } else if (tabName === 'path') {
+        loadPathAnalysis();
+      }
+    }
+
+    async function loadRootCampaigns() {
+      if (!currentMerchantId) return;
+      
+      const emptyDiv = document.getElementById('root-campaigns-empty');
+      const tableContainer = document.getElementById('root-campaigns-table-container');
+      const currentRootDiv = document.getElementById('root-current');
+      
+      emptyDiv.style.display = 'block';
+      emptyDiv.textContent = '加载中...';
+      tableContainer.style.display = 'none';
+      
+      try {
+        // Add workerName parameter for instance filtering
+        const workerParam = selectedWorkerName ? '?workerName=' + encodeURIComponent(selectedWorkerName) : '';
+        const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/root-campaigns' + workerParam, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        const rootCampaigns = data.rootCampaigns || [];
+        
+        // Find current root (isConfirmed = true)
+        const confirmedRoot = rootCampaigns.find(c => c.isConfirmed);
+        if (confirmedRoot) {
+          currentProjectRootId = confirmedRoot.campaignId;
+          currentRootDiv.style.display = 'block';
+          document.getElementById('root-current-name').textContent = confirmedRoot.subject || '未知主题';
+        } else {
+          currentProjectRootId = null;
+          currentRootDiv.style.display = 'none';
+        }
+        
+        if (rootCampaigns.length === 0) {
+          emptyDiv.textContent = '该商户暂无 Root 候选活动。请先在"营销活动"标签页中查看活动列表。';
+          return;
+        }
+        
+        emptyDiv.style.display = 'none';
+        tableContainer.style.display = 'table';
+        
+        const tbody = document.getElementById('root-campaigns-table');
+        tbody.innerHTML = rootCampaigns.map(c => {
+          const isRoot = c.isConfirmed;
+          const statusBadge = isRoot 
+            ? '<span class="root-badge">当前 Root</span>' 
+            : (c.isCandidate ? '<span style="color:#666;font-size:11px;">候选: ' + escapeHtml(c.candidateReason || '系统推荐') + '</span>' : '-');
+          const actionBtn = isRoot 
+            ? '<button class="btn btn-sm btn-secondary" disabled>已选中</button>'
+            : '<button class="btn btn-sm btn-primary" onclick="setAsRoot(\\'' + c.campaignId + '\\')">设为 Root</button>';
+          
+          return '<tr style="' + (isRoot ? 'background:#e8f5e9;' : '') + '">' +
+            '<td>' + escapeHtml(c.subject || '未知主题') + '</td>' +
+            '<td>' + (c.newUserCount || 0) + '</td>' +
+            '<td>' + (c.isConfirmed ? '已确认' : (c.isCandidate ? '候选' : '-')) + '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td class="actions">' + actionBtn + '</td></tr>';
+        }).join('');
+      } catch (e) {
+        console.error('Error loading root campaigns:', e);
+        emptyDiv.textContent = '加载失败，请重试。';
+      }
+    }
+
+    async function setAsRoot(campaignId) {
+      if (!currentMerchantId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      try {
+        // First, unset any existing root for this merchant
+        // Then set the new root
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/root', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ isRoot: true })
+        });
+        
+        if (res.ok) {
+          currentProjectRootId = campaignId;
+          showAlert('Root 设置成功');
+          loadRootCampaigns();
+        } else {
+          const errorData = await res.json().catch(() => ({}));
+          showAlert(errorData.message || '设置失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error setting root:', e);
+        showAlert('设置失败', 'error');
+      }
+    }
+
+    async function loadProjectCampaigns() {
+      if (!currentMerchantId) return;
+      
+      const emptyDiv = document.getElementById('campaigns-empty');
+      const tableContainer = document.getElementById('campaigns-table-container');
+      
+      emptyDiv.style.display = 'block';
+      emptyDiv.textContent = '加载中...';
+      tableContainer.style.display = 'none';
+      
+      try {
+        const valueFilter = document.getElementById('campaign-valuable-filter')?.value || '';
+        let url = '/api/campaign/campaigns?merchantId=' + currentMerchantId;
+        if (valueFilter) url += '&tag=' + valueFilter;
+        
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        campaignsData = data.campaigns || [];
+        
+        if (campaignsData.length === 0) {
+          emptyDiv.textContent = '该商户暂无营销活动数据。';
+          return;
+        }
+        
+        emptyDiv.style.display = 'none';
+        tableContainer.style.display = 'table';
+        renderProjectCampaigns();
+      } catch (e) {
+        console.error('Error loading campaigns:', e);
+        emptyDiv.textContent = '加载失败，请重试。';
+      }
+    }
+
+    function renderProjectCampaigns() {
+      const tbody = document.getElementById('campaigns-table');
+      const sortField = document.getElementById('campaign-sort-field')?.value || 'emails';
+      
+      const sortedCampaigns = [...campaignsData].sort((a, b) => {
+        if (sortField === 'emails') {
+          return (b.emailCount || 0) - (a.emailCount || 0);
+        } else {
+          return new Date(b.firstSeen || 0) - new Date(a.firstSeen || 0);
+        }
+      });
+      
+      tbody.innerHTML = sortedCampaigns.map(c => {
+        const tag = c.tag || 0;
+        const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值' };
+        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2' };
+        const tagBadge = '<span class="' + tagClasses[tag] + '" style="padding:2px 8px;border-radius:4px;font-size:11px;">' + tagLabels[tag] + '</span>';
+        const firstSeen = c.firstSeen ? new Date(c.firstSeen).toLocaleDateString('zh-CN') : '-';
+        
+        return '<tr style="cursor:pointer;" onclick="showCampaignDetail(\\'' + c.id + '\\')">' +
+          '<td>' + escapeHtml(c.subject || '未知主题') + '</td>' +
+          '<td>' + (c.emailCount || 0) + '</td>' +
+          '<td>' + (c.recipientCount || 0) + '</td>' +
+          '<td>' + tagBadge + '</td>' +
+          '<td>' + firstSeen + '</td>' +
+          '<td class="actions" onclick="event.stopPropagation()">' +
+            '<button class="btn btn-sm btn-success" onclick="tagCampaign(\\'' + c.id + '\\', 1)">标记有价值</button>' +
+            '<button class="btn btn-sm btn-warning" onclick="tagCampaign(\\'' + c.id + '\\', 2)">标记高价值</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    function sortCampaignList() {
+      renderProjectCampaigns();
+    }
+
+    async function showCampaignDetail(campaignId) {
+      const contentDiv = document.getElementById('campaign-detail-content');
+      contentDiv.innerHTML = '<p style="text-align:center;color:#999;">加载中...</p>';
+      showModal('campaign-detail-modal');
+      
+      try {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const campaign = await res.json();
+        
+        const tag = campaign.tag || 0;
+        const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值', 3: '一般营销', 4: '可忽略' };
+        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-0', 4: 'value-tag-0' };
+        const firstSeen = campaign.firstSeenAt ? new Date(campaign.firstSeenAt).toLocaleString('zh-CN') : '-';
+        const lastSeen = campaign.lastSeenAt ? new Date(campaign.lastSeenAt).toLocaleString('zh-CN') : '-';
+        
+        let content = '<div style="margin-bottom:16px;">' +
+          '<p><strong>邮件主题:</strong></p>' +
+          '<p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;">' + escapeHtml(campaign.subject || '未知主题') + '</p>' +
+          '</div>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">' +
+          '<div class="stat-card" style="padding:12px;"><div class="stat-value" style="font-size:20px;">' + (campaign.totalEmails || 0) + '</div><div class="stat-label">邮件总数</div></div>' +
+          '<div class="stat-card" style="padding:12px;"><div class="stat-value" style="font-size:20px;">' + (campaign.uniqueRecipients || 0) + '</div><div class="stat-label">收件人数</div></div>' +
+          '</div>' +
+          '<div style="margin-bottom:16px;">' +
+          '<p><strong>价值标记:</strong> <span class="' + tagClasses[tag] + '" style="padding:2px 8px;border-radius:4px;font-size:11px;">' + tagLabels[tag] + '</span></p>' +
+          '</div>' +
+          '<div style="margin-bottom:16px;">' +
+          '<p><strong>首次出现:</strong> ' + firstSeen + '</p>' +
+          '<p><strong>最后出现:</strong> ' + lastSeen + '</p>' +
+          '</div>';
+        
+        // Show recipient stats if available
+        if (campaign.recipientStats && campaign.recipientStats.length > 0) {
+          content += '<div style="margin-bottom:16px;">' +
+            '<p><strong>收件人统计 (前10):</strong></p>' +
+            '<table style="width:100%;font-size:12px;margin-top:8px;">' +
+            '<thead><tr><th>收件人</th><th>邮件数</th></tr></thead>' +
+            '<tbody>' +
+            campaign.recipientStats.slice(0, 10).map(r => 
+              '<tr><td>' + escapeHtml(r.recipient || '-') + '</td><td>' + (r.count || 0) + '</td></tr>'
+            ).join('') +
+            '</tbody></table>' +
+            '</div>';
+        }
+        
+        // Tag buttons
+        content += '<div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid #eee;">' +
+          '<button class="btn btn-sm btn-secondary" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 0)">清除标记</button>' +
+          '<button class="btn btn-sm btn-success" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 1)">标记有价值</button>' +
+          '<button class="btn btn-sm btn-warning" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 2)">标记高价值</button>' +
+          '</div>';
+        
+        contentDiv.innerHTML = content;
+      } catch (e) {
+        console.error('Error loading campaign detail:', e);
+        contentDiv.innerHTML = '<p style="text-align:center;color:#e74c3c;">加载失败，请重试。</p>';
+      }
+    }
+
+    async function tagCampaignFromDetail(campaignId, tagValue) {
+      try {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/tag', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ tag: tagValue })
+        });
+        
+        if (res.ok) {
+          showAlert('标记成功');
+          hideModal('campaign-detail-modal');
+          loadProjectCampaigns();
+        } else {
+          showAlert('标记失败', 'error');
+        }
+      } catch (e) {
+        showAlert('标记失败', 'error');
+      }
+    }
+
+    async function tagCampaign(campaignId, tagValue) {
+      try {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/tag', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ tag: tagValue })
+        });
+        
+        if (res.ok) {
+          showAlert('标记成功');
+          loadProjectCampaigns();
+        } else {
+          showAlert('标记失败', 'error');
+        }
+      } catch (e) {
+        showAlert('标记失败', 'error');
+      }
+    }
+
+    async function loadPathAnalysis() {
+      const noRootDiv = document.getElementById('path-no-root');
+      const analysisContainer = document.getElementById('path-analysis-container');
+      const flowContainer = document.getElementById('path-flow-container');
+      
+      if (!currentProjectRootId) {
+        noRootDiv.style.display = 'block';
+        analysisContainer.style.display = 'none';
+        return;
+      }
+      
+      noRootDiv.style.display = 'none';
+      analysisContainer.style.display = 'block';
+      flowContainer.innerHTML = '加载中...';
+      
+      try {
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        let url = '/api/campaign/merchants/' + currentMerchantId + '/path-analysis';
+        if (workerName) url += '?workerName=' + encodeURIComponent(workerName);
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderProjectPathAnalysis(data);
+      } catch (e) {
+        console.error('Error loading path analysis:', e);
+        flowContainer.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">加载失败，请重试。</div>';
+      }
+    }
+
+    function renderProjectPathAnalysis(data) {
+      const flowContainer = document.getElementById('path-flow-container');
+      
+      // Check if data is valid
+      if (!data || !data.userStats) {
+        flowContainer.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">暂无路径数据。</div>';
+        return;
+      }
+      
+      let html = '';
+      
+      // User Stats Section
+      html += '<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#1565c0;">📊 用户统计</h4>';
+      html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#1565c0;">' + (data.userStats.totalRecipients || 0) + '</div><div style="font-size:11px;color:#666;">总收件人</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#28a745;">' + (data.userStats.newUsers || 0) + '</div><div style="font-size:11px;color:#666;">新用户</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#ff9800;">' + (data.userStats.oldUsers || 0) + '</div><div style="font-size:11px;color:#666;">老用户</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#9c27b0;">' + (data.userStats.newUserPercentage || 0).toFixed(1) + '%</div><div style="font-size:11px;color:#666;">新用户比例</div></div>';
+      html += '</div></div>';
+      
+      // Level Stats Section - Path Nodes
+      html += '<div style="background:#f3e5f5;border:1px solid #ce93d8;border-radius:8px;padding:15px;margin-bottom:15px;">';
+      html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#7b1fa2;">📈 活动层级 (基于新用户路径)</h4>';
+      
+      if (data.levelStats && data.levelStats.length > 0) {
+        // Group by level
+        const levelGroups = {};
+        data.levelStats.forEach(ls => {
+          if (!levelGroups[ls.level]) levelGroups[ls.level] = [];
+          levelGroups[ls.level].push(ls);
+        });
+        
+        Object.keys(levelGroups).sort((a, b) => a - b).forEach(level => {
+          html += '<div style="margin-bottom:12px;">';
+          html += '<div style="font-size:12px;font-weight:600;color:#7b1fa2;margin-bottom:6px;">第 ' + level + ' 层</div>';
+          
+          levelGroups[level].forEach(node => {
+            const isHighlighted = node.tag === 1 || node.tag === 2 || node.isValuable;
+            const percentage = node.coverage ? node.coverage.toFixed(1) + '%' : '-';
+            
+            html += '<div class="path-node ' + (isHighlighted ? 'highlighted' : '') + '">';
+            html += '<div class="path-node-title">' + escapeHtml(node.subject || '未知主题');
+            if (node.isRoot) html += ' <span style="color:#e65100;">🎯 Root</span>';
+            html += '</div>';
+            html += '<div class="path-node-stats">';
+            html += '收件人: ' + (node.userCount || 0) + ' | ';
+            html += '覆盖率: ' + percentage;
+            if (isHighlighted) html += ' | <span style="color:#27ae60;font-weight:500;">★ 有价值</span>';
+            html += '</div>';
+            html += '</div>';
+          });
+          
+          html += '</div>';
+        });
+      } else {
+        html += '<div style="text-align:center;color:#999;padding:20px;">暂无层级数据</div>';
+      }
+      html += '</div>';
+      
+      // Transitions Section - Tree View
+      html += '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:15px;">';
+      html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#2e7d32;">🔄 新用户转移路径</h4>';
+      
+      if (data.transitions && data.transitions.length > 0) {
+        // Build tree structure from transitions
+        const transitionMap = {};
+        const allTargets = new Set();
+        
+        data.transitions.forEach(t => {
+          if (!transitionMap[t.fromCampaignId]) {
+            transitionMap[t.fromCampaignId] = {
+              subject: t.fromSubject,
+              isValuable: t.fromIsValuable,
+              children: []
+            };
+          }
+          transitionMap[t.fromCampaignId].children.push({
+            campaignId: t.toCampaignId,
+            subject: t.toSubject,
+            isValuable: t.toIsValuable,
+            userCount: t.userCount,
+            ratio: t.transitionRatio
+          });
+          allTargets.add(t.toCampaignId);
+        });
+        
+        // Find root nodes (nodes that are not targets of any transition)
+        const rootNodes = Object.keys(transitionMap).filter(id => !allTargets.has(id));
+        
+        // If no clear roots, use nodes with most outgoing transitions
+        if (rootNodes.length === 0) {
+          const sortedNodes = Object.entries(transitionMap)
+            .sort((a, b) => b[1].children.length - a[1].children.length);
+          if (sortedNodes.length > 0) rootNodes.push(sortedNodes[0][0]);
+        }
+        
+        // Render tree recursively
+        function renderTreeNode(campaignId, depth, maxDepth) {
+          if (depth > maxDepth || !transitionMap[campaignId]) return '';
+          const node = transitionMap[campaignId];
+          let nodeHtml = '';
+          
+          node.children.sort((a, b) => b.userCount - a.userCount).slice(0, 5).forEach((child, idx, arr) => {
+            const isLast = idx === arr.length - 1;
+            const prefix = depth > 0 ? '│'.repeat(depth - 1) + (isLast ? '└' : '├') : '';
+            const bgColor = child.ratio >= 50 ? '#c8e6c9' : (child.ratio >= 20 ? '#fff9c4' : 'transparent');
+            const valuableMarker = child.isValuable ? ' <span style="color:#27ae60;">★</span>' : '';
+            
+            nodeHtml += '<div style="padding:3px 0;font-size:12px;font-family:monospace;background:' + bgColor + ';border-radius:3px;margin:2px 0;">';
+            nodeHtml += '<span style="color:#999;">' + prefix + '→ </span>';
+            nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>' + valuableMarker;
+            nodeHtml += '<span style="color:#2e7d32;font-weight:bold;margin-left:8px;">' + child.userCount + '人</span>';
+            nodeHtml += '<span style="color:#666;margin-left:5px;">(' + child.ratio.toFixed(1) + '%)</span>';
+            nodeHtml += '</div>';
+            
+            // Recursively render children
+            nodeHtml += renderTreeNode(child.campaignId, depth + 1, maxDepth);
+          });
+          
+          if (node.children.length > 5) {
+            const prefix = depth > 0 ? '│'.repeat(depth - 1) + '└' : '';
+            nodeHtml += '<div style="padding:3px 0;font-size:11px;color:#999;font-family:monospace;">' + prefix + '... +' + (node.children.length - 5) + ' 更多</div>';
+          }
+          
+          return nodeHtml;
+        }
+        
+        // Render from each root
+        rootNodes.forEach(rootId => {
+          const rootNode = transitionMap[rootId];
+          if (rootNode) {
+            const rootValuable = rootNode.isValuable ? ' <span style="color:#27ae60;">★</span>' : '';
+            html += '<div style="margin-bottom:10px;padding:10px;background:#fff;border-radius:6px;border:1px solid #c8e6c9;">';
+            html += '<div style="font-weight:bold;font-size:12px;color:#1b5e20;margin-bottom:6px;">🎯 ' + escapeHtml(rootNode.subject.substring(0, 40)) + rootValuable + '</div>';
+            html += renderTreeNode(rootId, 0, 4);
+            html += '</div>';
+          }
+        });
+        
+        html += '<p style="color:#888;font-size:10px;margin-top:8px;margin-bottom:0;">💡 绿色背景=主路径(≥50%) | 黄色背景=次级路径(≥20%) | ★=有价值活动</p>';
+      } else {
+        html += '<div style="text-align:center;color:#999;padding:20px;">暂无转移数据</div>';
+      }
+      html += '</div>';
+      
+      flowContainer.innerHTML = html;
     }
 
     async function loadDataStats() {

@@ -2597,4 +2597,382 @@ describe('CampaignAnalyticsService', () => {
       );
     });
   });
+
+  /**
+   * **Feature: campaign-analytics-ui-reorganization, Property 1: Instance Data Isolation**
+   * **Validates: Requirements 1.3, 2.1, 4.1**
+   * 
+   * For any selected worker instance, all displayed merchants and projects 
+   * should belong to that instance only.
+   */
+  describe('Property 1: Instance Data Isolation', () => {
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker-a'),
+      fc.constant('worker-b'),
+      fc.constant('worker-c')
+    );
+
+    // Generate valid project names
+    const projectNameArb = fc.stringOf(
+      fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789 -_'.split('')),
+      { minLength: 1, maxLength: 30 }
+    ).filter(s => s.trim().length > 0);
+
+    /**
+     * Test service extension with project support for sql.js
+     */
+    class TestServiceWithProjects extends TestCampaignAnalyticsService {
+      createAnalysisProject(data: { name: string; merchantId: string; workerName: string; note?: string }): any {
+        const id = uuidv4();
+        const now = new Date().toISOString();
+        
+        (this as any).db.run(
+          `INSERT INTO analysis_projects (id, name, merchant_id, worker_name, status, note, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+          [id, data.name, data.merchantId, data.workerName, data.note || null, now, now]
+        );
+        
+        return this.getAnalysisProjectById(id);
+      }
+
+      getAnalysisProjectById(id: string): any | null {
+        const result = (this as any).db.exec(
+          `SELECT ap.*, m.domain as merchant_domain
+           FROM analysis_projects ap
+           LEFT JOIN merchants m ON ap.merchant_id = m.id
+           WHERE ap.id = ?`,
+          [id]
+        );
+        if (result.length === 0 || result[0].values.length === 0) {
+          return null;
+        }
+        const row = result[0].values[0];
+        const columns = result[0].columns;
+        return this.rowToProject(columns, row);
+      }
+
+      getAnalysisProjects(filter?: { workerName?: string; status?: string }): any[] {
+        let query = `
+          SELECT ap.*, m.domain as merchant_domain
+          FROM analysis_projects ap
+          LEFT JOIN merchants m ON ap.merchant_id = m.id
+        `;
+        const params: any[] = [];
+        const conditions: string[] = [];
+
+        if (filter?.workerName) {
+          conditions.push('ap.worker_name = ?');
+          params.push(filter.workerName);
+        }
+
+        if (filter?.status) {
+          conditions.push('ap.status = ?');
+          params.push(filter.status);
+        }
+
+        if (conditions.length > 0) {
+          query += ' WHERE ' + conditions.join(' AND ');
+        }
+
+        query += ' ORDER BY ap.created_at DESC';
+
+        const result = (this as any).db.exec(query, params);
+        if (result.length === 0) {
+          return [];
+        }
+
+        const columns = result[0].columns;
+        return result[0].values.map((row: any) => this.rowToProject(columns, row));
+      }
+
+      private rowToProject(columns: string[], row: any[]): any {
+        const obj: any = {};
+        columns.forEach((col, i) => {
+          obj[col] = row[i];
+        });
+        return {
+          id: obj.id,
+          name: obj.name,
+          merchantId: obj.merchant_id,
+          workerName: obj.worker_name,
+          status: obj.status,
+          note: obj.note,
+          merchantDomain: obj.merchant_domain,
+          createdAt: new Date(obj.created_at),
+          updatedAt: new Date(obj.updated_at),
+        };
+      }
+    }
+
+    // Helper to create test database with analysis_projects table
+    async function createTestDbWithProjects(): Promise<SqlJsDatabase> {
+      const SQL = await initSqlJs();
+      const db = new SQL.Database();
+      
+      // Load campaign schema
+      const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+      const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+      db.run(campaignSchema);
+      
+      // Add analysis_projects table
+      db.run(`
+        CREATE TABLE IF NOT EXISTS analysis_projects (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          merchant_id TEXT NOT NULL,
+          worker_name TEXT NOT NULL,
+          status TEXT DEFAULT 'active',
+          note TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_analysis_projects_merchant ON analysis_projects(merchant_id);
+        CREATE INDEX IF NOT EXISTS idx_analysis_projects_worker ON analysis_projects(worker_name);
+      `);
+      
+      return db;
+    }
+
+    it('should only return projects that belong to the specified worker instance', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender for creating merchant
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          projectNameArb, // project name for workerA
+          projectNameArb, // project name for workerB
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, projectNameA, projectNameB, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add analysis_projects table
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              );
+            `);
+            
+            const service = new TestServiceWithProjects(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Create a merchant by tracking an email
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+              const merchantId = result.merchantId;
+
+              // Create project for workerA
+              const projectA = service.createAnalysisProject({
+                name: projectNameA,
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Create project for workerB
+              const projectB = service.createAnalysisProject({
+                name: projectNameB,
+                merchantId,
+                workerName: workerB,
+              });
+
+              // Query projects filtered by workerA
+              const projectsForWorkerA = service.getAnalysisProjects({ workerName: workerA });
+              
+              // All returned projects should belong to workerA
+              for (const project of projectsForWorkerA) {
+                expect(project.workerName).toBe(workerA);
+                expect(project.id).toBe(projectA.id);
+              }
+              expect(projectsForWorkerA.length).toBe(1);
+
+              // Query projects filtered by workerB
+              const projectsForWorkerB = service.getAnalysisProjects({ workerName: workerB });
+              
+              // All returned projects should belong to workerB
+              for (const project of projectsForWorkerB) {
+                expect(project.workerName).toBe(workerB);
+                expect(project.id).toBe(projectB.id);
+              }
+              expect(projectsForWorkerB.length).toBe(1);
+
+              // Query all projects (no filter)
+              const allProjects = service.getAnalysisProjects();
+              expect(allProjects.length).toBe(2);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should return empty list when no projects exist for the specified worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          projectNameArb, // project name
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, projectName, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add analysis_projects table
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              );
+            `);
+            
+            const service = new TestServiceWithProjects(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Create a merchant by tracking an email
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+              const merchantId = result.merchantId;
+
+              // Create project only for workerA
+              service.createAnalysisProject({
+                name: projectName,
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Query projects filtered by workerB (which has no projects)
+              const projectsForWorkerB = service.getAnalysisProjects({ workerName: workerB });
+              
+              // Should return empty list
+              expect(projectsForWorkerB.length).toBe(0);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should isolate merchants by worker instance when filtering', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          fc.array(validEmailArb, { minLength: 2, maxLength: 3 })
+            .filter(arr => {
+              // Ensure unique domains
+              const domains = arr.map(e => extractDomain(e)).filter(d => d !== null);
+              return new Set(domains).size === domains.length;
+            }),
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          (senders, subject, recipient, workerA, workerB) => {
+            // Ensure workers are different and we have at least 2 senders
+            if (workerA === workerB) return;
+            if (senders.length < 2) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithProjects(db);
+
+            try {
+              // Track email from first sender with workerA
+              const resultA = service.trackEmail({
+                sender: senders[0],
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+
+              // Track email from second sender with workerB
+              const resultB = service.trackEmail({
+                sender: senders[1],
+                subject,
+                recipient,
+                workerName: workerB,
+              });
+
+              // Query merchants filtered by workerA
+              const merchantsForWorkerA = service.getMerchants({ workerName: workerA });
+              
+              // All returned merchants should have emails from workerA only
+              expect(merchantsForWorkerA.length).toBe(1);
+              expect(merchantsForWorkerA[0].id).toBe(resultA.merchantId);
+
+              // Query merchants filtered by workerB
+              const merchantsForWorkerB = service.getMerchants({ workerName: workerB });
+              
+              // All returned merchants should have emails from workerB only
+              expect(merchantsForWorkerB.length).toBe(1);
+              expect(merchantsForWorkerB[0].id).toBe(resultB.merchantId);
+
+              // Merchants should be different
+              expect(resultA.merchantId).not.toBe(resultB.merchantId);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
 });

@@ -51,11 +51,59 @@ import type {
 import { toMerchant, toCampaign, ROOT_CAMPAIGN_KEYWORDS } from '@email-filter/shared';
 
 /**
- * Extract domain from email address
- * Returns the portion after the @ symbol in lowercase
+ * Common second-level TLDs that should be treated as part of the TLD
+ * e.g., .co.uk, .com.cn, .org.uk, etc.
+ */
+const SECOND_LEVEL_TLDS = new Set([
+  // UK
+  'co.uk', 'org.uk', 'me.uk', 'net.uk', 'ac.uk', 'gov.uk', 'ltd.uk', 'plc.uk',
+  // China
+  'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'ac.cn',
+  // Australia
+  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'asn.au', 'id.au',
+  // Japan
+  'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'ad.jp', 'ed.jp', 'go.jp', 'gr.jp',
+  // Brazil
+  'com.br', 'net.br', 'org.br', 'gov.br', 'edu.br',
+  // India
+  'co.in', 'net.in', 'org.in', 'gen.in', 'firm.in', 'ind.in',
+  // New Zealand
+  'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'ac.nz', 'school.nz',
+  // South Africa
+  'co.za', 'net.za', 'org.za', 'gov.za', 'edu.za',
+  // Hong Kong
+  'com.hk', 'net.hk', 'org.hk', 'gov.hk', 'edu.hk', 'idv.hk',
+  // Taiwan
+  'com.tw', 'net.tw', 'org.tw', 'gov.tw', 'edu.tw', 'idv.tw',
+  // Singapore
+  'com.sg', 'net.sg', 'org.sg', 'gov.sg', 'edu.sg',
+  // Korea
+  'co.kr', 'ne.kr', 'or.kr', 'go.kr', 'ac.kr', 're.kr',
+  // Russia
+  'com.ru', 'net.ru', 'org.ru',
+  // Mexico
+  'com.mx', 'net.mx', 'org.mx', 'gob.mx', 'edu.mx',
+  // Other common ones
+  'co.il', 'org.il', 'net.il', 'ac.il', 'gov.il', // Israel
+  'com.tr', 'net.tr', 'org.tr', 'gov.tr', 'edu.tr', // Turkey
+  'com.my', 'net.my', 'org.my', 'gov.my', 'edu.my', // Malaysia
+  'com.ph', 'net.ph', 'org.ph', 'gov.ph', 'edu.ph', // Philippines
+  'co.th', 'in.th', 'ac.th', 'go.th', 'or.th', 'net.th', // Thailand
+  'com.vn', 'net.vn', 'org.vn', 'gov.vn', 'edu.vn', // Vietnam
+  'co.id', 'or.id', 'ac.id', 'go.id', 'web.id', // Indonesia
+]);
+
+/**
+ * Extract root domain (registrable domain) from email address
+ * Returns the primary domain without subdomains, handling special TLDs like .co.uk
+ * 
+ * Examples:
+ * - user@mail.example.com -> example.com
+ * - user@shop.amazon.co.uk -> amazon.co.uk
+ * - user@newsletter.company.com.cn -> company.com.cn
  * 
  * @param email - Email address to extract domain from
- * @returns Domain string in lowercase, or null if invalid
+ * @returns Root domain string in lowercase, or null if invalid
  * 
  * Requirements: 1.1
  */
@@ -76,14 +124,44 @@ export function extractDomain(email: string): string | null {
     return null;
   }
 
-  const domain = trimmed.substring(atIndex + 1).toLowerCase();
+  const fullDomain = trimmed.substring(atIndex + 1).toLowerCase();
   
   // Basic validation: domain should have at least one dot and no spaces
-  if (!domain || domain.includes(' ') || !domain.includes('.')) {
+  if (!fullDomain || fullDomain.includes(' ') || !fullDomain.includes('.')) {
     return null;
   }
 
-  return domain;
+  // Extract root domain
+  return extractRootDomain(fullDomain);
+}
+
+/**
+ * Extract root domain from a full domain string
+ * Handles subdomains and special TLDs like .co.uk
+ * 
+ * @param fullDomain - Full domain string (e.g., mail.example.co.uk)
+ * @returns Root domain (e.g., example.co.uk)
+ */
+export function extractRootDomain(fullDomain: string): string {
+  const parts = fullDomain.split('.');
+  
+  if (parts.length <= 2) {
+    // Already a root domain (e.g., example.com)
+    return fullDomain;
+  }
+  
+  // Check if the last two parts form a known second-level TLD
+  const lastTwo = parts.slice(-2).join('.');
+  if (SECOND_LEVEL_TLDS.has(lastTwo)) {
+    // Need at least 3 parts for domains like example.co.uk
+    if (parts.length >= 3) {
+      return parts.slice(-3).join('.');
+    }
+    return fullDomain;
+  }
+  
+  // Standard TLD - return last two parts (e.g., example.com from mail.example.com)
+  return parts.slice(-2).join('.');
 }
 
 /**

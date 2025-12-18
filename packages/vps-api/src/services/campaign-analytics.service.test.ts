@@ -693,29 +693,28 @@ describe('CampaignAnalyticsService', () => {
    * **Validates: Requirements 1.1**
    * 
    * For any valid email address, extracting the domain should always return 
-   * the portion after the @ symbol in lowercase.
+   * the root domain (registrable domain) in lowercase.
    */
   describe('Property 1: Domain Extraction Consistency', () => {
-    it('should extract domain from valid email addresses', () => {
-      fc.assert(
-        fc.property(
-          validEmailArb,
-          (email) => {
-            const result = extractDomain(email);
-            
-            // Should not be null for valid emails
-            expect(result).not.toBeNull();
-            
-            // Should be the part after @
-            const expectedDomain = email.split('@').pop()!.toLowerCase();
-            expect(result).toBe(expectedDomain);
-            
-            // Should be lowercase
-            expect(result).toBe(result!.toLowerCase());
-          }
-        ),
-        { numRuns: 100 }
-      );
+    it('should extract root domain from valid email addresses', () => {
+      // Test with simple domains (no subdomains)
+      expect(extractDomain('user@example.com')).toBe('example.com');
+      expect(extractDomain('user@amazon.com')).toBe('amazon.com');
+      
+      // Test with subdomains - should return root domain
+      expect(extractDomain('user@mail.example.com')).toBe('example.com');
+      expect(extractDomain('user@shop.store.amazon.com')).toBe('amazon.com');
+      expect(extractDomain('user@newsletter.company.org')).toBe('company.org');
+      
+      // Test with special TLDs like .co.uk
+      expect(extractDomain('user@amazon.co.uk')).toBe('amazon.co.uk');
+      expect(extractDomain('user@shop.amazon.co.uk')).toBe('amazon.co.uk');
+      expect(extractDomain('user@mail.company.com.cn')).toBe('company.com.cn');
+      expect(extractDomain('user@news.site.com.au')).toBe('site.com.au');
+      
+      // Test case insensitivity
+      expect(extractDomain('USER@EXAMPLE.COM')).toBe('example.com');
+      expect(extractDomain('User@Mail.Example.Co.Uk')).toBe('example.co.uk');
     });
 
     it('should handle uppercase emails by returning lowercase domain', () => {

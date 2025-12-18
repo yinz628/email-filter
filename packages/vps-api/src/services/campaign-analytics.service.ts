@@ -305,8 +305,18 @@ export class CampaignAnalyticsService {
       return rows.map(toMerchant);
     }
 
-    // No workerName filter - use global counts and status from merchants table
-    if (filter?.analysisStatus) {
+    // No workerName filter - show all merchants (global view)
+    // Include merchants with matching status in global OR any worker instance
+    if (filter?.analysisStatus && workerStatusTableExists) {
+      // Filter by status: match global status OR any worker-specific status
+      conditions.push(`(
+        m.analysis_status = ? 
+        OR m.id IN (
+          SELECT merchant_id FROM merchant_worker_status WHERE analysis_status = ?
+        )
+      )`);
+      params.push(filter.analysisStatus, filter.analysisStatus);
+    } else if (filter?.analysisStatus) {
       conditions.push('m.analysis_status = ?');
       params.push(filter.analysisStatus);
     }

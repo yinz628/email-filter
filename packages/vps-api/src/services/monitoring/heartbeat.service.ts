@@ -18,6 +18,7 @@ import { calculateGapMinutes, calculateSignalState, determineAlertType } from '@
 import { MonitoringRuleRepository } from '../../db/monitoring-rule-repository.js';
 import { SignalStateRepository } from '../../db/signal-state-repository.js';
 import { AlertService } from './alert.service.js';
+import { SignalStateService } from './signal-state.service.js';
 
 /**
  * Heartbeat Service
@@ -29,11 +30,13 @@ export class HeartbeatService {
   private ruleRepo: MonitoringRuleRepository;
   private stateRepo: SignalStateRepository;
   private alertService: AlertService;
+  private signalStateService: SignalStateService;
 
   constructor(private db: Database) {
     this.ruleRepo = new MonitoringRuleRepository(db);
     this.stateRepo = new SignalStateRepository(db);
     this.alertService = new AlertService(db);
+    this.signalStateService = new SignalStateService(db);
   }
 
   /**
@@ -55,6 +58,10 @@ export class HeartbeatService {
     const startTime = Date.now();
     const stateChanges: StateChange[] = [];
     let alertsTriggered = 0;
+
+    // Recalculate time window counters based on hit_logs
+    // This ensures 1h/12h/24h counts reflect actual hits within each window
+    this.signalStateService.recalculateAllCounters(now);
 
     // Get all enabled rules (Requirement 4.1)
     const enabledRules = this.ruleRepo.getEnabled();

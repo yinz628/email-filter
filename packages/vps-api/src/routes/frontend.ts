@@ -2965,7 +2965,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tbody.innerHTML = displayStatuses.map(s => {
         const stateIcon = s.state === 'ACTIVE' ? '🟢' : (s.state === 'WEAK' ? '🟡' : '🔴');
         const stateClass = s.state === 'ACTIVE' ? 'status-enabled' : (s.state === 'WEAK' ? 'category-dynamic' : 'status-disabled');
-        const lastSeen = s.lastSeenAt ? formatTimeAgo(new Date(s.lastSeenAt)) : '从未';
+        const lastSeenTime = s.lastSeenAt ? formatDateTime(new Date(s.lastSeenAt)) : '从未';
+        const lastSeenAgo = s.lastSeenAt ? ' (' + formatTimeAgo(new Date(s.lastSeenAt)) + ')' : '';
         
         // Update rule state in rules table
         const ruleStateEl = document.getElementById('rule-state-' + s.ruleId);
@@ -2976,7 +2977,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return '<tr>' +
           '<td><span class="status ' + stateClass + '">' + stateIcon + ' ' + s.state + '</span></td>' +
           '<td><strong>' + escapeHtml(s.rule?.merchant || '-') + '</strong> / ' + escapeHtml(s.rule?.name || '-') + '</td>' +
-          '<td>' + lastSeen + '</td>' +
+          '<td title="' + lastSeenTime + '">' + lastSeenTime + lastSeenAgo + '</td>' +
           '<td>' + s.gapMinutes + ' 分钟</td>' +
           '<td>' + s.count24h + '</td>' +
           '<td>' + s.count12h + '</td>' +
@@ -2989,12 +2990,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
+    function formatDateTime(date) {
+      return date.toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+    }
+
     function formatTimeAgo(date) {
       const now = new Date();
       const diff = Math.floor((now - date) / 1000 / 60);
-      if (diff < 60) return diff + ' 分钟前';
-      if (diff < 1440) return Math.floor(diff / 60) + ' 小时前';
-      return Math.floor(diff / 1440) + ' 天前';
+      if (diff < 60) return diff + '分钟前';
+      if (diff < 1440) return Math.floor(diff / 60) + '小时前';
+      return Math.floor(diff / 1440) + '天前';
     }
 
     let allAlerts = [];

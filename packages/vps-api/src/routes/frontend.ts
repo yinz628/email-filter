@@ -372,7 +372,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
-          <button class="btn btn-secondary" onclick="loadMerchants()">🔄 刷新</button>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="campaign-auto-refresh" onchange="toggleAutoRefresh('campaign')">
+              <span>自动刷新</span>
+            </label>
+            <select id="campaign-refresh-interval" onchange="updateAutoRefreshInterval('campaign')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadMerchants()">🔄 刷新</button>
+          </div>
         </div>
         <div class="stats-grid" id="campaign-stats-container">
           <div class="stat-card"><div class="stat-value" id="stat-merchants">-</div><div class="stat-label">商户数量</div></div>
@@ -384,7 +395,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">🗄️ 数据管理</h2>
-          <button class="btn btn-sm btn-secondary" onclick="loadDataStats()">🔄 刷新统计</button>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="dataStats-auto-refresh" onchange="toggleAutoRefresh('dataStats')">
+              <span>自动刷新</span>
+            </label>
+            <select id="dataStats-refresh-interval" onchange="updateAutoRefreshInterval('dataStats')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
+            </select>
+            <button class="btn btn-sm btn-secondary" onclick="loadDataStats()">🔄 刷新统计</button>
+          </div>
         </div>
         <div id="data-stats-container" style="margin-bottom:15px;">
           <div class="stats-grid">
@@ -2894,7 +2916,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       alerts: () => loadMonitoringAlerts(),
       status: () => loadMonitoringStatus(),
       funnel: () => { loadRatioMonitors(); checkRatioMonitors(); },
-      heartbeat: () => triggerHeartbeat()
+      heartbeat: () => triggerHeartbeat(),
+      campaign: () => { loadMerchants(); updateCampaignStats(); },
+      dataStats: () => loadDataStats()
     };
 
     function toggleAutoRefresh(type) {

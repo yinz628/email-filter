@@ -2566,10 +2566,21 @@ export class CampaignAnalyticsService {
         WHERE worker_name = ? AND analysis_status = 'ignored'
       `).all(workerName) as Array<{ id: string }>;
     } else {
-      // Get globally ignored merchants
-      ignoredMerchants = this.db.prepare(`
-        SELECT id FROM merchants WHERE analysis_status = 'ignored'
-      `).all() as Array<{ id: string }>;
+      // Get globally ignored merchants (from merchants table OR from any worker status)
+      if (workerStatusTableExists) {
+        // Include merchants ignored globally OR ignored in any worker instance
+        ignoredMerchants = this.db.prepare(`
+          SELECT DISTINCT id FROM (
+            SELECT id FROM merchants WHERE analysis_status = 'ignored'
+            UNION
+            SELECT merchant_id as id FROM merchant_worker_status WHERE analysis_status = 'ignored'
+          )
+        `).all() as Array<{ id: string }>;
+      } else {
+        ignoredMerchants = this.db.prepare(`
+          SELECT id FROM merchants WHERE analysis_status = 'ignored'
+        `).all() as Array<{ id: string }>;
+      }
     }
 
     if (ignoredMerchants.length === 0) {
@@ -2635,7 +2646,7 @@ export class CampaignAnalyticsService {
     if (campaigns.length > 0) {
       const campaignIds = campaigns.map(c => c.id);
       const campaignPlaceholders = campaignIds.map(() => '?').join(',');
-      
+
       // Delete campaign emails
       const emailsResult = this.db.prepare(`
         DELETE FROM campaign_emails WHERE campaign_id IN (${campaignPlaceholders})
@@ -2647,6 +2658,13 @@ export class CampaignAnalyticsService {
     const campaignsResult = this.db.prepare(`
       DELETE FROM campaigns WHERE merchant_id IN (${placeholders})
     `).run(...merchantIds);
+
+    // Delete worker status records for these merchants (global cleanup)
+    if (workerStatusTableExists) {
+      this.db.prepare(`
+        DELETE FROM merchant_worker_status WHERE merchant_id IN (${placeholders})
+      `).run(...merchantIds);
+    }
 
     // Delete merchants
     const merchantsResult = this.db.prepare(`

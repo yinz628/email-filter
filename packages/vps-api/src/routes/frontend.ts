@@ -2702,7 +2702,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('flow-container').innerHTML = '<p style="color:#666;text-align:center;">加载中...</p>';
       
       try {
-        const res = await fetch('/api/campaign/merchants/' + merchantId + '/path-analysis', { headers: getHeaders() });
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        let url = '/api/campaign/merchants/' + merchantId + '/path-analysis';
+        if (workerName) url += '?workerName=' + encodeURIComponent(workerName);
+        const res = await fetch(url, { headers: getHeaders() });
         const data = await res.json();
         if (!res.ok) {
           document.getElementById('flow-container').innerHTML = '<p style="color:#e74c3c;text-align:center;">加载失败: ' + (data.error || res.status) + '</p>';
@@ -2942,9 +2945,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('campaigns-section').style.display = 'none';
       
       try {
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        const workerParam = workerName ? '?workerName=' + encodeURIComponent(workerName) : '';
         const [rootRes, campaignsRes] = await Promise.all([
-          fetch('/api/campaign/merchants/' + merchantId + '/root-campaigns', { headers: getHeaders() }),
-          fetch('/api/campaign/campaigns?merchantId=' + merchantId + '&limit=100', { headers: getHeaders() })
+          fetch('/api/campaign/merchants/' + merchantId + '/root-campaigns' + workerParam, { headers: getHeaders() }),
+          fetch('/api/campaign/campaigns?merchantId=' + merchantId + '&limit=100' + (workerName ? '&workerName=' + encodeURIComponent(workerName) : ''), { headers: getHeaders() })
         ]);
         
         const rootData = await rootRes.json();

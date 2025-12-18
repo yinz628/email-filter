@@ -852,21 +852,23 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * GET /api/campaign/merchants/:id/root-campaigns
    * Get root campaigns for a merchant
+   * Query params: workerName (optional) - filter by worker instance
    */
   fastify.get('/merchants/:id/root-campaigns', async (
-    request: FastifyRequest<{ Params: MerchantParams }>,
+    request: FastifyRequest<{ Params: MerchantParams; Querystring: { workerName?: string } }>,
     reply: FastifyReply
   ) => {
     try {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
+      const { workerName } = request.query;
 
       const merchant = service.getMerchantById(request.params.id);
       if (!merchant) {
         return reply.status(404).send({ error: 'Merchant not found' });
       }
 
-      const rootCampaigns = service.getRootCampaigns(request.params.id);
+      const rootCampaigns = service.getRootCampaigns(request.params.id, workerName);
 
       return reply.send({
         merchantId: request.params.id,
@@ -1061,21 +1063,23 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
    * GET /api/campaign/merchants/:id/path-analysis
    * Get complete path analysis (综合路径分析)
    * Returns all analysis data in one request
+   * Query params: workerName (optional) - filter by worker instance
    */
   fastify.get('/merchants/:id/path-analysis', async (
-    request: FastifyRequest<{ Params: MerchantParams }>,
+    request: FastifyRequest<{ Params: MerchantParams; Querystring: { workerName?: string } }>,
     reply: FastifyReply
   ) => {
     try {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
+      const { workerName } = request.query;
 
       const merchant = service.getMerchantById(request.params.id);
       if (!merchant) {
         return reply.status(404).send({ error: 'Merchant not found' });
       }
 
-      const analysis = service.getPathAnalysis(request.params.id);
+      const analysis = service.getPathAnalysis(request.params.id, workerName);
 
       return reply.send(analysis);
     } catch (error) {

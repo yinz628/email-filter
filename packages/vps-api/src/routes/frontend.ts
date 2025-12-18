@@ -3516,56 +3516,23 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       showMerchantEmptyState('hidden');
       tableContainer.style.display = 'table';
 
-      // Get current worker filter for display
-      const currentWorkerFilter = workerName;
+      // Check which merchants have projects
+      const merchantsWithProjects = new Set(projectsData.map(p => p.merchantId));
       
       tbody.innerHTML = merchantsData.map(m => {
-        const status = m.analysisStatus || 'pending';
-        const color = statusColors[status] || statusColors.pending;
-        const statusBadge = '<span style="background:' + color.bg + ';color:' + color.text + ';border:1px solid ' + color.border + ';padding:2px 8px;border-radius:4px;font-size:11px;">' + statusLabels[status] + '</span>';
-        
-        // Determine scope badge based on status
-        // - For pending: show instance name if filtered, otherwise show "-" (not yet assigned)
-        // - For active/ignored: show the current filter scope (instance or global)
-        let scopeBadge = '-';
-        if (status === 'pending') {
-          // Pending merchants: show instance if filtered, otherwise not assigned yet
-          if (currentWorkerFilter) {
-            scopeBadge = '<span style="background:#fff3e0;color:#e65100;border:1px solid #ffb74d;padding:2px 6px;border-radius:4px;font-size:10px;">' + escapeHtml(currentWorkerFilter) + '</span>';
-          }
-        } else {
-          // Active/ignored: show the scope they belong to
-          const scopeLabel = currentWorkerFilter ? currentWorkerFilter : '全局';
-          scopeBadge = '<span style="background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;padding:2px 6px;border-radius:4px;font-size:10px;">' + escapeHtml(scopeLabel) + '</span>';
-        }
-        
-        // Show different actions based on status
-        let actions = '';
-        if (status === 'active') {
-          actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">活动</button>' +
-            '<button class="btn btn-sm btn-warning" onclick="showRootCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">Root</button>' +
-            '<button class="btn btn-sm btn-success" onclick="showPathAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">分析</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
-        } else if (status === 'pending') {
-          actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">预览</button>' +
-            '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">开始分析</button>' +
-            '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
-        } else {
-          actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">预览</button>' +
-            '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">恢复分析</button>';
-        }
-        
-        // Display name with edit button
-        const displayNameHtml = '<span style="cursor:pointer;text-decoration:underline dotted;color:#1565c0;" onclick="editMerchantName(\\'' + m.id + '\\', \\'' + escapeHtml(m.displayName || '') + '\\')" title="点击编辑">' + escapeHtml(m.displayName || '-') + '</span>';
+        const hasProject = merchantsWithProjects.has(m.id);
+        const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
         
         return '<tr>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
-          '<td>' + displayNameHtml + '</td>' +
-          '<td>' + scopeBadge + '</td>' +
-          '<td>' + statusBadge + '</td>' +
           '<td>' + m.totalCampaigns + '</td>' +
           '<td>' + m.totalEmails + '</td>' +
-          '<td class="actions">' + actions + '</td></tr>';
+          '<td>' + projectIndicator + (hasProject ? '是' : '-') + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="showMerchantPreview(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalCampaigns + ', ' + m.totalEmails + ')" style="margin-right:5px;">预览</button>' +
+            '<button class="btn btn-sm btn-success" onclick="showCreateProjectModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
+            (workerName ? '<button class="btn btn-sm btn-danger" onclick="showDeleteMerchantModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalEmails + ', ' + m.totalCampaigns + ')" style="margin-left:5px;">删除数据</button>' : '') +
+          '</td></tr>';
       }).join('');
     }
 

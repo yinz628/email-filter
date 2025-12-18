@@ -404,21 +404,69 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
           <div style="display:flex;gap:10px;align-items:center;">
-            <select id="campaign-worker-filter" onchange="loadMerchants(); loadDataStats(); if(currentMerchantId) loadCampaigns(currentMerchantId);" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
-              <option value="">全部实例</option>
+            <select id="campaign-worker-filter" onchange="onWorkerFilterChange()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">选择实例</option>
             </select>
-            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-              <input type="checkbox" id="campaign-auto-refresh" onchange="toggleAutoRefresh('campaign')">
-              <span>自动刷新</span>
-            </label>
-            <select id="campaign-refresh-interval" onchange="updateAutoRefreshInterval('campaign')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
-              <option value="60" selected>1分钟</option>
-              <option value="300">5分钟</option>
-              <option value="600">10分钟</option>
-            </select>
-            <button class="btn btn-secondary" onclick="loadMerchants()">🔄 刷新</button>
+            <button class="btn btn-secondary" onclick="loadProjects(); loadWorkerMerchants();">🔄 刷新</button>
           </div>
         </div>
+        <p style="color:#666;margin-bottom:15px">选择 Worker 实例后，可以查看该实例的商户列表并创建分析项目。</p>
+      </div>
+      
+      <!-- Analysis Projects Section -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">📁 分析项目</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="project-status-filter" onchange="loadProjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部状态</option>
+              <option value="active">进行中</option>
+              <option value="completed">已完成</option>
+              <option value="archived">已归档</option>
+            </select>
+          </div>
+        </div>
+        <div id="projects-empty" style="text-align:center;color:#999;padding:40px;">
+          暂无分析项目。请先选择实例，然后从商户列表创建项目。
+        </div>
+        <table id="projects-table-container" style="display:none;">
+          <thead>
+            <tr>
+              <th>项目名称</th>
+              <th>商户域名</th>
+              <th>实例</th>
+              <th>状态</th>
+              <th>活动数</th>
+              <th>邮件数</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="projects-table"></tbody>
+        </table>
+      </div>
+
+      <!-- Worker Merchants Section (for creating projects) -->
+      <div id="worker-merchants-section" class="card" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;" id="worker-merchants-title">商户列表</h2>
+        </div>
+        <p style="color:#666;margin-bottom:15px">以下是该实例收到邮件的商户。点击"创建项目"开始分析。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>商户域名</th>
+              <th>营销活动数</th>
+              <th>邮件总数</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="worker-merchants-table"></tbody>
+        </table>
+      </div>
+
+      <!-- Legacy sections (hidden by default, shown when viewing project) -->
+      <div id="legacy-campaign-sections" style="display:none;">
         <div class="stats-grid" id="campaign-stats-container">
           <div class="stat-card"><div class="stat-value" id="stat-merchants">-</div><div class="stat-label">商户数量</div></div>
           <div class="stat-card"><div class="stat-value" id="stat-campaigns">-</div><div class="stat-label">营销活动</div></div>
@@ -2224,10 +2272,211 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     let currentMerchantId = null;
     let merchantsData = [];
     let campaignsData = [];
+    let projectsData = [];
+    let workerMerchantsData = [];
+    let currentProjectId = null;
 
     async function loadCampaignAnalytics() {
-      await loadMerchants();
-      await loadDataStats();
+      await loadProjects();
+    }
+
+    // Project status labels and colors
+    const projectStatusLabels = { active: '进行中', completed: '已完成', archived: '已归档' };
+    const projectStatusColors = {
+      active: { bg: '#d4edda', text: '#155724', border: '#28a745' },
+      completed: { bg: '#cce5ff', text: '#004085', border: '#007bff' },
+      archived: { bg: '#e9ecef', text: '#495057', border: '#6c757d' }
+    };
+
+    function onWorkerFilterChange() {
+      loadProjects();
+      loadWorkerMerchants();
+    }
+
+    async function loadProjects() {
+      if (!apiToken) return;
+      try {
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        const statusFilter = document.getElementById('project-status-filter')?.value || '';
+        let url = '/api/campaign/projects';
+        const params = [];
+        if (workerName) params.push('workerName=' + encodeURIComponent(workerName));
+        if (statusFilter) params.push('status=' + encodeURIComponent(statusFilter));
+        if (params.length > 0) url += '?' + params.join('&');
+        
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        projectsData = data.projects || [];
+        renderProjects();
+      } catch (e) {
+        console.error('Error loading projects:', e);
+      }
+    }
+
+    function renderProjects() {
+      const tbody = document.getElementById('projects-table');
+      const emptyDiv = document.getElementById('projects-empty');
+      const tableContainer = document.getElementById('projects-table-container');
+      
+      if (projectsData.length === 0) {
+        emptyDiv.style.display = 'block';
+        tableContainer.style.display = 'none';
+        return;
+      }
+      
+      emptyDiv.style.display = 'none';
+      tableContainer.style.display = 'table';
+      
+      tbody.innerHTML = projectsData.map(p => {
+        const status = p.status || 'active';
+        const color = projectStatusColors[status] || projectStatusColors.active;
+        const statusBadge = '<span style="background:' + color.bg + ';color:' + color.text + ';border:1px solid ' + color.border + ';padding:2px 8px;border-radius:4px;font-size:11px;">' + projectStatusLabels[status] + '</span>';
+        const createdAt = new Date(p.createdAt).toLocaleDateString('zh-CN');
+        
+        return '<tr>' +
+          '<td><strong style="cursor:pointer;color:#1565c0;" onclick="openProject(\\'' + p.id + '\\')">' + escapeHtml(p.name) + '</strong></td>' +
+          '<td>' + escapeHtml(p.merchantDomain || '-') + '</td>' +
+          '<td><span class="tag">' + escapeHtml(p.workerName) + '</span></td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + (p.totalCampaigns || 0) + '</td>' +
+          '<td>' + (p.totalEmails || 0) + '</td>' +
+          '<td>' + createdAt + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="openProject(\\'' + p.id + '\\')">打开</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="editProject(\\'' + p.id + '\\')">编辑</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteProject(\\'' + p.id + '\\')">删除</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    async function loadWorkerMerchants() {
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      const section = document.getElementById('worker-merchants-section');
+      
+      if (!workerName) {
+        section.style.display = 'none';
+        return;
+      }
+      
+      if (!apiToken) return;
+      try {
+        const res = await fetch('/api/campaign/workers/' + encodeURIComponent(workerName) + '/merchants', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        workerMerchantsData = data.merchants || [];
+        renderWorkerMerchants(workerName);
+        section.style.display = 'block';
+      } catch (e) {
+        console.error('Error loading worker merchants:', e);
+      }
+    }
+
+    function renderWorkerMerchants(workerName) {
+      document.getElementById('worker-merchants-title').textContent = '商户列表 - ' + workerName;
+      const tbody = document.getElementById('worker-merchants-table');
+      
+      if (workerMerchantsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">该实例暂无商户数据</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = workerMerchantsData.map(m => {
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
+          '<td>' + m.totalCampaigns + '</td>' +
+          '<td>' + m.totalEmails + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-success" onclick="createProject(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    async function createProject(merchantId, merchantDomain) {
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      if (!workerName) {
+        showAlert('请先选择实例', 'error');
+        return;
+      }
+      
+      const name = prompt('请输入项目名称:', merchantDomain);
+      if (!name) return;
+      
+      try {
+        const res = await fetch('/api/campaign/projects', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ name, merchantId, workerName })
+        });
+        if (res.ok) {
+          showAlert('项目创建成功');
+          await loadProjects();
+        } else {
+          const err = await res.json();
+          showAlert('创建失败: ' + (err.message || '未知错误'), 'error');
+        }
+      } catch (e) {
+        showAlert('创建失败', 'error');
+      }
+    }
+
+    async function editProject(projectId) {
+      const project = projectsData.find(p => p.id === projectId);
+      if (!project) return;
+      
+      const newName = prompt('请输入新的项目名称:', project.name);
+      if (newName === null) return;
+      
+      try {
+        const res = await fetch('/api/campaign/projects/' + projectId, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify({ name: newName })
+        });
+        if (res.ok) {
+          showAlert('项目已更新');
+          await loadProjects();
+        } else {
+          showAlert('更新失败', 'error');
+        }
+      } catch (e) {
+        showAlert('更新失败', 'error');
+      }
+    }
+
+    async function deleteProject(projectId) {
+      if (!confirm('确定要删除此项目吗？此操作不可恢复！')) return;
+      
+      try {
+        const res = await fetch('/api/campaign/projects/' + projectId, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        if (res.ok) {
+          showAlert('项目已删除');
+          await loadProjects();
+        } else {
+          showAlert('删除失败', 'error');
+        }
+      } catch (e) {
+        showAlert('删除失败', 'error');
+      }
+    }
+
+    async function openProject(projectId) {
+      const project = projectsData.find(p => p.id === projectId);
+      if (!project) return;
+      
+      currentProjectId = projectId;
+      currentMerchantId = project.merchantId;
+      
+      // Show legacy sections for analysis
+      document.getElementById('legacy-campaign-sections').style.display = 'block';
+      
+      // Load campaigns for this merchant/worker
+      await loadCampaigns(project.merchantId);
+      
+      showAlert('已打开项目: ' + project.name);
     }
 
     async function loadDataStats() {

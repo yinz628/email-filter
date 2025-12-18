@@ -884,7 +884,8 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Merchant not found' });
       }
 
-      const rootCampaigns = service.getRootCampaigns(request.params.id, workerName);
+      const workerNames = workerName ? [workerName] : undefined;
+      const rootCampaigns = service.getRootCampaigns(request.params.id, workerNames);
 
       return reply.send({
         merchantId: request.params.id,

@@ -404,7 +404,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
           <div style="display:flex;gap:10px;align-items:center;">
-            <select id="campaign-worker-filter" onchange="loadMerchants(); loadDataStats();" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <select id="campaign-worker-filter" onchange="loadMerchants(); loadDataStats(); if(currentMerchantId) loadCampaigns(currentMerchantId);" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="">全部实例</option>
             </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">

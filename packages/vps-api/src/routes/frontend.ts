@@ -3061,8 +3061,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       try {
         const valueFilter = document.getElementById('campaign-valuable-filter')?.value || '';
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
         let url = '/api/campaign/campaigns?merchantId=' + currentMerchantId;
         if (valueFilter) url += '&tag=' + valueFilter;
+        if (workerName) url += '&workerName=' + encodeURIComponent(workerName);
         
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
@@ -3089,9 +3091,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       const sortedCampaigns = [...campaignsData].sort((a, b) => {
         if (sortField === 'emails') {
-          return (b.emailCount || 0) - (a.emailCount || 0);
+          return (b.totalEmails || b.emailCount || 0) - (a.totalEmails || a.emailCount || 0);
         } else {
-          return new Date(b.firstSeen || 0) - new Date(a.firstSeen || 0);
+          return new Date(b.firstSeenAt || b.firstSeen || 0) - new Date(a.firstSeenAt || a.firstSeen || 0);
         }
       });
       
@@ -3100,12 +3102,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值' };
         const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2' };
         const tagBadge = '<span class="' + tagClasses[tag] + '" style="padding:2px 8px;border-radius:4px;font-size:11px;">' + tagLabels[tag] + '</span>';
-        const firstSeen = c.firstSeen ? new Date(c.firstSeen).toLocaleDateString('zh-CN') : '-';
+        const firstSeen = (c.firstSeenAt || c.firstSeen) ? new Date(c.firstSeenAt || c.firstSeen).toLocaleDateString('zh-CN') : '-';
         
         return '<tr style="cursor:pointer;" onclick="showCampaignDetail(\\'' + c.id + '\\')">' +
           '<td>' + escapeHtml(c.subject || '未知主题') + '</td>' +
-          '<td>' + (c.emailCount || 0) + '</td>' +
-          '<td>' + (c.recipientCount || 0) + '</td>' +
+          '<td>' + (c.totalEmails || c.emailCount || 0) + '</td>' +
+          '<td>' + (c.uniqueRecipients || c.recipientCount || 0) + '</td>' +
           '<td>' + tagBadge + '</td>' +
           '<td>' + firstSeen + '</td>' +
           '<td class="actions" onclick="event.stopPropagation()">' +

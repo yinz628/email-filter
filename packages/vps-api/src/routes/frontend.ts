@@ -521,8 +521,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
         <!-- Root确认标签页内容 -->
         <div id="tab-content-root" class="tab-panel">
-          <div style="margin-bottom:15px;">
-            <p style="color:#666;">选择一个营销活动作为分析起点（Root）。Root 将作为路径分析的基准。</p>
+          <div style="margin-bottom:15px;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#666;margin:0;">选择一个营销活动作为分析起点（Root）。Root 将作为路径分析的基准。</p>
+            <button class="btn btn-primary btn-sm" onclick="detectRootCandidatesForProject()">🔍 自动检测候选</button>
           </div>
           <div id="root-current" style="margin-bottom:15px;padding:12px;background:#e8f5e9;border-radius:6px;display:none;">
             <strong>当前 Root:</strong> <span id="root-current-name">-</span>
@@ -3017,6 +3018,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } catch (e) {
         console.error('Error loading root campaigns:', e);
         emptyDiv.textContent = '加载失败，请重试。';
+      }
+    }
+
+    async function detectRootCandidatesForProject() {
+      if (!currentMerchantId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/detect-root-candidates', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('检测到 ' + data.candidatesDetected + ' 个候选活动');
+          loadRootCampaigns();
+        } else {
+          showAlert('检测失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error detecting root candidates:', e);
+        showAlert('检测失败', 'error');
       }
     }
 

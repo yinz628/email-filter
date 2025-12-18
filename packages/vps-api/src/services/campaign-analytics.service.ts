@@ -202,8 +202,8 @@ export class CampaignAnalyticsService {
     // Map sortBy to database column names
     const columnMap: Record<string, string> = {
       domain: 'm.domain',
-      totalCampaigns: 'm.total_campaigns',
-      totalEmails: 'm.total_emails',
+      totalCampaigns: 'total_campaigns',
+      totalEmails: 'total_emails',
       createdAt: 'm.created_at',
     };
 
@@ -213,13 +213,13 @@ export class CampaignAnalyticsService {
     // Build WHERE clause conditions
     const conditions: string[] = [];
     const params: (string | number)[] = [];
-    
+
     if (filter?.analysisStatus) {
       conditions.push('m.analysis_status = ?');
       params.push(filter.analysisStatus);
     }
 
-    // Filter by workerName - only show merchants that have emails from this worker
+    // When workerName is specified, calculate counts dynamically for that worker
     if (filter?.workerName) {
       conditions.push(`m.id IN (
         SELECT DISTINCT c.merchant_id 
@@ -228,11 +228,44 @@ export class CampaignAnalyticsService {
         WHERE ce.worker_name = ?
       )`);
       params.push(filter.workerName);
+
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // Query with worker-specific counts
+      const stmt = this.db.prepare(`
+        SELECT 
+          m.*,
+          COALESCE(wc.campaign_count, 0) as total_campaigns,
+          COALESCE(wc.email_count, 0) as total_emails,
+          COALESCE(wc.valuable_count, 0) as valuable_campaigns
+        FROM merchants m
+        LEFT JOIN (
+          SELECT 
+            c.merchant_id,
+            COUNT(DISTINCT c.id) as campaign_count,
+            COUNT(ce.id) as email_count,
+            COUNT(DISTINCT CASE WHEN c.is_valuable = 1 THEN c.id END) as valuable_count
+          FROM campaigns c
+          JOIN campaign_emails ce ON c.id = ce.campaign_id
+          WHERE ce.worker_name = ?
+          GROUP BY c.merchant_id
+        ) wc ON m.id = wc.merchant_id
+        ${whereClause}
+        ORDER BY ${column} ${order}
+        LIMIT ? OFFSET ?
+      `);
+
+      // Add workerName param for the subquery, then limit/offset
+      const queryParams = [filter.workerName, ...params, limit, offset];
+      const rows = stmt.all(...queryParams) as MerchantRow[];
+      return rows.map(toMerchant);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    // No workerName filter - use global counts from merchants table
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Query merchants with valuable campaigns count calculated from campaigns table
     const stmt = this.db.prepare(`
       SELECT 
         m.*,

@@ -113,3 +113,15 @@
 2. WHEN VPS API 接收到数据 THEN 系统 SHALL 验证数据完整性并返回处理结果
 3. WHEN 数据上报失败 THEN Worker SHALL 记录错误日志但不影响邮件转发流程
 4. WHEN 批量上报数据 THEN 系统 SHALL 支持批量处理以提高效率
+
+### Requirement 9: 营销活动预览
+
+**User Story:** As a 系统管理员, I want to 在分析开始前预览商户的营销活动列表, so that 可以快速了解商户的营销活动概况而无需等待完整分析。
+
+#### Acceptance Criteria
+
+1. WHEN 管理员选择某商户 THEN 系统 SHALL 显示该商户下所有营销活动的预览列表
+2. WHEN 显示营销活动预览 THEN 系统 SHALL 展示活动主题、邮件数量、收件人数量和首次/最后出现时间
+3. WHEN 预览列表加载 THEN 系统 SHALL 在 2 秒内返回结果以保证响应速度
+4. WHEN 预览列表展示 THEN 系统 SHALL 支持按邮件数量、时间等字段排序
+5. WHEN 预览列表展示 THEN 系统 SHALL 显示有价值活动的标记状态

@@ -2183,10 +2183,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             '<button class="btn btn-sm btn-success" onclick="showPathAnalysis(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">分析</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
         } else if (status === 'pending') {
-          actions = '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">开始分析</button>' +
+          actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">预览</button>' +
+            '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">开始分析</button>' +
             '<button class="btn btn-sm btn-secondary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'ignored\\')">忽略</button>';
         } else {
-          actions = '<button class="btn btn-sm btn-primary" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">恢复分析</button>';
+          actions = '<button class="btn btn-sm btn-primary" onclick="showCampaigns(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">预览</button>' +
+            '<button class="btn btn-sm btn-success" onclick="setMerchantStatus(\\'' + m.id + '\\', \\'active\\')">恢复分析</button>';
         }
         
         return '<tr>' +

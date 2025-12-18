@@ -227,7 +227,12 @@ try {
 }
 
 // Migration: Create merchant_worker_status table for per-instance merchant status
-if (!existingTables.has('merchant_worker_status')) {
+// Re-check if table exists (in case it was created in a previous partial run)
+const workerStatusTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+`).get();
+
+if (!workerStatusTableExists) {
   console.log('Creating merchant_worker_status table...');
   db.exec(`
     CREATE TABLE merchant_worker_status (

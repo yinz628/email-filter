@@ -352,7 +352,16 @@ export class CampaignAnalyticsService {
       return null;
     }
 
-    // Check if merchant_worker_status table exists
+    // If workerName is 'global', update the merchants table directly
+    // This ensures the global view shows the correct status
+    if (workerName === 'global') {
+      this.db.prepare(`
+        UPDATE merchants SET analysis_status = ?, updated_at = ? WHERE id = ?
+      `).run(data.status, now, id);
+      return this.getMerchantById(id);
+    }
+
+    // For specific worker instances, use merchant_worker_status table
     const tableExists = this.db.prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
     `).get();

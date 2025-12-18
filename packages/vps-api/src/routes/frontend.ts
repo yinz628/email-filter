@@ -2423,7 +2423,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Get valuable count from campaigns API (which supports worker filtering)
       let valuableCount = 0;
       try {
-        let valuableUrl = '/api/campaign/campaigns?valuable=true';
+        let valuableUrl = '/api/campaign/campaigns?isValuable=true&limit=10000';
         if (workerName) valuableUrl += '&workerName=' + encodeURIComponent(workerName);
         const res = await fetch(valuableUrl, { headers: getHeaders() });
         if (res.ok) {

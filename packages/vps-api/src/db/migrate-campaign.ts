@@ -226,5 +226,27 @@ try {
   console.log('analysis_status column migration skipped (may already exist).');
 }
 
+// Migration: Create merchant_worker_status table for per-instance merchant status
+if (!existingTables.has('merchant_worker_status')) {
+  console.log('Creating merchant_worker_status table...');
+  db.exec(`
+    CREATE TABLE merchant_worker_status (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      merchant_id TEXT NOT NULL,
+      worker_name TEXT NOT NULL,
+      analysis_status TEXT DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (merchant_id) REFERENCES merchants(id),
+      UNIQUE(merchant_id, worker_name)
+    );
+    CREATE INDEX idx_merchant_worker_status_merchant ON merchant_worker_status(merchant_id);
+    CREATE INDEX idx_merchant_worker_status_worker ON merchant_worker_status(worker_name);
+  `);
+  console.log('merchant_worker_status table created.');
+} else {
+  console.log('merchant_worker_status table already exists.');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

@@ -2376,10 +2376,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function setMerchantStatus(merchantId, status) {
       try {
+        // Get current worker filter to set status per-instance
+        const workerName = document.getElementById('campaign-worker-filter')?.value || 'global';
         const res = await fetch('/api/campaign/merchants/' + merchantId + '/status', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({ status })
+          body: JSON.stringify({ status, workerName })
         });
         if (res.ok) {
           showAlert('状态已更新');

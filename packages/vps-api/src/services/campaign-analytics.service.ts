@@ -214,13 +214,15 @@ export class CampaignAnalyticsService {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
 
-    if (filter?.analysisStatus) {
-      conditions.push('m.analysis_status = ?');
-      params.push(filter.analysisStatus);
-    }
-
     // When workerName is specified, calculate counts dynamically for that worker
+    // and use worker-specific analysis status
     if (filter?.workerName) {
+      // Filter by worker-specific analysis status if provided
+      if (filter?.analysisStatus) {
+        conditions.push(`COALESCE(mws.analysis_status, 'pending') = ?`);
+        params.push(filter.analysisStatus);
+      }
+
       conditions.push(`m.id IN (
         SELECT DISTINCT c.merchant_id 
         FROM campaigns c 
@@ -232,13 +234,14 @@ export class CampaignAnalyticsService {
       const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-      // Query with worker-specific counts
+      // Query with worker-specific counts and status
       const stmt = this.db.prepare(`
         SELECT 
           m.*,
           COALESCE(wc.campaign_count, 0) as total_campaigns,
           COALESCE(wc.email_count, 0) as total_emails,
-          COALESCE(wc.valuable_count, 0) as valuable_campaigns
+          COALESCE(wc.valuable_count, 0) as valuable_campaigns,
+          COALESCE(mws.analysis_status, 'pending') as analysis_status
         FROM merchants m
         LEFT JOIN (
           SELECT 
@@ -251,18 +254,24 @@ export class CampaignAnalyticsService {
           WHERE ce.worker_name = ?
           GROUP BY c.merchant_id
         ) wc ON m.id = wc.merchant_id
+        LEFT JOIN merchant_worker_status mws ON m.id = mws.merchant_id AND mws.worker_name = ?
         ${whereClause}
         ORDER BY ${column} ${order}
         LIMIT ? OFFSET ?
       `);
 
-      // Add workerName param for the subquery, then limit/offset
-      const queryParams = [filter.workerName, ...params, limit, offset];
+      // Add workerName params for subqueries, then limit/offset
+      const queryParams = [filter.workerName, filter.workerName, ...params, limit, offset];
       const rows = stmt.all(...queryParams) as MerchantRow[];
       return rows.map(toMerchant);
     }
 
-    // No workerName filter - use global counts from merchants table
+    // No workerName filter - use global counts and status from merchants table
+    if (filter?.analysisStatus) {
+      conditions.push('m.analysis_status = ?');
+      params.push(filter.analysisStatus);
+    }
+
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -288,28 +297,50 @@ export class CampaignAnalyticsService {
   }
 
   /**
-   * Set merchant analysis status
+   * Set merchant analysis status (per worker instance)
    * 
    * @param id - Merchant ID
-   * @param data - Status data
+   * @param data - Status data including optional workerName
    * @returns Updated Merchant or null
    */
   setMerchantAnalysisStatus(id: string, data: SetMerchantAnalysisStatusDTO): Merchant | null {
     const now = new Date().toISOString();
-    
-    const stmt = this.db.prepare(`
-      UPDATE merchants
-      SET analysis_status = ?, updated_at = ?
-      WHERE id = ?
-    `);
+    const workerName = data.workerName || 'global';
 
-    const result = stmt.run(data.status, now, id);
-    
-    if (result.changes === 0) {
+    // Check if merchant exists
+    const merchantExists = this.db.prepare('SELECT id FROM merchants WHERE id = ?').get(id);
+    if (!merchantExists) {
       return null;
     }
 
-    return this.getMerchantById(id);
+    // Use UPSERT to insert or update the worker-specific status
+    const stmt = this.db.prepare(`
+      INSERT INTO merchant_worker_status (merchant_id, worker_name, analysis_status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(merchant_id, worker_name) DO UPDATE SET
+        analysis_status = excluded.analysis_status,
+        updated_at = excluded.updated_at
+    `);
+
+    stmt.run(id, workerName, data.status, now, now);
+
+    return this.getMerchantById(id, workerName);
+  }
+
+  /**
+   * Get merchant analysis status for a specific worker
+   * 
+   * @param merchantId - Merchant ID
+   * @param workerName - Worker name (defaults to 'global')
+   * @returns Analysis status or 'pending' if not set
+   */
+  getMerchantWorkerStatus(merchantId: string, workerName: string = 'global'): string {
+    const stmt = this.db.prepare(`
+      SELECT analysis_status FROM merchant_worker_status
+      WHERE merchant_id = ? AND worker_name = ?
+    `);
+    const row = stmt.get(merchantId, workerName) as { analysis_status: string } | undefined;
+    return row?.analysis_status || 'pending';
   }
 
   /**
@@ -340,9 +371,10 @@ export class CampaignAnalyticsService {
    * Get merchant by ID
    * 
    * @param id - Merchant ID
+   * @param workerName - Optional worker name for per-instance status
    * @returns Merchant or null if not found
    */
-  getMerchantById(id: string): Merchant | null {
+  getMerchantById(id: string, workerName?: string): Merchant | null {
     const stmt = this.db.prepare(`
       SELECT 
         m.*,
@@ -357,7 +389,16 @@ export class CampaignAnalyticsService {
       WHERE m.id = ?
     `);
     const row = stmt.get(id) as MerchantRow | undefined;
-    return row ? toMerchant(row) : null;
+    if (!row) return null;
+
+    const merchant = toMerchant(row);
+    
+    // If workerName is provided, get the worker-specific status
+    if (workerName) {
+      merchant.analysisStatus = this.getMerchantWorkerStatus(id, workerName) as any;
+    }
+    
+    return merchant;
   }
 
   /**

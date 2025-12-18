@@ -370,17 +370,18 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * POST /api/campaign/merchants/:id/status
    * Set merchant analysis status (pending, active, ignored)
+   * Supports per-worker-instance status via workerName parameter
    */
   fastify.post('/merchants/:id/status', async (
     request: FastifyRequest<{ Params: MerchantParams }>,
     reply: FastifyReply
   ) => {
     const body = request.body as Record<string, unknown>;
-    
+
     if (!body?.status || !['pending', 'active', 'ignored'].includes(body.status as string)) {
-      return reply.status(400).send({ 
-        error: 'Invalid request', 
-        message: 'status must be one of: pending, active, ignored' 
+      return reply.status(400).send({
+        error: 'Invalid request',
+        message: 'status must be one of: pending, active, ignored',
       });
     }
 
@@ -388,8 +389,12 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
+      // Get workerName from body (optional, defaults to 'global')
+      const workerName = typeof body.workerName === 'string' ? body.workerName : 'global';
+
       const merchant = service.setMerchantAnalysisStatus(request.params.id, {
         status: body.status as MerchantAnalysisStatus,
+        workerName,
       });
 
       if (!merchant) {

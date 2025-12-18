@@ -467,6 +467,7 @@ export interface MerchantFilter {
  */
 export interface SetMerchantAnalysisStatusDTO {
   status: MerchantAnalysisStatus;
+  workerName?: string; // Optional worker name for per-instance status
 }
 
 // ============================================

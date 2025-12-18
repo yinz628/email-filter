@@ -630,44 +630,30 @@ export class CampaignAnalyticsService {
     const params: (string | number)[] = [];
 
     if (filter?.merchantId) {
-      conditions.push('merchant_id = ?');
+      conditions.push('c.merchant_id = ?');
       params.push(filter.merchantId);
     }
 
     // Filter by specific tag
     if (filter?.tag !== undefined) {
-      conditions.push('tag = ?');
+      conditions.push('c.tag = ?');
       params.push(filter.tag);
     }
 
     // Exclude campaigns with specific tag (e.g., 4 for ignorable)
     if (filter?.excludeTag !== undefined) {
-      conditions.push('(tag IS NULL OR tag != ?)');
+      conditions.push('(c.tag IS NULL OR c.tag != ?)');
       params.push(filter.excludeTag);
     }
 
     // Legacy isValuable filter (tag 1 or 2)
     if (filter?.isValuable !== undefined) {
       if (filter.isValuable) {
-        conditions.push('(tag = 1 OR tag = 2)');
+        conditions.push('(c.tag = 1 OR c.tag = 2)');
       } else {
-        conditions.push('(tag IS NULL OR tag = 0 OR tag = 3 OR tag = 4)');
+        conditions.push('(c.tag IS NULL OR c.tag = 0 OR c.tag = 3 OR c.tag = 4)');
       }
     }
-
-    // Filter by workerName - only show campaigns that have emails from this worker
-    if (filter?.workerName) {
-      conditions.push(`id IN (
-        SELECT DISTINCT campaign_id 
-        FROM campaign_emails 
-        WHERE worker_name = ?
-      )`);
-      params.push(filter.workerName);
-    }
-
-    const whereClause = conditions.length > 0 
-      ? `WHERE ${conditions.join(' AND ')}` 
-      : '';
 
     // Map sortBy to database column names
     const columnMap: Record<string, string> = {
@@ -682,6 +668,44 @@ export class CampaignAnalyticsService {
     const order = (filter?.sortOrder || 'desc') === 'asc' ? 'ASC' : 'DESC';
     const limit = filter?.limit || 100;
     const offset = filter?.offset || 0;
+
+    // When workerName is specified, calculate worker-specific email counts
+    if (filter?.workerName) {
+      const workerConditions = [...conditions];
+      const workerParams = [...params];
+      
+      // Add worker filter for the join
+      workerConditions.push('ce.worker_name = ?');
+      workerParams.push(filter.workerName);
+
+      const whereClause = workerConditions.length > 0 
+        ? `WHERE ${workerConditions.join(' AND ')}` 
+        : '';
+
+      // Use subquery to calculate worker-specific counts
+      const stmt = this.db.prepare(`
+        SELECT 
+          c.id, c.merchant_id, c.subject, c.tag, c.is_valuable,
+          c.first_seen_at, c.last_seen_at, c.created_at, c.updated_at,
+          COUNT(ce.id) as total_emails,
+          COUNT(DISTINCT ce.recipient) as unique_recipients
+        FROM campaigns c
+        INNER JOIN campaign_emails ce ON c.id = ce.campaign_id
+        ${whereClause}
+        GROUP BY c.id
+        ORDER BY ${column === 'total_emails' || column === 'unique_recipients' ? column : 'c.' + column} ${order}
+        LIMIT ? OFFSET ?
+      `);
+
+      workerParams.push(limit, offset);
+      const rows = stmt.all(...workerParams) as CampaignRow[];
+      return rows.map(toCampaign);
+    }
+
+    // No workerName filter - use global counts from campaigns table
+    const whereClause = conditions.length > 0 
+      ? `WHERE ${conditions.join(' AND ').replace(/c\./g, '')}` 
+      : '';
 
     const stmt = this.db.prepare(`
       SELECT * FROM campaigns

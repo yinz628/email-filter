@@ -592,6 +592,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <h2 style="margin:0;border:none;padding:0;">📡 信号监控规则</h2>
           </div>
           <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="monitoring-scope-filter" onchange="loadMonitoringRules()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="">全部范围</option>
+              <option value="global">全局</option>
+            </select>
             <select id="monitoring-tag-filter" onchange="loadMonitoringRules()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="">全部标签</option>
             </select>
@@ -692,6 +696,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <h2 style="margin:0;border:none;padding:0;">📈 漏斗监控</h2>
           </div>
           <div style="display:flex;gap:10px;align-items:center;" onclick="event.stopPropagation()">
+            <select id="ratio-scope-filter" onchange="loadRatioMonitors()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
+              <option value="">全部范围</option>
+              <option value="global">全局</option>
+            </select>
             <select id="ratio-tag-filter" onchange="loadRatioMonitors()" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="">全部标签</option>
             </select>
@@ -1415,6 +1423,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (ratioWorkerScope) ratioWorkerScope.innerHTML = monitoringWorkerScopeOptions;
       const editRatioWorkerScope = document.getElementById('edit-ratio-worker-scope');
       if (editRatioWorkerScope) editRatioWorkerScope.innerHTML = monitoringWorkerScopeOptions;
+      
+      // Update monitoring scope filter
+      const monitoringScopeFilterOptions = '<option value="">全部范围</option><option value="global">全局</option>' +
+        workers.map(w => '<option value="' + escapeHtml(w.name) + '">' + escapeHtml(w.name) + '</option>').join('');
+      const monitoringScopeFilter = document.getElementById('monitoring-scope-filter');
+      if (monitoringScopeFilter) monitoringScopeFilter.innerHTML = monitoringScopeFilterOptions;
+      
+      // Update ratio scope filter
+      const ratioScopeFilter = document.getElementById('ratio-scope-filter');
+      if (ratioScopeFilter) ratioScopeFilter.innerHTML = monitoringScopeFilterOptions;
     }
 
     document.getElementById('add-worker-form').addEventListener('submit', async (e) => {
@@ -3153,10 +3171,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!apiToken) return;
       try {
         const tagFilter = document.getElementById('monitoring-tag-filter')?.value || '';
+        const scopeFilter = document.getElementById('monitoring-scope-filter')?.value || '';
         let url = '/api/monitoring/rules';
-        if (tagFilter) {
-          url += '?tag=' + encodeURIComponent(tagFilter);
-        }
+        const params = [];
+        if (tagFilter) params.push('tag=' + encodeURIComponent(tagFilter));
+        if (scopeFilter) params.push('workerScope=' + encodeURIComponent(scopeFilter));
+        if (params.length > 0) url += '?' + params.join('&');
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
@@ -3698,10 +3718,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!apiToken) return;
       try {
         const tagFilter = document.getElementById('ratio-tag-filter')?.value || '';
+        const scopeFilter = document.getElementById('ratio-scope-filter')?.value || '';
         let url = '/api/monitoring/ratio';
-        if (tagFilter) {
-          url += '?tag=' + encodeURIComponent(tagFilter);
-        }
+        const params = [];
+        if (tagFilter) params.push('tag=' + encodeURIComponent(tagFilter));
+        if (scopeFilter) params.push('workerScope=' + encodeURIComponent(scopeFilter));
+        if (params.length > 0) url += '?' + params.join('&');
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();

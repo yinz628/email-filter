@@ -2600,6 +2600,16 @@ export class CampaignAnalyticsService {
         emailsDeleted = emailsResult.changes;
       }
 
+      // Delete the worker-specific status records for these merchants
+      if (workerStatusTableExists) {
+        for (const merchantId of merchantIds) {
+          this.db.prepare(`
+            DELETE FROM merchant_worker_status 
+            WHERE merchant_id = ? AND worker_name = ?
+          `).run(merchantId, workerName);
+        }
+      }
+
       // Don't delete merchants, campaigns, or paths when filtering by worker
       // Only delete the emails from that specific worker
       return {

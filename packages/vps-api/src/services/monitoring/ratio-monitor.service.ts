@@ -267,10 +267,22 @@ export class RatioMonitorService {
     const previousStateRecord = this.ratioRepo.getState(monitor.id);
     let previousStepsStates: Record<string, RatioState> = {};
     try {
-      previousStepsStates = JSON.parse(previousStateRecord?.stepsData || '{}');
+      const parsedData = JSON.parse(previousStateRecord?.stepsData || '{}');
       // Handle old format (array)
-      if (Array.isArray(previousStepsStates)) {
+      if (Array.isArray(parsedData)) {
         previousStepsStates = {};
+      } else {
+        // Handle new format: { step_1_2: { count: number, state: RatioState } }
+        // Convert to simple state map: { step_1_2: RatioState }
+        for (const [key, value] of Object.entries(parsedData)) {
+          if (typeof value === 'string') {
+            // Old simple format
+            previousStepsStates[key] = value as RatioState;
+          } else if (value && typeof value === 'object' && 'state' in value) {
+            // New format with count and state
+            previousStepsStates[key] = (value as { state: RatioState }).state;
+          }
+        }
       }
     } catch {
       previousStepsStates = {};

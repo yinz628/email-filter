@@ -2551,10 +2551,26 @@ export class CampaignAnalyticsService {
     emailsDeleted: number;
     pathsDeleted: number;
   } {
-    // Get ignored merchant IDs
-    const ignoredMerchants = this.db.prepare(`
-      SELECT id FROM merchants WHERE analysis_status = 'ignored'
-    `).all() as Array<{ id: string }>;
+    // Check if merchant_worker_status table exists
+    const workerStatusTableExists = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+    `).get();
+
+    // Get ignored merchant IDs based on workerName
+    let ignoredMerchants: Array<{ id: string }>;
+
+    if (workerName && workerName !== 'global' && workerStatusTableExists) {
+      // Get merchants ignored for this specific worker instance
+      ignoredMerchants = this.db.prepare(`
+        SELECT merchant_id as id FROM merchant_worker_status 
+        WHERE worker_name = ? AND analysis_status = 'ignored'
+      `).all(workerName) as Array<{ id: string }>;
+    } else {
+      // Get globally ignored merchants
+      ignoredMerchants = this.db.prepare(`
+        SELECT id FROM merchants WHERE analysis_status = 'ignored'
+      `).all() as Array<{ id: string }>;
+    }
 
     if (ignoredMerchants.length === 0) {
       return { merchantsDeleted: 0, campaignsDeleted: 0, emailsDeleted: 0, pathsDeleted: 0 };
@@ -2563,9 +2579,9 @@ export class CampaignAnalyticsService {
     const merchantIds = ignoredMerchants.map(m => m.id);
     const placeholders = merchantIds.map(() => '?').join(',');
 
-    // If workerName is specified, only delete emails from that worker
+    // If workerName is specified (not global), only delete emails from that worker
     // Otherwise delete all data for ignored merchants
-    if (workerName) {
+    if (workerName && workerName !== 'global') {
       // Get campaign IDs for these merchants
       const campaigns = this.db.prepare(`
         SELECT id FROM campaigns WHERE merchant_id IN (${placeholders})
@@ -2575,7 +2591,7 @@ export class CampaignAnalyticsService {
       if (campaigns.length > 0) {
         const campaignIds = campaigns.map(c => c.id);
         const campaignPlaceholders = campaignIds.map(() => '?').join(',');
-        
+
         // Delete campaign emails only for the specified worker
         const emailsResult = this.db.prepare(`
           DELETE FROM campaign_emails 

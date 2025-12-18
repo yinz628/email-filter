@@ -489,6 +489,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <tr>
               <th>商户域名</th>
               <th>显示名称</th>
+              <th>数据范围</th>
               <th>状态</th>
               <th>营销活动数</th>
               <th>邮件总数</th>
@@ -2342,6 +2343,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       emptyDiv.style.display = 'none';
       tableContainer.style.display = 'table';
+
+      // Get current worker filter for display
+      const currentWorkerFilter = document.getElementById('campaign-worker-filter')?.value || '';
+      const scopeLabel = currentWorkerFilter ? currentWorkerFilter : '全局';
+      const scopeBadge = '<span style="background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;padding:2px 6px;border-radius:4px;font-size:10px;">' + escapeHtml(scopeLabel) + '</span>';
       
       tbody.innerHTML = merchantsData.map(m => {
         const status = m.analysisStatus || 'pending';
@@ -2367,6 +2373,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return '<tr>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
           '<td>' + escapeHtml(m.displayName || '-') + '</td>' +
+          '<td>' + scopeBadge + '</td>' +
           '<td>' + statusBadge + '</td>' +
           '<td>' + m.totalCampaigns + '</td>' +
           '<td>' + m.totalEmails + '</td>' +

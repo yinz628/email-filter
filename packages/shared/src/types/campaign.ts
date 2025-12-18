@@ -470,6 +470,26 @@ export interface SetMerchantAnalysisStatusDTO {
   workerName?: string; // Optional worker name for per-instance status
 }
 
+/**
+ * DTO for deleting merchant data
+ */
+export interface DeleteMerchantDataDTO {
+  merchantId: string;
+  workerName: string;
+}
+
+/**
+ * Result of deleting merchant data
+ */
+export interface DeleteMerchantDataResult {
+  merchantId: string;
+  workerName: string;
+  emailsDeleted: number;
+  pathsDeleted: number;
+  campaignsAffected: number;
+  merchantDeleted: boolean; // true if merchant record was also deleted
+}
+
 // ============================================
 // Analysis Project Types
 // ============================================

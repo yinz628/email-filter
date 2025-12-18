@@ -444,8 +444,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <p style="color:#666;margin-bottom:15px">选择实例后显示该实例的商户列表。点击"创建项目"开始分析。</p>
-        <div id="merchants-empty" style="text-align:center;color:#999;padding:40px;">
-          请先选择实例以加载商户列表。
+        <div id="merchants-empty" style="text-align:center;padding:40px;">
+          <div id="merchants-no-worker-prompt" style="display:block;">
+            <div style="font-size:48px;margin-bottom:16px;">📋</div>
+            <div style="color:#666;font-size:16px;font-weight:500;margin-bottom:8px;">请先选择 Worker 实例</div>
+            <div style="color:#999;font-size:14px;margin-bottom:16px;">商户数据按 Worker 实例隔离显示，请在上方选择一个 Worker 实例以查看对应的商户列表。</div>
+            <button class="btn btn-primary" onclick="document.getElementById('campaign-worker-filter').focus(); document.getElementById('campaign-worker-filter').click();">选择 Worker 实例</button>
+          </div>
+          <div id="merchants-loading" style="display:none;color:#999;">加载中...</div>
+          <div id="merchants-empty-data" style="display:none;color:#999;">该实例暂无商户数据。</div>
+          <div id="merchants-load-error" style="display:none;color:#e74c3c;">加载商户列表失败。</div>
         </div>
         <table id="merchants-table-container" style="display:none;">
           <thead>
@@ -1359,6 +1367,34 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <button type="submit" class="btn btn-success">创建项目</button>
       </form>
+    </div>
+  </div>
+
+  <!-- Delete Merchant Data Modal -->
+  <div id="delete-merchant-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>⚠️ 删除商户数据</h3>
+        <button class="modal-close" onclick="hideModal('delete-merchant-modal')">&times;</button>
+      </div>
+      <div style="padding:15px 0;">
+        <input type="hidden" id="delete-merchant-id">
+        <p style="color:#e74c3c;font-weight:bold;margin-bottom:15px;">此操作不可恢复！</p>
+        <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:15px;margin-bottom:15px;">
+          <p style="margin:0 0 10px 0;"><strong>将要删除的数据：</strong></p>
+          <ul style="margin:0;padding-left:20px;">
+            <li>商户域名: <strong id="delete-merchant-domain">-</strong></li>
+            <li>Worker 实例: <strong id="delete-merchant-worker">-</strong></li>
+            <li>邮件记录数: <strong id="delete-merchant-emails">-</strong></li>
+            <li>营销活动数: <strong id="delete-merchant-campaigns">-</strong></li>
+          </ul>
+        </div>
+        <p style="color:#666;font-size:13px;margin-bottom:15px;">删除后，该商户在此 Worker 下的所有邮件和路径记录将被永久删除。如果该商户在其他 Worker 中仍有数据，商户记录将被保留。</p>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button class="btn btn-secondary" onclick="hideModal('delete-merchant-modal')">取消</button>
+          <button class="btn btn-danger" onclick="confirmDeleteMerchantData()">确认删除</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2445,19 +2481,58 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     // 区域2: 商户列表功能
+    function showMerchantEmptyState(state) {
+      // state: 'no-worker' | 'loading' | 'empty-data' | 'error' | 'hidden'
+      const emptyDiv = document.getElementById('merchants-empty');
+      const noWorkerPrompt = document.getElementById('merchants-no-worker-prompt');
+      const loadingDiv = document.getElementById('merchants-loading');
+      const emptyDataDiv = document.getElementById('merchants-empty-data');
+      const errorDiv = document.getElementById('merchants-load-error');
+      
+      // Hide all states first
+      noWorkerPrompt.style.display = 'none';
+      loadingDiv.style.display = 'none';
+      emptyDataDiv.style.display = 'none';
+      errorDiv.style.display = 'none';
+      
+      if (state === 'hidden') {
+        emptyDiv.style.display = 'none';
+        return;
+      }
+      
+      emptyDiv.style.display = 'block';
+      
+      switch (state) {
+        case 'no-worker':
+          noWorkerPrompt.style.display = 'block';
+          break;
+        case 'loading':
+          loadingDiv.style.display = 'block';
+          break;
+        case 'empty-data':
+          emptyDataDiv.style.display = 'block';
+          break;
+        case 'error':
+          errorDiv.style.display = 'block';
+          break;
+      }
+    }
+
     async function loadMerchantList() {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
-      const emptyDiv = document.getElementById('merchants-empty');
       const tableContainer = document.getElementById('merchants-table-container');
       
       if (!workerName) {
-        emptyDiv.style.display = 'block';
-        emptyDiv.textContent = '请先选择实例以加载商户列表。';
+        showMerchantEmptyState('no-worker');
         tableContainer.style.display = 'none';
         return;
       }
       
       if (!apiToken) return;
+      
+      showMerchantEmptyState('loading');
+      tableContainer.style.display = 'none';
+      
       try {
         const res = await fetch('/api/campaign/workers/' + encodeURIComponent(workerName) + '/merchants', { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
@@ -2466,25 +2541,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         renderMerchantList();
       } catch (e) {
         console.error('Error loading merchants:', e);
-        emptyDiv.style.display = 'block';
-        emptyDiv.textContent = '加载商户列表失败。';
+        showMerchantEmptyState('error');
         tableContainer.style.display = 'none';
       }
     }
 
     function renderMerchantList() {
       const tbody = document.getElementById('merchants-table');
-      const emptyDiv = document.getElementById('merchants-empty');
       const tableContainer = document.getElementById('merchants-table-container');
       
       if (workerMerchantsData.length === 0) {
-        emptyDiv.style.display = 'block';
-        emptyDiv.textContent = '该实例暂无商户数据。';
+        showMerchantEmptyState('empty-data');
         tableContainer.style.display = 'none';
         return;
       }
       
-      emptyDiv.style.display = 'none';
+      showMerchantEmptyState('hidden');
       tableContainer.style.display = 'table';
       
       // Sort merchants
@@ -2499,6 +2571,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Check which merchants have projects
       const merchantsWithProjects = new Set(projectsData.map(p => p.merchantId));
       
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      
       tbody.innerHTML = sortedMerchants.map(m => {
         const hasProject = merchantsWithProjects.has(m.id);
         const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
@@ -2510,6 +2584,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + projectIndicator + (hasProject ? '是' : '-') + '</td>' +
           '<td class="actions">' +
             '<button class="btn btn-sm btn-success" onclick="showCreateProjectModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
+            (workerName ? '<button class="btn btn-sm btn-danger" onclick="showDeleteMerchantModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalEmails + ', ' + m.totalCampaigns + ')" style="margin-left:5px;">删除数据</button>' : '') +
           '</td></tr>';
       }).join('');
     }
@@ -2645,6 +2720,70 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           showAlert('删除失败', 'error');
         }
       } catch (e) {
+        showAlert('删除失败', 'error');
+      }
+    }
+
+    // Show delete merchant data confirmation modal
+    function showDeleteMerchantModal(merchantId, merchantDomain, emailCount, campaignCount) {
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      if (!workerName) {
+        showAlert('请先选择实例', 'error');
+        return;
+      }
+      
+      // Set modal values
+      document.getElementById('delete-merchant-id').value = merchantId;
+      document.getElementById('delete-merchant-domain').textContent = merchantDomain;
+      document.getElementById('delete-merchant-worker').textContent = workerName;
+      document.getElementById('delete-merchant-emails').textContent = emailCount;
+      document.getElementById('delete-merchant-campaigns').textContent = campaignCount;
+      
+      showModal('delete-merchant-modal');
+    }
+
+    // Confirm and execute merchant data deletion
+    async function confirmDeleteMerchantData() {
+      const merchantId = document.getElementById('delete-merchant-id').value;
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      
+      if (!merchantId || !workerName) {
+        showAlert('参数错误', 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/campaign/merchants/' + encodeURIComponent(merchantId) + '/data?workerName=' + encodeURIComponent(workerName), {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          const result = data.result;
+          
+          hideModal('delete-merchant-modal');
+          
+          // Show deletion result
+          let message = '删除成功！\\n';
+          message += '- 删除邮件数: ' + result.emailsDeleted + '\\n';
+          message += '- 删除路径数: ' + result.pathsDeleted + '\\n';
+          message += '- 影响活动数: ' + result.campaignsAffected;
+          if (result.merchantDeleted) {
+            message += '\\n- 商户记录已删除（无其他 Worker 数据）';
+          }
+          
+          showAlert(message);
+          
+          // Refresh merchant list and projects
+          await loadMerchantList();
+          await loadProjects();
+        } else {
+          const err = await res.json();
+          showAlert('删除失败: ' + (err.message || err.error || '未知错误'), 'error');
+        }
+      } catch (e) {
+        console.error('Error deleting merchant data:', e);
         showAlert('删除失败', 'error');
       }
     }
@@ -3265,20 +3404,27 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     function renderMerchants() {
       const tbody = document.getElementById('merchants-table');
-      const emptyDiv = document.getElementById('merchants-empty');
       const tableContainer = document.getElementById('merchants-table-container');
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       
-      if (merchantsData.length === 0) {
-        emptyDiv.style.display = 'block';
+      // Check if worker is selected first
+      if (!workerName) {
+        showMerchantEmptyState('no-worker');
         tableContainer.style.display = 'none';
         return;
       }
       
-      emptyDiv.style.display = 'none';
+      if (merchantsData.length === 0) {
+        showMerchantEmptyState('empty-data');
+        tableContainer.style.display = 'none';
+        return;
+      }
+      
+      showMerchantEmptyState('hidden');
       tableContainer.style.display = 'table';
 
       // Get current worker filter for display
-      const currentWorkerFilter = document.getElementById('campaign-worker-filter')?.value || '';
+      const currentWorkerFilter = workerName;
       
       tbody.innerHTML = merchantsData.map(m => {
         const status = m.analysisStatus || 'pending';

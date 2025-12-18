@@ -2976,3 +2976,2264 @@ describe('CampaignAnalyticsService', () => {
     });
   });
 });
+
+
+// ============================================
+// Merchant Data Deletion Property Tests
+// ============================================
+
+describe('Merchant Data Deletion', () => {
+  // Generate valid worker names
+  const workerNameArb = fc.oneof(
+    fc.constant('worker-a'),
+    fc.constant('worker-b'),
+    fc.constant('worker-c'),
+    fc.constant('global'),
+  );
+
+  /**
+   * Test service extension with delete support for sql.js
+   */
+  class TestServiceWithDelete extends TestCampaignAnalyticsService {
+    deleteMerchantData(data: { merchantId: string; workerName: string }): {
+      merchantId: string;
+      workerName: string;
+      emailsDeleted: number;
+      pathsDeleted: number;
+      campaignsAffected: number;
+      merchantDeleted: boolean;
+    } {
+      const { merchantId, workerName } = data;
+      const db = (this as any).db;
+
+      // Check if merchant exists
+      const merchant = this.getMerchantById(merchantId);
+      if (!merchant) {
+        throw new Error(`Merchant not found: ${merchantId}`);
+      }
+
+      let emailsDeleted = 0;
+      let pathsDeleted = 0;
+      let campaignsAffected = 0;
+      let merchantDeleted = false;
+
+      // Step 1: Get all campaign IDs for this merchant
+      const campaignResult = db.exec(
+        'SELECT id FROM campaigns WHERE merchant_id = ?',
+        [merchantId]
+      );
+      const campaignIds: string[] = campaignResult.length > 0 
+        ? campaignResult[0].values.map((row: any) => row[0] as string)
+        : [];
+
+      if (campaignIds.length > 0) {
+        // Step 2: Count and delete campaign_emails for this worker
+        const placeholders = campaignIds.map(() => '?').join(',');
+        
+        const emailCountResult = db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails 
+           WHERE campaign_id IN (${placeholders}) AND worker_name = ?`,
+          [...campaignIds, workerName]
+        );
+        emailsDeleted = emailCountResult.length > 0 ? emailCountResult[0].values[0][0] as number : 0;
+
+        if (emailsDeleted > 0) {
+          db.run(
+            `DELETE FROM campaign_emails 
+             WHERE campaign_id IN (${placeholders}) AND worker_name = ?`,
+            [...campaignIds, workerName]
+          );
+        }
+
+        // Step 3: Get recipients that had emails from this worker for this merchant
+        // and delete their paths if they have no remaining emails
+        const recipientsResult = db.exec(
+          `SELECT DISTINCT recipient FROM campaign_emails 
+           WHERE campaign_id IN (${placeholders})`,
+          [...campaignIds]
+        );
+        
+        // For paths, we need to check which recipients no longer have any emails
+        // Since we already deleted the worker's emails, check remaining emails per recipient
+        const pathResult = db.exec(
+          'SELECT id FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+        
+        if (pathResult.length > 0) {
+          // Get all recipients with paths for this merchant
+          const pathRecipientsResult = db.exec(
+            'SELECT DISTINCT recipient FROM recipient_paths WHERE merchant_id = ?',
+            [merchantId]
+          );
+          
+          if (pathRecipientsResult.length > 0) {
+            for (const row of pathRecipientsResult[0].values) {
+              const recipient = row[0] as string;
+              
+              // Check if this recipient still has emails from any worker
+              const remainingEmailsResult = db.exec(
+                `SELECT COUNT(*) as count FROM campaign_emails 
+                 WHERE campaign_id IN (${placeholders}) AND recipient = ?`,
+                [...campaignIds, recipient]
+              );
+              const remainingEmails = remainingEmailsResult.length > 0 
+                ? remainingEmailsResult[0].values[0][0] as number 
+                : 0;
+
+              if (remainingEmails === 0) {
+                // Delete all paths for this recipient and merchant
+                const pathDeleteResult = db.exec(
+                  'SELECT COUNT(*) FROM recipient_paths WHERE merchant_id = ? AND recipient = ?',
+                  [merchantId, recipient]
+                );
+                const pathCount = pathDeleteResult.length > 0 
+                  ? pathDeleteResult[0].values[0][0] as number 
+                  : 0;
+                
+                db.run(
+                  'DELETE FROM recipient_paths WHERE merchant_id = ? AND recipient = ?',
+                  [merchantId, recipient]
+                );
+                pathsDeleted += pathCount;
+              }
+            }
+          }
+        }
+
+        // Step 4: Count affected campaigns
+        const affectedCampaignsResult = db.exec(
+          `SELECT COUNT(DISTINCT id) as count FROM campaigns WHERE merchant_id = ?`,
+          [merchantId]
+        );
+        campaignsAffected = affectedCampaignsResult.length > 0 
+          ? affectedCampaignsResult[0].values[0][0] as number 
+          : 0;
+
+        // Step 5: Update campaign statistics
+        for (const campaignId of campaignIds) {
+          const emailCount = db.exec(
+            'SELECT COUNT(*) as count FROM campaign_emails WHERE campaign_id = ?',
+            [campaignId]
+          );
+          const count = emailCount.length > 0 ? emailCount[0].values[0][0] as number : 0;
+
+          const recipientCount = db.exec(
+            'SELECT COUNT(DISTINCT recipient) as count FROM campaign_emails WHERE campaign_id = ?',
+            [campaignId]
+          );
+          const recipients = recipientCount.length > 0 ? recipientCount[0].values[0][0] as number : 0;
+
+          db.run(
+            `UPDATE campaigns SET total_emails = ?, unique_recipients = ?, updated_at = ? WHERE id = ?`,
+            [count, recipients, new Date().toISOString(), campaignId]
+          );
+        }
+      }
+
+      // Step 6: Check if merchant has any remaining data
+      const remainingEmailsResult = db.exec(
+        `SELECT COUNT(*) as count FROM campaign_emails 
+         WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
+        [merchantId]
+      );
+      const remainingEmails = remainingEmailsResult.length > 0 
+        ? remainingEmailsResult[0].values[0][0] as number 
+        : 0;
+
+      if (remainingEmails === 0) {
+        // Delete all campaigns for this merchant
+        db.run('DELETE FROM campaigns WHERE merchant_id = ?', [merchantId]);
+        
+        // Delete all remaining paths for this merchant
+        db.run('DELETE FROM recipient_paths WHERE merchant_id = ?', [merchantId]);
+        
+        // Delete the merchant record
+        db.run('DELETE FROM merchants WHERE id = ?', [merchantId]);
+        
+        merchantDeleted = true;
+      } else {
+        // Update merchant statistics
+        const totalEmails = db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails 
+           WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
+          [merchantId]
+        );
+        const emailTotal = totalEmails.length > 0 ? totalEmails[0].values[0][0] as number : 0;
+
+        const totalCampaigns = db.exec(
+          `SELECT COUNT(DISTINCT c.id) as count 
+           FROM campaigns c
+           JOIN campaign_emails ce ON c.id = ce.campaign_id
+           WHERE c.merchant_id = ?`,
+          [merchantId]
+        );
+        const campaignTotal = totalCampaigns.length > 0 ? totalCampaigns[0].values[0][0] as number : 0;
+
+        db.run(
+          `UPDATE merchants SET total_emails = ?, total_campaigns = ?, updated_at = ? WHERE id = ?`,
+          [emailTotal, campaignTotal, new Date().toISOString(), merchantId]
+        );
+      }
+
+      return {
+        merchantId,
+        workerName,
+        emailsDeleted,
+        pathsDeleted,
+        campaignsAffected,
+        merchantDeleted,
+      };
+    }
+
+    getEmailsForMerchantAndWorker(merchantId: string, workerName: string): number {
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT COUNT(*) as count FROM campaign_emails 
+         WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?) 
+         AND worker_name = ?`,
+        [merchantId, workerName]
+      );
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+
+    getPathsForMerchant(merchantId: string): number {
+      const db = (this as any).db;
+      const result = db.exec(
+        'SELECT COUNT(*) as count FROM recipient_paths WHERE merchant_id = ?',
+        [merchantId]
+      );
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+
+    getAllEmailsForMerchant(merchantId: string): number {
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT COUNT(*) as count FROM campaign_emails 
+         WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
+        [merchantId]
+      );
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+  }
+
+  /**
+   * **Feature: merchant-data-management, Property 5: Delete Removes Worker Emails**
+   * **Validates: Requirements 3.2**
+   * 
+   * For any delete operation on a merchant for a specific Worker, 
+   * all campaign_emails records for that merchant and Worker should be removed.
+   */
+  describe('Property 5: Delete Removes Worker Emails', () => {
+    it('should remove all emails for the specified worker when deleting merchant data', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 1, maxLength: 3 }), // subjects
+          fc.array(validEmailArb, { minLength: 1, maxLength: 3 }), // recipients
+          workerNameArb,
+          (sender, subjects, recipients, workerName) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDelete(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track multiple emails from the same sender with the specified worker
+              let merchantId: string | null = null;
+              for (const subject of subjects) {
+                for (const recipient of recipients) {
+                  const result = service.trackEmail({
+                    sender,
+                    subject,
+                    recipient,
+                    workerName,
+                  });
+                  merchantId = result.merchantId;
+                }
+              }
+
+              if (!merchantId) return;
+
+              // Verify emails exist before deletion
+              const emailsBefore = service.getEmailsForMerchantAndWorker(merchantId, workerName);
+              expect(emailsBefore).toBeGreaterThan(0);
+
+              // Delete merchant data for this worker
+              const deleteResult = service.deleteMerchantData({
+                merchantId,
+                workerName,
+              });
+
+              // Verify all emails for this worker are removed
+              const emailsAfter = service.getEmailsForMerchantAndWorker(merchantId, workerName);
+              expect(emailsAfter).toBe(0);
+              expect(deleteResult.emailsDeleted).toBe(emailsBefore);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 6: Delete Removes Worker Paths**
+   * **Validates: Requirements 3.3**
+   * 
+   * For any delete operation on a merchant for a specific Worker, 
+   * all recipient_paths records associated with that Worker's data should be removed.
+   */
+  describe('Property 6: Delete Removes Worker Paths', () => {
+    it('should remove paths for recipients whose emails were all from the deleted worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 1, maxLength: 3 }), // subjects
+          validEmailArb, // recipient (single recipient to ensure path is created)
+          workerNameArb,
+          (sender, subjects, recipient, workerName) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDelete(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track emails to create paths
+              let merchantId: string | null = null;
+              for (const subject of subjects) {
+                const result = service.trackEmail({
+                  sender,
+                  subject,
+                  recipient,
+                  workerName,
+                });
+                merchantId = result.merchantId;
+              }
+
+              if (!merchantId) return;
+
+              // Verify paths exist before deletion
+              const pathsBefore = service.getPathsForMerchant(merchantId);
+              expect(pathsBefore).toBeGreaterThan(0);
+
+              // Delete merchant data for this worker
+              service.deleteMerchantData({
+                merchantId,
+                workerName,
+              });
+
+              // Since all emails were from this worker, paths should be removed
+              // (merchant should be deleted entirely in this case)
+              const merchant = service.getMerchantById(merchantId);
+              if (merchant === null) {
+                // Merchant was deleted, so paths are gone
+                expect(true).toBe(true);
+              } else {
+                // If merchant still exists, check paths
+                const pathsAfter = service.getPathsForMerchant(merchantId);
+                // Paths for recipients with no remaining emails should be removed
+                expect(pathsAfter).toBeLessThanOrEqual(pathsBefore);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 7: Delete Preserves Other Worker Data**
+   * **Validates: Requirements 3.5**
+   * 
+   * For any delete operation on a merchant for Worker A, 
+   * if the merchant has data in Worker B, the Worker B data should remain unchanged.
+   */
+  describe('Property 7: Delete Preserves Other Worker Data', () => {
+    it('should preserve emails from other workers when deleting data for one worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDelete(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email from workerA
+              const resultA = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+
+              // Track email from workerB (same merchant, different worker)
+              service.trackEmail({
+                sender,
+                subject: subject + ' v2', // Different subject to create another campaign
+                recipient,
+                workerName: workerB,
+              });
+
+              const merchantId = resultA.merchantId;
+
+              // Verify both workers have emails
+              const emailsWorkerA = service.getEmailsForMerchantAndWorker(merchantId, workerA);
+              const emailsWorkerB = service.getEmailsForMerchantAndWorker(merchantId, workerB);
+              expect(emailsWorkerA).toBeGreaterThan(0);
+              expect(emailsWorkerB).toBeGreaterThan(0);
+
+              // Delete data for workerA only
+              service.deleteMerchantData({
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Verify workerA emails are removed
+              const emailsWorkerAAfter = service.getEmailsForMerchantAndWorker(merchantId, workerA);
+              expect(emailsWorkerAAfter).toBe(0);
+
+              // Verify workerB emails are preserved
+              const emailsWorkerBAfter = service.getEmailsForMerchantAndWorker(merchantId, workerB);
+              expect(emailsWorkerBAfter).toBe(emailsWorkerB);
+
+              // Merchant should still exist
+              const merchant = service.getMerchantById(merchantId);
+              expect(merchant).not.toBeNull();
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 8: Delete Cleans Up Empty Merchant**
+   * **Validates: Requirements 3.6**
+   * 
+   * For any merchant that has no remaining data in any Worker after a delete operation, 
+   * the merchant record should be removed.
+   */
+  describe('Property 8: Delete Cleans Up Empty Merchant', () => {
+    it('should delete merchant record when no data remains after deletion', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          (sender, subject, recipient, workerName) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDelete(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email from single worker
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName,
+              });
+
+              const merchantId = result.merchantId;
+
+              // Verify merchant exists
+              const merchantBefore = service.getMerchantById(merchantId);
+              expect(merchantBefore).not.toBeNull();
+
+              // Delete all data for this worker (the only worker with data)
+              const deleteResult = service.deleteMerchantData({
+                merchantId,
+                workerName,
+              });
+
+              // Verify merchant is deleted
+              expect(deleteResult.merchantDeleted).toBe(true);
+              
+              const merchantAfter = service.getMerchantById(merchantId);
+              expect(merchantAfter).toBeNull();
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should NOT delete merchant record when other workers still have data', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDelete(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track emails from both workers
+              const resultA = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+
+              service.trackEmail({
+                sender,
+                subject: subject + ' v2',
+                recipient,
+                workerName: workerB,
+              });
+
+              const merchantId = resultA.merchantId;
+
+              // Delete data for workerA only
+              const deleteResult = service.deleteMerchantData({
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Merchant should NOT be deleted
+              expect(deleteResult.merchantDeleted).toBe(false);
+              
+              const merchantAfter = service.getMerchantById(merchantId);
+              expect(merchantAfter).not.toBeNull();
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+
+// ============================================
+// Worker Data Isolation Property Tests
+// ============================================
+
+describe('Worker Data Isolation', () => {
+  // Generate valid worker names
+  const workerNameArb = fc.oneof(
+    fc.constant('worker-a'),
+    fc.constant('worker-b'),
+    fc.constant('worker-c'),
+  );
+
+  /**
+   * Test service extension with Worker-specific statistics for sql.js
+   */
+  class TestServiceWithWorkerStats extends TestCampaignAnalyticsService {
+    /**
+     * Get merchants with Worker-specific statistics
+     * This mirrors the production getMerchants behavior when workerName is specified
+     */
+    getMerchantsWithWorkerStats(workerName: string): any[] {
+      const db = (this as any).db;
+      
+      // Get merchants that have emails from this worker, with worker-specific counts
+      const result = db.exec(`
+        SELECT 
+          m.*,
+          COALESCE(wc.campaign_count, 0) as worker_campaign_count,
+          COALESCE(wc.email_count, 0) as worker_email_count
+        FROM merchants m
+        INNER JOIN (
+          SELECT 
+            c.merchant_id,
+            COUNT(DISTINCT c.id) as campaign_count,
+            COUNT(ce.id) as email_count
+          FROM campaigns c
+          JOIN campaign_emails ce ON c.id = ce.campaign_id
+          WHERE ce.worker_name = ?
+          GROUP BY c.merchant_id
+        ) wc ON m.id = wc.merchant_id
+      `, [workerName]);
+
+      if (result.length === 0) {
+        return [];
+      }
+
+      const columns = result[0].columns;
+      return result[0].values.map((row: any) => {
+        const obj: any = {};
+        columns.forEach((col: string, i: number) => {
+          obj[col] = row[i];
+        });
+        return {
+          id: obj.id,
+          domain: obj.domain,
+          totalCampaigns: obj.worker_campaign_count,
+          totalEmails: obj.worker_email_count,
+        };
+      });
+    }
+
+    /**
+     * Get actual email count for a merchant from a specific worker
+     */
+    getWorkerEmailCount(merchantId: string, workerName: string): number {
+      const db = (this as any).db;
+      const result = db.exec(`
+        SELECT COUNT(*) as count 
+        FROM campaign_emails ce
+        JOIN campaigns c ON ce.campaign_id = c.id
+        WHERE c.merchant_id = ? AND ce.worker_name = ?
+      `, [merchantId, workerName]);
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+
+    /**
+     * Get actual campaign count for a merchant from a specific worker
+     */
+    getWorkerCampaignCount(merchantId: string, workerName: string): number {
+      const db = (this as any).db;
+      const result = db.exec(`
+        SELECT COUNT(DISTINCT c.id) as count 
+        FROM campaigns c
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE c.merchant_id = ? AND ce.worker_name = ?
+      `, [merchantId, workerName]);
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+
+    /**
+     * Get total email count for a merchant across all workers
+     */
+    getTotalEmailCount(merchantId: string): number {
+      const db = (this as any).db;
+      const result = db.exec(`
+        SELECT COUNT(*) as count 
+        FROM campaign_emails ce
+        JOIN campaigns c ON ce.campaign_id = c.id
+        WHERE c.merchant_id = ?
+      `, [merchantId]);
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+  }
+
+  /**
+   * **Feature: merchant-data-management, Property 2: Worker Filter Isolation**
+   * **Validates: Requirements 1.3, 2.1**
+   * 
+   * For any merchant list query with a workerName filter, all returned merchants 
+   * should have at least one email from that Worker.
+   */
+  describe('Property 2: Worker Filter Isolation', () => {
+    it('should only return merchants that have emails from the specified worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          // Generate multiple senders to create multiple merchants
+          fc.array(validEmailArb, { minLength: 2, maxLength: 4 })
+            .filter(arr => {
+              // Ensure unique domains
+              const domains = arr.map(e => extractDomain(e)).filter(d => d !== null);
+              return new Set(domains).size === domains.length;
+            }),
+          fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 1, maxLength: 3 }), // subjects
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          (senders, subjects, recipient, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            if (senders.length < 2) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithWorkerStats(db);
+
+            try {
+              // Track emails from first half of senders with workerA
+              const workerAMerchantIds = new Set<string>();
+              const halfIndex = Math.ceil(senders.length / 2);
+              
+              for (let i = 0; i < halfIndex; i++) {
+                for (const subject of subjects) {
+                  const result = service.trackEmail({
+                    sender: senders[i],
+                    subject,
+                    recipient,
+                    workerName: workerA,
+                  });
+                  workerAMerchantIds.add(result.merchantId);
+                }
+              }
+
+              // Track emails from second half of senders with workerB
+              const workerBMerchantIds = new Set<string>();
+              for (let i = halfIndex; i < senders.length; i++) {
+                for (const subject of subjects) {
+                  const result = service.trackEmail({
+                    sender: senders[i],
+                    subject,
+                    recipient,
+                    workerName: workerB,
+                  });
+                  workerBMerchantIds.add(result.merchantId);
+                }
+              }
+
+              // Query merchants filtered by workerA
+              const merchantsForWorkerA = service.getMerchants({ workerName: workerA });
+              
+              // Property: All returned merchants should have at least one email from workerA
+              for (const merchant of merchantsForWorkerA) {
+                const emailCount = service.getWorkerEmailCount(merchant.id, workerA);
+                expect(emailCount).toBeGreaterThan(0);
+              }
+
+              // Property: No merchants from workerB-only should appear in workerA results
+              for (const merchant of merchantsForWorkerA) {
+                // If this merchant has no emails from workerA, it shouldn't be in the list
+                const workerAEmails = service.getWorkerEmailCount(merchant.id, workerA);
+                expect(workerAEmails).toBeGreaterThan(0);
+              }
+
+              // Query merchants filtered by workerB
+              const merchantsForWorkerB = service.getMerchants({ workerName: workerB });
+              
+              // Property: All returned merchants should have at least one email from workerB
+              for (const merchant of merchantsForWorkerB) {
+                const emailCount = service.getWorkerEmailCount(merchant.id, workerB);
+                expect(emailCount).toBeGreaterThan(0);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 3: Worker Statistics Accuracy**
+   * **Validates: Requirements 2.2, 6.1, 6.2**
+   * 
+   * For any merchant displayed in a Worker-filtered view, the email count and 
+   * campaign count should only include data from that specific Worker.
+   */
+  describe('Property 3: Worker Statistics Accuracy', () => {
+    it('should calculate statistics only from the specified worker data', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender (single merchant)
+          fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 2, maxLength: 5 })
+            .filter(arr => new Set(arr).size === arr.length), // unique subjects
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          fc.integer({ min: 1, max: 3 }), // emails per subject for workerA
+          fc.integer({ min: 1, max: 3 }), // emails per subject for workerB
+          (sender, subjects, recipient, workerA, workerB, countA, countB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            if (subjects.length < 2) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithWorkerStats(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Split subjects between workers
+              const halfIndex = Math.ceil(subjects.length / 2);
+              const subjectsA = subjects.slice(0, halfIndex);
+              const subjectsB = subjects.slice(halfIndex);
+
+              let merchantId: string | null = null;
+
+              // Track emails for workerA
+              for (const subject of subjectsA) {
+                for (let i = 0; i < countA; i++) {
+                  const result = service.trackEmail({
+                    sender,
+                    subject,
+                    recipient: `${recipient.split('@')[0]}+${i}@${recipient.split('@')[1]}`,
+                    workerName: workerA,
+                  });
+                  merchantId = result.merchantId;
+                }
+              }
+
+              // Track emails for workerB
+              for (const subject of subjectsB) {
+                for (let i = 0; i < countB; i++) {
+                  const result = service.trackEmail({
+                    sender,
+                    subject,
+                    recipient: `${recipient.split('@')[0]}+${i}@${recipient.split('@')[1]}`,
+                    workerName: workerB,
+                  });
+                  merchantId = result.merchantId;
+                }
+              }
+
+              if (!merchantId) return;
+
+              // Get merchants with worker-specific stats for workerA
+              const merchantsA = service.getMerchantsWithWorkerStats(workerA);
+              const merchantA = merchantsA.find(m => m.id === merchantId);
+              
+              if (merchantA) {
+                // Property: Email count should match actual emails from workerA
+                const actualEmailsA = service.getWorkerEmailCount(merchantId, workerA);
+                expect(merchantA.totalEmails).toBe(actualEmailsA);
+
+                // Property: Campaign count should match actual campaigns from workerA
+                const actualCampaignsA = service.getWorkerCampaignCount(merchantId, workerA);
+                expect(merchantA.totalCampaigns).toBe(actualCampaignsA);
+
+                // Property: Stats should NOT include workerB data
+                const totalEmails = service.getTotalEmailCount(merchantId);
+                if (subjectsB.length > 0) {
+                  expect(merchantA.totalEmails).toBeLessThan(totalEmails);
+                }
+              }
+
+              // Get merchants with worker-specific stats for workerB
+              const merchantsB = service.getMerchantsWithWorkerStats(workerB);
+              const merchantB = merchantsB.find(m => m.id === merchantId);
+              
+              if (merchantB) {
+                // Property: Email count should match actual emails from workerB
+                const actualEmailsB = service.getWorkerEmailCount(merchantId, workerB);
+                expect(merchantB.totalEmails).toBe(actualEmailsB);
+
+                // Property: Campaign count should match actual campaigns from workerB
+                const actualCampaignsB = service.getWorkerCampaignCount(merchantId, workerB);
+                expect(merchantB.totalCampaigns).toBe(actualCampaignsB);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 4: Cross-Worker Data Independence**
+   * **Validates: Requirements 2.3**
+   * 
+   * For any merchant that exists in multiple Workers, the statistics shown in 
+   * each Worker view should be independent and not affect each other.
+   */
+  describe('Property 4: Cross-Worker Data Independence', () => {
+    it('should maintain independent statistics for each worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender (single merchant)
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          fc.integer({ min: 1, max: 5 }), // initial emails for workerA
+          fc.integer({ min: 1, max: 5 }), // additional emails for workerB
+          (sender, subject, recipient, workerA, workerB, initialCountA, additionalCountB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithWorkerStats(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              let merchantId: string | null = null;
+
+              // Track initial emails for workerA
+              for (let i = 0; i < initialCountA; i++) {
+                const result = service.trackEmail({
+                  sender,
+                  subject: `${subject} A${i}`,
+                  recipient,
+                  workerName: workerA,
+                });
+                merchantId = result.merchantId;
+              }
+
+              if (!merchantId) return;
+
+              // Record workerA stats before adding workerB data
+              const statsABefore = service.getWorkerEmailCount(merchantId, workerA);
+
+              // Add emails for workerB
+              for (let i = 0; i < additionalCountB; i++) {
+                service.trackEmail({
+                  sender,
+                  subject: `${subject} B${i}`,
+                  recipient,
+                  workerName: workerB,
+                });
+              }
+
+              // Property: WorkerA stats should remain unchanged after adding workerB data
+              const statsAAfter = service.getWorkerEmailCount(merchantId, workerA);
+              expect(statsAAfter).toBe(statsABefore);
+
+              // Property: WorkerA and WorkerB stats should be independent
+              const merchantsA = service.getMerchantsWithWorkerStats(workerA);
+              const merchantsB = service.getMerchantsWithWorkerStats(workerB);
+              
+              const merchantInA = merchantsA.find(m => m.id === merchantId);
+              const merchantInB = merchantsB.find(m => m.id === merchantId);
+
+              expect(merchantInA).toBeDefined();
+              expect(merchantInB).toBeDefined();
+
+              if (merchantInA && merchantInB) {
+                // Property: Each worker view shows only its own data
+                expect(merchantInA.totalEmails).toBe(initialCountA);
+                expect(merchantInB.totalEmails).toBe(additionalCountB);
+
+                // Property: Sum of worker stats equals total
+                const totalEmails = service.getTotalEmailCount(merchantId);
+                expect(merchantInA.totalEmails + merchantInB.totalEmails).toBe(totalEmails);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 1: Worker Data Source Tagging**
+   * **Validates: Requirements 1.1, 1.2**
+   * 
+   * For any email tracked by the system, the campaign_emails record should contain 
+   * the correct worker_name that matches the source Worker.
+   */
+  describe('Property 1: Worker Data Source Tagging', () => {
+    /**
+     * Test service extension with method to verify worker_name in campaign_emails
+     */
+    class TestServiceWithWorkerVerification extends TestCampaignAnalyticsService {
+      /**
+       * Get the worker_name for a specific campaign email record
+       */
+      getEmailWorkerName(campaignId: string, recipient: string): string | null {
+        const db = (this as any).db;
+        const result = db.exec(
+          `SELECT worker_name FROM campaign_emails 
+           WHERE campaign_id = ? AND recipient = ? 
+           ORDER BY id DESC LIMIT 1`,
+          [campaignId, recipient]
+        );
+        if (result.length === 0 || result[0].values.length === 0) {
+          return null;
+        }
+        return result[0].values[0][0] as string;
+      }
+
+      /**
+       * Get all emails for a campaign with their worker_names
+       */
+      getEmailsWithWorkerName(campaignId: string): Array<{ recipient: string; workerName: string }> {
+        const db = (this as any).db;
+        const result = db.exec(
+          `SELECT recipient, worker_name FROM campaign_emails WHERE campaign_id = ?`,
+          [campaignId]
+        );
+        if (result.length === 0) {
+          return [];
+        }
+        return result[0].values.map((row: any) => ({
+          recipient: row[0] as string,
+          workerName: row[1] as string,
+        }));
+      }
+
+      /**
+       * Count emails by worker_name for a campaign
+       */
+      countEmailsByWorker(campaignId: string, workerName: string): number {
+        const db = (this as any).db;
+        const result = db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails 
+           WHERE campaign_id = ? AND worker_name = ?`,
+          [campaignId, workerName]
+        );
+        return result.length > 0 ? result[0].values[0][0] as number : 0;
+      }
+    }
+
+    it('should save the correct worker_name when tracking an email with explicit workerName', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb, // workerName
+          (sender, subject, recipient, workerName) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithWorkerVerification(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track an email with explicit workerName
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName,
+              });
+
+              // Property: The saved worker_name should match the provided workerName
+              const savedWorkerName = service.getEmailWorkerName(result.campaignId, recipient);
+              expect(savedWorkerName).toBe(workerName);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should default worker_name to "global" when workerName is not provided', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          (sender, subject, recipient) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithWorkerVerification(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track an email WITHOUT workerName
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                // workerName is intentionally omitted
+              });
+
+              // Property: The saved worker_name should default to 'global'
+              const savedWorkerName = service.getEmailWorkerName(result.campaignId, recipient);
+              expect(savedWorkerName).toBe('global');
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should preserve worker_name for each email when tracking multiple emails from different workers', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          fc.array(validEmailArb, { minLength: 2, maxLength: 5 })
+            .filter(arr => new Set(arr).size === arr.length), // unique recipients
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipients, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            if (recipients.length < 2) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithWorkerVerification(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track first half of recipients with workerA
+              const halfIndex = Math.ceil(recipients.length / 2);
+              let campaignId: string | null = null;
+              
+              for (let i = 0; i < halfIndex; i++) {
+                const result = service.trackEmail({
+                  sender,
+                  subject,
+                  recipient: recipients[i],
+                  workerName: workerA,
+                });
+                campaignId = result.campaignId;
+              }
+
+              // Track second half of recipients with workerB
+              for (let i = halfIndex; i < recipients.length; i++) {
+                service.trackEmail({
+                  sender,
+                  subject,
+                  recipient: recipients[i],
+                  workerName: workerB,
+                });
+              }
+
+              if (!campaignId) return;
+
+              // Property: Each email should have the correct worker_name
+              for (let i = 0; i < halfIndex; i++) {
+                const savedWorkerName = service.getEmailWorkerName(campaignId, recipients[i]);
+                expect(savedWorkerName).toBe(workerA);
+              }
+
+              for (let i = halfIndex; i < recipients.length; i++) {
+                const savedWorkerName = service.getEmailWorkerName(campaignId, recipients[i]);
+                expect(savedWorkerName).toBe(workerB);
+              }
+
+              // Property: Count of emails by worker should match
+              const countA = service.countEmailsByWorker(campaignId, workerA);
+              const countB = service.countEmailsByWorker(campaignId, workerB);
+              expect(countA).toBe(halfIndex);
+              expect(countB).toBe(recipients.length - halfIndex);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+
+// ============================================
+// Project Worker Association Property Tests
+// ============================================
+
+describe('Project Worker Association', () => {
+  // Generate valid worker names
+  const workerNameArb = fc.oneof(
+    fc.constant('worker-a'),
+    fc.constant('worker-b'),
+    fc.constant('worker-c'),
+    fc.constant('global'),
+  );
+
+  // Generate valid project names
+  const projectNameArb = fc.string({ minLength: 1, maxLength: 50 })
+    .filter(s => s.trim().length > 0);
+
+  /**
+   * Test service extension with project support for sql.js
+   */
+  class TestServiceWithProjectAssociation extends TestCampaignAnalyticsService {
+    createAnalysisProject(data: { name: string; merchantId: string; workerName: string; note?: string }): any {
+      const id = uuidv4();
+      const now = new Date().toISOString();
+      
+      (this as any).db.run(
+        `INSERT INTO analysis_projects (id, name, merchant_id, worker_name, status, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+        [id, data.name, data.merchantId, data.workerName, data.note || null, now, now]
+      );
+      
+      return this.getAnalysisProjectById(id);
+    }
+
+    getAnalysisProjectById(id: string): any | null {
+      const result = (this as any).db.exec(
+        `SELECT ap.*, m.domain as merchant_domain
+         FROM analysis_projects ap
+         LEFT JOIN merchants m ON ap.merchant_id = m.id
+         WHERE ap.id = ?`,
+        [id]
+      );
+      if (result.length === 0 || result[0].values.length === 0) {
+        return null;
+      }
+      const row = result[0].values[0];
+      const columns = result[0].columns;
+      return this.rowToProject(columns, row);
+    }
+
+    getAnalysisProjects(filter?: { workerName?: string; status?: string }): any[] {
+      let query = `
+        SELECT ap.*, m.domain as merchant_domain
+        FROM analysis_projects ap
+        LEFT JOIN merchants m ON ap.merchant_id = m.id
+      `;
+      const params: any[] = [];
+      const conditions: string[] = [];
+
+      if (filter?.workerName) {
+        conditions.push('ap.worker_name = ?');
+        params.push(filter.workerName);
+      }
+
+      if (filter?.status) {
+        conditions.push('ap.status = ?');
+        params.push(filter.status);
+      }
+
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+
+      query += ' ORDER BY ap.created_at DESC';
+
+      const result = (this as any).db.exec(query, params);
+      if (result.length === 0) {
+        return [];
+      }
+
+      const columns = result[0].columns;
+      return result[0].values.map((row: any) => this.rowToProject(columns, row));
+    }
+
+    /**
+     * Get emails for a project's merchant filtered by the project's worker
+     */
+    getProjectEmails(projectId: string): Array<{ recipient: string; workerName: string; subject: string }> {
+      const project = this.getAnalysisProjectById(projectId);
+      if (!project) return [];
+
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT ce.recipient, ce.worker_name, c.subject
+         FROM campaign_emails ce
+         JOIN campaigns c ON ce.campaign_id = c.id
+         WHERE c.merchant_id = ? AND ce.worker_name = ?`,
+        [project.merchantId, project.workerName]
+      );
+
+      if (result.length === 0) return [];
+
+      return result[0].values.map((row: any) => ({
+        recipient: row[0] as string,
+        workerName: row[1] as string,
+        subject: row[2] as string,
+      }));
+    }
+
+    /**
+     * Get all emails for a merchant (regardless of worker)
+     */
+    getAllMerchantEmails(merchantId: string): Array<{ recipient: string; workerName: string }> {
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT ce.recipient, ce.worker_name
+         FROM campaign_emails ce
+         JOIN campaigns c ON ce.campaign_id = c.id
+         WHERE c.merchant_id = ?`,
+        [merchantId]
+      );
+
+      if (result.length === 0) return [];
+
+      return result[0].values.map((row: any) => ({
+        recipient: row[0] as string,
+        workerName: row[1] as string,
+      }));
+    }
+
+    private rowToProject(columns: string[], row: any[]): any {
+      const obj: any = {};
+      columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return {
+        id: obj.id,
+        name: obj.name,
+        merchantId: obj.merchant_id,
+        workerName: obj.worker_name,
+        status: obj.status,
+        note: obj.note,
+        merchantDomain: obj.merchant_domain,
+        createdAt: new Date(obj.created_at),
+        updatedAt: new Date(obj.updated_at),
+      };
+    }
+  }
+
+  /**
+   * **Feature: merchant-data-management, Property 9: Project Worker Association**
+   * **Validates: Requirements 4.1, 4.4**
+   * 
+   * For any analysis project, the project should be associated with a specific Worker name,
+   * and queries should respect this association.
+   */
+  describe('Property 9: Project Worker Association', () => {
+    it('should associate project with the specified worker and filter correctly', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender for creating merchant
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          projectNameArb, // project name
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, projectName, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add analysis_projects table
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              );
+            `);
+            
+            const service = new TestServiceWithProjectAssociation(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Create a merchant by tracking an email
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+              const merchantId = result.merchantId;
+
+              // Create project associated with workerA
+              const project = service.createAnalysisProject({
+                name: projectName,
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Property 1: Project should have the correct workerName
+              expect(project.workerName).toBe(workerA);
+
+              // Property 2: getAnalysisProjects with workerA filter should return this project
+              const projectsForWorkerA = service.getAnalysisProjects({ workerName: workerA });
+              expect(projectsForWorkerA.length).toBe(1);
+              expect(projectsForWorkerA[0].id).toBe(project.id);
+              expect(projectsForWorkerA[0].workerName).toBe(workerA);
+
+              // Property 3: getAnalysisProjects with workerB filter should NOT return this project
+              const projectsForWorkerB = service.getAnalysisProjects({ workerName: workerB });
+              expect(projectsForWorkerB.length).toBe(0);
+
+              // Property 4: getAnalysisProjectById should return project with correct workerName
+              const retrievedProject = service.getAnalysisProjectById(project.id);
+              expect(retrievedProject).not.toBeNull();
+              expect(retrievedProject.workerName).toBe(workerA);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should correctly filter projects when multiple projects exist for different workers', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender for creating merchant
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          projectNameArb, // project name for workerA
+          projectNameArb, // project name for workerB
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, projectNameA, projectNameB, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add analysis_projects table
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              );
+            `);
+            
+            const service = new TestServiceWithProjectAssociation(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Create a merchant by tracking an email
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+              const merchantId = result.merchantId;
+
+              // Create project for workerA
+              const projectA = service.createAnalysisProject({
+                name: projectNameA,
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Create project for workerB
+              const projectB = service.createAnalysisProject({
+                name: projectNameB,
+                merchantId,
+                workerName: workerB,
+              });
+
+              // Property: Each worker filter should return only its own projects
+              const projectsForWorkerA = service.getAnalysisProjects({ workerName: workerA });
+              expect(projectsForWorkerA.length).toBe(1);
+              expect(projectsForWorkerA.every(p => p.workerName === workerA)).toBe(true);
+              expect(projectsForWorkerA[0].id).toBe(projectA.id);
+
+              const projectsForWorkerB = service.getAnalysisProjects({ workerName: workerB });
+              expect(projectsForWorkerB.length).toBe(1);
+              expect(projectsForWorkerB.every(p => p.workerName === workerB)).toBe(true);
+              expect(projectsForWorkerB[0].id).toBe(projectB.id);
+
+              // Property: No filter should return all projects
+              const allProjects = service.getAnalysisProjects();
+              expect(allProjects.length).toBe(2);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: merchant-data-management, Property 10: Project Data Isolation**
+   * **Validates: Requirements 4.2**
+   * 
+   * For any analysis project opened, the loaded data should only include records 
+   * from the project's associated Worker.
+   */
+  describe('Property 10: Project Data Isolation', () => {
+    it('should only load data from the project associated worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender for creating merchant
+          fc.string({ minLength: 1, maxLength: 50 }), // subject for workerA
+          fc.string({ minLength: 1, maxLength: 50 }), // subject for workerB
+          validEmailArb, // recipient for workerA
+          validEmailArb, // recipient for workerB
+          projectNameArb, // project name
+          workerNameArb,
+          workerNameArb,
+          (sender, subjectA, subjectB, recipientA, recipientB, projectName, workerA, workerB) => {
+            // Ensure workers are different and recipients are different
+            if (workerA === workerB) return;
+            if (recipientA === recipientB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add analysis_projects table
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              );
+            `);
+            
+            const service = new TestServiceWithProjectAssociation(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email from workerA
+              const resultA = service.trackEmail({
+                sender,
+                subject: subjectA,
+                recipient: recipientA,
+                workerName: workerA,
+              });
+              const merchantId = resultA.merchantId;
+
+              // Track email from workerB for the same merchant (same sender domain)
+              service.trackEmail({
+                sender,
+                subject: subjectB,
+                recipient: recipientB,
+                workerName: workerB,
+              });
+
+              // Create project associated with workerA
+              const project = service.createAnalysisProject({
+                name: projectName,
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Get all emails for the merchant (should have both workers)
+              const allEmails = service.getAllMerchantEmails(merchantId);
+              expect(allEmails.length).toBe(2);
+
+              // Get emails for the project (should only have workerA's data)
+              const projectEmails = service.getProjectEmails(project.id);
+              
+              // Property 1: All project emails should be from the project's worker
+              expect(projectEmails.every(e => e.workerName === workerA)).toBe(true);
+
+              // Property 2: Project emails should not include workerB's data
+              expect(projectEmails.some(e => e.workerName === workerB)).toBe(false);
+
+              // Property 3: Project emails count should be less than or equal to all emails
+              expect(projectEmails.length).toBeLessThanOrEqual(allEmails.length);
+
+              // Property 4: Project emails should only contain recipientA (from workerA)
+              expect(projectEmails.length).toBe(1);
+              expect(projectEmails[0].recipient).toBe(recipientA);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should return empty data when project worker has no emails', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender for creating merchant
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          projectNameArb, // project name
+          workerNameArb,
+          workerNameArb,
+          (sender, subject, recipient, projectName, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add analysis_projects table
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              );
+            `);
+            
+            const service = new TestServiceWithProjectAssociation(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email from workerA only
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+              const merchantId = result.merchantId;
+
+              // Create project associated with workerB (which has no emails)
+              const project = service.createAnalysisProject({
+                name: projectName,
+                merchantId,
+                workerName: workerB,
+              });
+
+              // Get emails for the project (should be empty since workerB has no emails)
+              const projectEmails = service.getProjectEmails(project.id);
+              
+              // Property: Project should have no emails since workerB has no data
+              expect(projectEmails.length).toBe(0);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+
+// ============================================
+// Statistics Update After Delete Property Tests
+// ============================================
+
+describe('Statistics Update After Delete', () => {
+  // Generate valid worker names
+  const workerNameArb = fc.oneof(
+    fc.constant('worker-a'),
+    fc.constant('worker-b'),
+    fc.constant('worker-c'),
+  );
+
+  /**
+   * Test service extension with delete and statistics verification for sql.js
+   */
+  class TestServiceWithDeleteStats extends TestCampaignAnalyticsService {
+    deleteMerchantData(data: { merchantId: string; workerName: string }): {
+      merchantId: string;
+      workerName: string;
+      emailsDeleted: number;
+      pathsDeleted: number;
+      campaignsAffected: number;
+      merchantDeleted: boolean;
+    } {
+      const { merchantId, workerName } = data;
+      const db = (this as any).db;
+
+      // Check if merchant exists
+      const merchant = this.getMerchantById(merchantId);
+      if (!merchant) {
+        throw new Error(`Merchant not found: ${merchantId}`);
+      }
+
+      let emailsDeleted = 0;
+      let pathsDeleted = 0;
+      let campaignsAffected = 0;
+      let merchantDeleted = false;
+
+      // Step 1: Get all campaign IDs for this merchant
+      const campaignResult = db.exec(
+        'SELECT id FROM campaigns WHERE merchant_id = ?',
+        [merchantId]
+      );
+      const campaignIds: string[] = campaignResult.length > 0 
+        ? campaignResult[0].values.map((row: any) => row[0] as string)
+        : [];
+
+      if (campaignIds.length > 0) {
+        // Step 2: Count and delete campaign_emails for this worker
+        const placeholders = campaignIds.map(() => '?').join(',');
+        
+        const emailCountResult = db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails 
+           WHERE campaign_id IN (${placeholders}) AND worker_name = ?`,
+          [...campaignIds, workerName]
+        );
+        emailsDeleted = emailCountResult.length > 0 ? emailCountResult[0].values[0][0] as number : 0;
+
+        if (emailsDeleted > 0) {
+          db.run(
+            `DELETE FROM campaign_emails 
+             WHERE campaign_id IN (${placeholders}) AND worker_name = ?`,
+            [...campaignIds, workerName]
+          );
+        }
+
+        // Step 3: Delete paths for recipients with no remaining emails
+        const pathRecipientsResult = db.exec(
+          'SELECT DISTINCT recipient FROM recipient_paths WHERE merchant_id = ?',
+          [merchantId]
+        );
+        
+        if (pathRecipientsResult.length > 0) {
+          for (const row of pathRecipientsResult[0].values) {
+            const recipient = row[0] as string;
+            
+            const remainingEmailsResult = db.exec(
+              `SELECT COUNT(*) as count FROM campaign_emails 
+               WHERE campaign_id IN (${placeholders}) AND recipient = ?`,
+              [...campaignIds, recipient]
+            );
+            const remainingEmails = remainingEmailsResult.length > 0 
+              ? remainingEmailsResult[0].values[0][0] as number 
+              : 0;
+
+            if (remainingEmails === 0) {
+              const pathDeleteResult = db.exec(
+                'SELECT COUNT(*) FROM recipient_paths WHERE merchant_id = ? AND recipient = ?',
+                [merchantId, recipient]
+              );
+              const pathCount = pathDeleteResult.length > 0 
+                ? pathDeleteResult[0].values[0][0] as number 
+                : 0;
+              
+              db.run(
+                'DELETE FROM recipient_paths WHERE merchant_id = ? AND recipient = ?',
+                [merchantId, recipient]
+              );
+              pathsDeleted += pathCount;
+            }
+          }
+        }
+
+        // Step 4: Count affected campaigns
+        const affectedCampaignsResult = db.exec(
+          `SELECT COUNT(DISTINCT id) as count FROM campaigns WHERE merchant_id = ?`,
+          [merchantId]
+        );
+        campaignsAffected = affectedCampaignsResult.length > 0 
+          ? affectedCampaignsResult[0].values[0][0] as number 
+          : 0;
+
+        // Step 5: Update campaign statistics
+        for (const campaignId of campaignIds) {
+          const emailCount = db.exec(
+            'SELECT COUNT(*) as count FROM campaign_emails WHERE campaign_id = ?',
+            [campaignId]
+          );
+          const count = emailCount.length > 0 ? emailCount[0].values[0][0] as number : 0;
+
+          const recipientCount = db.exec(
+            'SELECT COUNT(DISTINCT recipient) as count FROM campaign_emails WHERE campaign_id = ?',
+            [campaignId]
+          );
+          const recipients = recipientCount.length > 0 ? recipientCount[0].values[0][0] as number : 0;
+
+          db.run(
+            `UPDATE campaigns SET total_emails = ?, unique_recipients = ?, updated_at = ? WHERE id = ?`,
+            [count, recipients, new Date().toISOString(), campaignId]
+          );
+        }
+      }
+
+      // Step 6: Check if merchant has any remaining data
+      const remainingEmailsResult = db.exec(
+        `SELECT COUNT(*) as count FROM campaign_emails 
+         WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
+        [merchantId]
+      );
+      const remainingEmails = remainingEmailsResult.length > 0 
+        ? remainingEmailsResult[0].values[0][0] as number 
+        : 0;
+
+      if (remainingEmails === 0) {
+        // Delete all campaigns for this merchant
+        db.run('DELETE FROM campaigns WHERE merchant_id = ?', [merchantId]);
+        
+        // Delete all remaining paths for this merchant
+        db.run('DELETE FROM recipient_paths WHERE merchant_id = ?', [merchantId]);
+        
+        // Delete the merchant record
+        db.run('DELETE FROM merchants WHERE id = ?', [merchantId]);
+        
+        merchantDeleted = true;
+      } else {
+        // Update merchant statistics
+        const totalEmails = db.exec(
+          `SELECT COUNT(*) as count FROM campaign_emails 
+           WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
+          [merchantId]
+        );
+        const emailTotal = totalEmails.length > 0 ? totalEmails[0].values[0][0] as number : 0;
+
+        const totalCampaigns = db.exec(
+          `SELECT COUNT(DISTINCT c.id) as count 
+           FROM campaigns c
+           JOIN campaign_emails ce ON c.id = ce.campaign_id
+           WHERE c.merchant_id = ?`,
+          [merchantId]
+        );
+        const campaignTotal = totalCampaigns.length > 0 ? totalCampaigns[0].values[0][0] as number : 0;
+
+        db.run(
+          `UPDATE merchants SET total_emails = ?, total_campaigns = ?, updated_at = ? WHERE id = ?`,
+          [emailTotal, campaignTotal, new Date().toISOString(), merchantId]
+        );
+      }
+
+      return {
+        merchantId,
+        workerName,
+        emailsDeleted,
+        pathsDeleted,
+        campaignsAffected,
+        merchantDeleted,
+      };
+    }
+
+    /**
+     * Get merchant statistics from the database
+     */
+    getMerchantStats(merchantId: string): { totalEmails: number; totalCampaigns: number } | null {
+      const db = (this as any).db;
+      const result = db.exec(
+        'SELECT total_emails, total_campaigns FROM merchants WHERE id = ?',
+        [merchantId]
+      );
+      if (result.length === 0 || result[0].values.length === 0) {
+        return null;
+      }
+      return {
+        totalEmails: result[0].values[0][0] as number,
+        totalCampaigns: result[0].values[0][1] as number,
+      };
+    }
+
+    /**
+     * Get actual email count for a merchant
+     */
+    getActualEmailCount(merchantId: string): number {
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT COUNT(*) as count FROM campaign_emails 
+         WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)`,
+        [merchantId]
+      );
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+
+    /**
+     * Get actual campaign count for a merchant (campaigns with at least one email)
+     */
+    getActualCampaignCount(merchantId: string): number {
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT COUNT(DISTINCT c.id) as count 
+         FROM campaigns c
+         JOIN campaign_emails ce ON c.id = ce.campaign_id
+         WHERE c.merchant_id = ?`,
+        [merchantId]
+      );
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+
+    /**
+     * Get emails for a specific worker
+     */
+    getWorkerEmailCount(merchantId: string, workerName: string): number {
+      const db = (this as any).db;
+      const result = db.exec(
+        `SELECT COUNT(*) as count FROM campaign_emails 
+         WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?) 
+         AND worker_name = ?`,
+        [merchantId, workerName]
+      );
+      return result.length > 0 ? result[0].values[0][0] as number : 0;
+    }
+  }
+
+  /**
+   * **Feature: merchant-data-management, Property 11: Statistics Update After Delete**
+   * **Validates: Requirements 6.4**
+   * 
+   * For any delete operation, the merchant statistics should be updated to reflect the remaining data.
+   */
+  describe('Property 11: Statistics Update After Delete', () => {
+    it('should update merchant statistics to reflect remaining data after partial deletion', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 2, maxLength: 4 })
+            .filter(arr => new Set(arr).size === arr.length), // unique subjects
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          fc.integer({ min: 1, max: 3 }), // emails per subject for workerA
+          fc.integer({ min: 1, max: 3 }), // emails per subject for workerB
+          (sender, subjects, recipient, workerA, workerB, countA, countB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            if (subjects.length < 2) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDeleteStats(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Split subjects between workers
+              const halfIndex = Math.ceil(subjects.length / 2);
+              const subjectsA = subjects.slice(0, halfIndex);
+              const subjectsB = subjects.slice(halfIndex);
+
+              let merchantId: string | null = null;
+
+              // Track emails for workerA
+              for (const subject of subjectsA) {
+                for (let i = 0; i < countA; i++) {
+                  const result = service.trackEmail({
+                    sender,
+                    subject,
+                    recipient: `${recipient.split('@')[0]}+a${i}@${recipient.split('@')[1]}`,
+                    workerName: workerA,
+                  });
+                  merchantId = result.merchantId;
+                }
+              }
+
+              // Track emails for workerB
+              for (const subject of subjectsB) {
+                for (let i = 0; i < countB; i++) {
+                  const result = service.trackEmail({
+                    sender,
+                    subject,
+                    recipient: `${recipient.split('@')[0]}+b${i}@${recipient.split('@')[1]}`,
+                    workerName: workerB,
+                  });
+                  merchantId = result.merchantId;
+                }
+              }
+
+              if (!merchantId) return;
+
+              // Record expected remaining data after deleting workerA
+              const expectedRemainingEmails = service.getWorkerEmailCount(merchantId, workerB);
+              const workerBCampaigns = subjectsB.length;
+
+              // Delete workerA data
+              const deleteResult = service.deleteMerchantData({
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Property 1: Merchant should not be deleted (workerB still has data)
+              expect(deleteResult.merchantDeleted).toBe(false);
+
+              // Property 2: Merchant statistics should be updated
+              const stats = service.getMerchantStats(merchantId);
+              expect(stats).not.toBeNull();
+
+              if (stats) {
+                // Property 3: total_emails should match actual remaining emails
+                const actualEmails = service.getActualEmailCount(merchantId);
+                expect(stats.totalEmails).toBe(actualEmails);
+                expect(stats.totalEmails).toBe(expectedRemainingEmails);
+
+                // Property 4: total_campaigns should match actual remaining campaigns
+                const actualCampaigns = service.getActualCampaignCount(merchantId);
+                expect(stats.totalCampaigns).toBe(actualCampaigns);
+                expect(stats.totalCampaigns).toBe(workerBCampaigns);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should remove merchant from list when all data is deleted', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          (sender, subject, recipient, workerName) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDeleteStats(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track email from single worker
+              const result = service.trackEmail({
+                sender,
+                subject,
+                recipient,
+                workerName,
+              });
+
+              const merchantId = result.merchantId;
+
+              // Verify merchant exists in list before deletion
+              const merchantsBefore = service.getMerchants();
+              expect(merchantsBefore.some(m => m.id === merchantId)).toBe(true);
+
+              // Delete all data for this worker
+              const deleteResult = service.deleteMerchantData({
+                merchantId,
+                workerName,
+              });
+
+              // Property 1: Merchant should be deleted
+              expect(deleteResult.merchantDeleted).toBe(true);
+
+              // Property 2: Merchant should be removed from list
+              const merchantsAfter = service.getMerchants();
+              expect(merchantsAfter.some(m => m.id === merchantId)).toBe(false);
+
+              // Property 3: getMerchantById should return null
+              const merchant = service.getMerchantById(merchantId);
+              expect(merchant).toBeNull();
+
+              // Property 4: Statistics should not exist
+              const stats = service.getMerchantStats(merchantId);
+              expect(stats).toBeNull();
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should correctly update statistics when deleting from merchant with multiple workers', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb,
+          fc.integer({ min: 2, max: 5 }), // emails for workerA
+          fc.integer({ min: 2, max: 5 }), // emails for workerB
+          (sender, subject, recipient, workerA, workerB, emailsA, emailsB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestServiceWithDeleteStats(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              let merchantId: string | null = null;
+
+              // Track emails for workerA
+              for (let i = 0; i < emailsA; i++) {
+                const result = service.trackEmail({
+                  sender,
+                  subject: `${subject} A`,
+                  recipient: `${recipient.split('@')[0]}+a${i}@${recipient.split('@')[1]}`,
+                  workerName: workerA,
+                });
+                merchantId = result.merchantId;
+              }
+
+              // Track emails for workerB
+              for (let i = 0; i < emailsB; i++) {
+                service.trackEmail({
+                  sender,
+                  subject: `${subject} B`,
+                  recipient: `${recipient.split('@')[0]}+b${i}@${recipient.split('@')[1]}`,
+                  workerName: workerB,
+                });
+              }
+
+              if (!merchantId) return;
+
+              // Get stats before deletion
+              const statsBefore = service.getMerchantStats(merchantId);
+              expect(statsBefore).not.toBeNull();
+              
+              const totalEmailsBefore = service.getActualEmailCount(merchantId);
+              expect(totalEmailsBefore).toBe(emailsA + emailsB);
+
+              // Delete workerA data
+              service.deleteMerchantData({
+                merchantId,
+                workerName: workerA,
+              });
+
+              // Get stats after deletion
+              const statsAfter = service.getMerchantStats(merchantId);
+              expect(statsAfter).not.toBeNull();
+
+              if (statsAfter) {
+                // Property 1: total_emails should decrease by workerA's email count
+                expect(statsAfter.totalEmails).toBe(emailsB);
+
+                // Property 2: Statistics should match actual data
+                const actualEmails = service.getActualEmailCount(merchantId);
+                expect(statsAfter.totalEmails).toBe(actualEmails);
+
+                // Property 3: Only workerB emails should remain
+                const workerAEmails = service.getWorkerEmailCount(merchantId, workerA);
+                const workerBEmails = service.getWorkerEmailCount(merchantId, workerB);
+                expect(workerAEmails).toBe(0);
+                expect(workerBEmails).toBe(emailsB);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});

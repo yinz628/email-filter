@@ -1109,6 +1109,57 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   // ============================================
 
   /**
+   * DELETE /api/campaign/merchants/:id/data
+   * Delete merchant data for a specific worker
+   * Query params: workerName (required) - the worker whose data should be deleted
+   * 
+   * Requirements: 3.2, 3.3, 3.4
+   */
+  fastify.delete('/merchants/:id/data', async (
+    request: FastifyRequest<{ Params: MerchantParams; Querystring: { workerName?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const { id } = request.params;
+      const { workerName } = request.query;
+
+      // Validate workerName parameter
+      if (!workerName || typeof workerName !== 'string' || workerName.trim() === '') {
+        return reply.status(400).send({
+          error: 'Invalid request',
+          message: 'workerName query parameter is required',
+        });
+      }
+
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      // Check if merchant exists
+      const merchant = service.getMerchantById(id);
+      if (!merchant) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+
+      // Delete merchant data for the specified worker
+      const result = service.deleteMerchantData({
+        merchantId: id,
+        workerName: workerName.trim(),
+      });
+
+      return reply.send({
+        success: true,
+        result,
+      });
+    } catch (error: any) {
+      if (error.message?.includes('Merchant not found')) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+      request.log.error(error, 'Error deleting merchant data');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
    * GET /api/campaign/data-stats
    * Get data statistics for all merchants
    * Query params: workerName (optional) - filter by worker instance (Requirements: 4.5)

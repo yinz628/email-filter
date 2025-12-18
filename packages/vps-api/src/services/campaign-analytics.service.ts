@@ -2291,23 +2291,43 @@ export class CampaignAnalyticsService {
     pathsDeleted: number;
     oldUsersAffected: number;
   } {
-    // Get count of old users before cleanup
-    const oldUserCount = this.db.prepare(`
-      SELECT COUNT(DISTINCT recipient) as count
+    // Find old users: recipients with sequence_order > 1 (have received multiple campaigns)
+    const oldUsers = this.db
+      .prepare(
+        `
+      SELECT DISTINCT recipient
       FROM recipient_paths
-      WHERE merchant_id = ? AND (is_new_user = 0 OR is_new_user IS NULL)
-    `).get(merchantId) as { count: number };
+      WHERE merchant_id = ? AND sequence_order > 1
+    `
+      )
+      .all(merchantId) as { recipient: string }[];
 
-    // Delete all paths for old users
-    const result = this.db.prepare(`
-      DELETE FROM recipient_paths
-      WHERE merchant_id = ? 
-        AND (is_new_user = 0 OR is_new_user IS NULL)
-    `).run(merchantId);
+    if (oldUsers.length === 0) {
+      return {
+        pathsDeleted: 0,
+        oldUsersAffected: 0,
+      };
+    }
+
+    // Delete all paths for old users (including their first campaign)
+    const oldUserRecipients = oldUsers.map((u) => u.recipient);
+
+    let totalDeleted = 0;
+    for (const recipient of oldUserRecipients) {
+      const result = this.db
+        .prepare(
+          `
+        DELETE FROM recipient_paths
+        WHERE merchant_id = ? AND recipient = ?
+      `
+        )
+        .run(merchantId, recipient);
+      totalDeleted += result.changes;
+    }
 
     return {
-      pathsDeleted: result.changes,
-      oldUsersAffected: oldUserCount.count,
+      pathsDeleted: totalDeleted,
+      oldUsersAffected: oldUsers.length,
     };
   }
 

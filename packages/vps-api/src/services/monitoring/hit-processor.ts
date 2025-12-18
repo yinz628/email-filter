@@ -159,7 +159,8 @@ export class HitProcessor {
       status.gapMinutes,
       status.count1h,
       status.count12h,
-      status.count24h
+      status.count24h,
+      status.lastSeenAt
     );
   }
 

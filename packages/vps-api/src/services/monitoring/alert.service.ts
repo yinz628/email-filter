@@ -90,6 +90,7 @@ export class AlertService {
    * @param count1h - Hit count in last 1 hour
    * @param count12h - Hit count in last 12 hours
    * @param count24h - Hit count in last 24 hours
+   * @param lastSeenAt - Optional last seen timestamp
    * @returns Formatted alert message
    */
   formatAlertMessage(
@@ -100,19 +101,37 @@ export class AlertService {
     gapMinutes: number,
     count1h: number,
     count12h: number,
-    count24h: number
+    count24h: number,
+    lastSeenAt?: Date | null
   ): string {
     const alertLabel = ALERT_TYPE_LABELS[alertType];
     const prevIcon = STATE_ICONS[previousState];
     const currIcon = STATE_ICONS[currentState];
     const gapDisplay = this.formatGapDisplay(gapMinutes);
+    const lastSeenDisplay = lastSeenAt ? this.formatDateTime(lastSeenAt) : '从未出现';
 
     return (
       `[${alertLabel}] ${rule.merchant} / ${rule.name}\n` +
       `状态变化: ${prevIcon} ${previousState} → ${currIcon} ${currentState}\n` +
-      `最后出现: ${gapDisplay}\n` +
+      `最后出现: ${lastSeenDisplay} (${gapDisplay})\n` +
       `历史表现: 24h: ${count24h} | 12h: ${count12h} | 1h: ${count1h}`
     );
+  }
+
+  /**
+   * Format date time for display (Asia/Shanghai timezone)
+   */
+  private formatDateTime(date: Date): string {
+    return date.toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
   }
 
   /**
@@ -137,6 +156,7 @@ export class AlertService {
    * @param count1h - Hit count in last 1 hour
    * @param count12h - Hit count in last 12 hours
    * @param count24h - Hit count in last 24 hours
+   * @param lastSeenAt - Optional last seen timestamp
    * @returns Created alert or null if no alert should be triggered
    */
   createAlertFromStateChange(
@@ -146,7 +166,8 @@ export class AlertService {
     gapMinutes: number,
     count1h: number,
     count12h: number,
-    count24h: number
+    count24h: number,
+    lastSeenAt?: Date | null
   ): Alert | null {
     const alertType = this.determineAlertType(previousState, currentState);
     if (!alertType) {
@@ -161,7 +182,8 @@ export class AlertService {
       gapMinutes,
       count1h,
       count12h,
-      count24h
+      count24h,
+      lastSeenAt
     );
 
     const alert = this.createAlert({

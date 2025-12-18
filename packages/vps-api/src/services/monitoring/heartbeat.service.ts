@@ -148,11 +148,12 @@ export class HeartbeatService {
     currentState: SignalState,
     gapMinutes: number
   ): void {
-    // Get current counters
+    // Get current counters and last seen time
     const stateRecord = this.stateRepo.getRawState(rule.id);
     const count1h = stateRecord?.count_1h ?? 0;
     const count12h = stateRecord?.count_12h ?? 0;
     const count24h = stateRecord?.count_24h ?? 0;
+    const lastSeenAt = stateRecord?.last_seen_at ? new Date(stateRecord.last_seen_at) : null;
 
     this.alertService.createAlertFromStateChange(
       rule,
@@ -161,7 +162,8 @@ export class HeartbeatService {
       gapMinutes,
       count1h,
       count12h,
-      count24h
+      count24h,
+      lastSeenAt
     );
   }
 

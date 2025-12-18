@@ -130,12 +130,60 @@ try {
       for (const duplicate of duplicateMerchants) {
         console.log(`  Merging: ${duplicate.domain} (id: ${duplicate.id})`);
         
-        // Update campaigns to point to primary merchant
-        const campaignResult = db.prepare('UPDATE campaigns SET merchant_id = ? WHERE merchant_id = ?')
-          .run(primaryMerchant.id, duplicate.id);
-        console.log(`    Updated ${campaignResult.changes} campaigns`);
+        // Get campaigns from duplicate merchant
+        const duplicateCampaigns = db.prepare('SELECT * FROM campaigns WHERE merchant_id = ?').all(duplicate.id);
+        console.log(`    Found ${duplicateCampaigns.length} campaigns to merge`);
         
-        // Update recipient_paths to point to primary merchant
+        let mergedCampaigns = 0;
+        let movedCampaigns = 0;
+        
+        for (const campaign of duplicateCampaigns) {
+          // Check if primary merchant already has a campaign with same subject_hash
+          const existingCampaign = db.prepare(
+            'SELECT * FROM campaigns WHERE merchant_id = ? AND subject_hash = ?'
+          ).get(primaryMerchant.id, campaign.subject_hash);
+          
+          if (existingCampaign) {
+            // Merge: update campaign_emails to point to existing campaign
+            const emailResult = db.prepare('UPDATE campaign_emails SET campaign_id = ? WHERE campaign_id = ?')
+              .run(existingCampaign.id, campaign.id);
+            
+            // Update recipient_paths to point to existing campaign
+            db.prepare('UPDATE recipient_paths SET campaign_id = ? WHERE campaign_id = ?')
+              .run(existingCampaign.id, campaign.id);
+            
+            // Update existing campaign totals
+            const newTotalEmails = existingCampaign.total_emails + campaign.total_emails;
+            const newUniqueRecipients = db.prepare(
+              'SELECT COUNT(DISTINCT recipient) as count FROM campaign_emails WHERE campaign_id = ?'
+            ).get(existingCampaign.id).count;
+            
+            // Use earliest first_seen_at and latest last_seen_at
+            const firstSeen = campaign.first_seen_at < existingCampaign.first_seen_at 
+              ? campaign.first_seen_at : existingCampaign.first_seen_at;
+            const lastSeen = campaign.last_seen_at > existingCampaign.last_seen_at 
+              ? campaign.last_seen_at : existingCampaign.last_seen_at;
+            
+            db.prepare(`
+              UPDATE campaigns 
+              SET total_emails = ?, unique_recipients = ?, first_seen_at = ?, last_seen_at = ?, updated_at = ?
+              WHERE id = ?
+            `).run(newTotalEmails, newUniqueRecipients, firstSeen, lastSeen, new Date().toISOString(), existingCampaign.id);
+            
+            // Delete duplicate campaign
+            db.prepare('DELETE FROM campaigns WHERE id = ?').run(campaign.id);
+            mergedCampaigns++;
+          } else {
+            // No conflict, just update merchant_id
+            db.prepare('UPDATE campaigns SET merchant_id = ? WHERE id = ?')
+              .run(primaryMerchant.id, campaign.id);
+            movedCampaigns++;
+          }
+        }
+        
+        console.log(`    Merged ${mergedCampaigns} duplicate campaigns, moved ${movedCampaigns} unique campaigns`);
+        
+        // Update remaining recipient_paths to point to primary merchant
         const pathResult = db.prepare('UPDATE recipient_paths SET merchant_id = ? WHERE merchant_id = ?')
           .run(primaryMerchant.id, duplicate.id);
         console.log(`    Updated ${pathResult.changes} recipient paths`);

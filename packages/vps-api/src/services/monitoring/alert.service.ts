@@ -107,7 +107,11 @@ export class AlertService {
     const alertLabel = ALERT_TYPE_LABELS[alertType];
     const prevIcon = STATE_ICONS[previousState];
     const currIcon = STATE_ICONS[currentState];
-    const gapDisplay = this.formatGapDisplay(gapMinutes);
+    // Recalculate gapMinutes from lastSeenAt if available to ensure consistency
+    const actualGapMinutes = lastSeenAt
+      ? Math.floor((Date.now() - lastSeenAt.getTime()) / (1000 * 60))
+      : gapMinutes;
+    const gapDisplay = this.formatGapDisplay(actualGapMinutes);
     const lastSeenDisplay = lastSeenAt ? this.formatDateTime(lastSeenAt) : '从未出现';
 
     return (

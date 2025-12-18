@@ -1361,6 +1361,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>商户域名</label>
           <input type="text" id="create-project-merchant-domain" disabled style="background:#f5f5f5">
         </div>
+        <div class="form-group" id="create-project-worker-group" style="display:none;">
+          <label>Worker 实例 *</label>
+          <select id="create-project-worker" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+            <option value="">请选择实例</option>
+          </select>
+          <p id="create-project-worker-error" style="color:#e74c3c;font-size:12px;margin-top:5px;display:none;">请选择一个 Worker 实例</p>
+        </div>
         <div class="form-group">
           <label>项目名称 *</label>
           <input type="text" id="create-project-name" required placeholder="请输入项目名称">
@@ -2561,19 +2568,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       const tableContainer = document.getElementById('merchants-table-container');
       
-      if (!workerName) {
-        showMerchantEmptyState('no-worker');
-        tableContainer.style.display = 'none';
-        return;
-      }
-      
       if (!apiToken) return;
       
       showMerchantEmptyState('loading');
       tableContainer.style.display = 'none';
       
       try {
-        const res = await fetch('/api/campaign/workers/' + encodeURIComponent(workerName) + '/merchants', { headers: getHeaders() });
+        // If workerName is empty, load all merchants; otherwise load worker-specific merchants
+        let url;
+        if (workerName) {
+          url = '/api/campaign/workers/' + encodeURIComponent(workerName) + '/merchants';
+        } else {
+          url = '/api/campaign/merchants';
+        }
+        const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         workerMerchantsData = data.merchants || [];
@@ -2635,16 +2643,35 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     function showCreateProjectModal(merchantId, merchantDomain) {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
-      if (!workerName) {
-        showAlert('请先选择实例', 'error');
-        return;
-      }
       
       // Set modal values
       document.getElementById('create-project-merchant-id').value = merchantId;
       document.getElementById('create-project-merchant-domain').value = merchantDomain;
       document.getElementById('create-project-name').value = merchantDomain;
       document.getElementById('create-project-name-error').style.display = 'none';
+      
+      // Show/hide worker selector based on current filter
+      const workerGroup = document.getElementById('create-project-worker-group');
+      const workerSelect = document.getElementById('create-project-worker');
+      const workerError = document.getElementById('create-project-worker-error');
+      
+      if (!workerName) {
+        // No worker selected, show worker selector
+        workerGroup.style.display = 'block';
+        workerError.style.display = 'none';
+        // Populate worker options from the main filter
+        const mainFilter = document.getElementById('campaign-worker-filter');
+        workerSelect.innerHTML = '<option value="">请选择实例</option>';
+        Array.from(mainFilter.options).forEach(opt => {
+          if (opt.value) {
+            workerSelect.innerHTML += '<option value="' + opt.value + '">' + opt.text + '</option>';
+          }
+        });
+      } else {
+        // Worker already selected, hide selector
+        workerGroup.style.display = 'none';
+        workerSelect.value = workerName;
+      }
       
       showModal('create-project-modal');
     }
@@ -2661,8 +2688,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       const merchantId = document.getElementById('create-project-merchant-id').value;
       const name = document.getElementById('create-project-name').value;
-      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       const errorEl = document.getElementById('create-project-name-error');
+      const workerErrorEl = document.getElementById('create-project-worker-error');
+      
+      // Get worker name from filter or modal selector
+      let workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      if (!workerName) {
+        workerName = document.getElementById('create-project-worker')?.value || '';
+      }
       
       // Validate project name
       if (!validateProjectName(name)) {
@@ -2671,10 +2704,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       errorEl.style.display = 'none';
       
+      // Validate worker selection
       if (!workerName) {
-        showAlert('请先选择实例', 'error');
+        if (workerErrorEl) workerErrorEl.style.display = 'block';
         return;
       }
+      if (workerErrorEl) workerErrorEl.style.display = 'none';
       
       try {
         const res = await fetch('/api/campaign/projects', {

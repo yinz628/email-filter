@@ -1370,6 +1370,44 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Merchant Preview Modal -->
+  <div id="merchant-preview-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:700px;">
+      <div class="modal-header">
+        <h3>📊 商户营销活动预览</h3>
+        <button class="modal-close" onclick="hideModal('merchant-preview-modal')">&times;</button>
+      </div>
+      <div style="padding:15px 0;">
+        <div style="margin-bottom:15px;">
+          <p style="margin:0;"><strong>商户域名:</strong> <span id="preview-merchant-domain">-</span></p>
+          <p style="margin:5px 0 0 0;color:#666;font-size:13px;">
+            共 <strong id="preview-total-campaigns">0</strong> 个营销活动，<strong id="preview-total-emails">0</strong> 封邮件
+          </p>
+        </div>
+        <div id="preview-campaigns-loading" style="text-align:center;padding:20px;color:#666;">
+          加载中...
+        </div>
+        <div id="preview-campaigns-list" style="display:none;max-height:400px;overflow-y:auto;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="background:#f8f9fa;position:sticky;top:0;">
+                <th style="text-align:left;padding:10px;border-bottom:2px solid #dee2e6;">邮件主题</th>
+                <th style="text-align:right;padding:10px;border-bottom:2px solid #dee2e6;width:100px;">邮件数</th>
+              </tr>
+            </thead>
+            <tbody id="preview-campaigns-tbody"></tbody>
+          </table>
+        </div>
+        <div id="preview-campaigns-empty" style="display:none;text-align:center;padding:20px;color:#999;">
+          暂无营销活动数据
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:15px;padding-top:15px;border-top:1px solid #eee;">
+          <button class="btn btn-secondary" onclick="hideModal('merchant-preview-modal')">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Merchant Data Modal -->
   <div id="delete-merchant-modal" class="modal hidden">
     <div class="modal-content">
@@ -2583,6 +2621,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + m.totalEmails + '</td>' +
           '<td>' + projectIndicator + (hasProject ? '是' : '-') + '</td>' +
           '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="showMerchantPreview(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalCampaigns + ', ' + m.totalEmails + ')" style="margin-right:5px;">预览</button>' +
             '<button class="btn btn-sm btn-success" onclick="showCreateProjectModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
             (workerName ? '<button class="btn btn-sm btn-danger" onclick="showDeleteMerchantModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalEmails + ', ' + m.totalCampaigns + ')" style="margin-left:5px;">删除数据</button>' : '') +
           '</td></tr>';
@@ -2721,6 +2760,60 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       } catch (e) {
         showAlert('删除失败', 'error');
+      }
+    }
+
+    // Show merchant preview modal with campaigns list
+    async function showMerchantPreview(merchantId, merchantDomain, totalCampaigns, totalEmails) {
+      // Set header info
+      document.getElementById('preview-merchant-domain').textContent = merchantDomain;
+      document.getElementById('preview-total-campaigns').textContent = totalCampaigns;
+      document.getElementById('preview-total-emails').textContent = totalEmails;
+      
+      // Show loading state
+      document.getElementById('preview-campaigns-loading').style.display = 'block';
+      document.getElementById('preview-campaigns-list').style.display = 'none';
+      document.getElementById('preview-campaigns-empty').style.display = 'none';
+      
+      showModal('merchant-preview-modal');
+      
+      try {
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        let url = '/api/campaign/campaigns?merchantId=' + encodeURIComponent(merchantId) + '&sortBy=totalEmails&sortOrder=desc&limit=50';
+        if (workerName) {
+          url += '&workerName=' + encodeURIComponent(workerName);
+        }
+        
+        const res = await fetch(url, { headers: getHeaders() });
+        
+        if (res.ok) {
+          const data = await res.json();
+          const campaigns = data.campaigns || [];
+          
+          document.getElementById('preview-campaigns-loading').style.display = 'none';
+          
+          if (campaigns.length === 0) {
+            document.getElementById('preview-campaigns-empty').style.display = 'block';
+          } else {
+            document.getElementById('preview-campaigns-list').style.display = 'block';
+            const tbody = document.getElementById('preview-campaigns-tbody');
+            tbody.innerHTML = campaigns.map(c => {
+              return '<tr>' +
+                '<td style="padding:8px 10px;border-bottom:1px solid #eee;word-break:break-word;">' + escapeHtml(c.subject) + '</td>' +
+                '<td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:bold;">' + c.totalEmails + '</td>' +
+                '</tr>';
+            }).join('');
+          }
+        } else {
+          document.getElementById('preview-campaigns-loading').style.display = 'none';
+          document.getElementById('preview-campaigns-empty').style.display = 'block';
+          document.getElementById('preview-campaigns-empty').textContent = '加载失败';
+        }
+      } catch (e) {
+        console.error('Error loading merchant campaigns:', e);
+        document.getElementById('preview-campaigns-loading').style.display = 'none';
+        document.getElementById('preview-campaigns-empty').style.display = 'block';
+        document.getElementById('preview-campaigns-empty').textContent = '加载失败';
       }
     }
 

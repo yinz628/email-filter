@@ -15,6 +15,22 @@ export interface TelegramMessage {
 }
 
 /**
+ * Format current time for display (Asia/Shanghai timezone)
+ */
+function formatCurrentTime(): string {
+  return new Date().toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
+/**
  * Send message via Telegram Bot API
  */
 export async function sendTelegramMessage(
@@ -48,7 +64,9 @@ export async function sendTelegramMessage(
       }
     }
 
-    const text = `${emoji} *${escapeMarkdown(message.title)}*\n\n${escapeMarkdown(message.body)}`;
+    // Add timestamp to all messages
+    const timestamp = formatCurrentTime();
+    const text = `${emoji} *${escapeMarkdown(message.title)}*\n\n${escapeMarkdown(message.body)}\n\n🕐 ${escapeMarkdown(timestamp)}`;
 
     const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
     const response = await fetch(url, {
@@ -72,7 +90,7 @@ export async function sendTelegramMessage(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: config.chatId,
-          text: `${emoji} ${message.title}\n\n${message.body}`,
+          text: `${emoji} ${message.title}\n\n${message.body}\n\n🕐 ${timestamp}`,
         }),
       });
       const retryData = (await retryResponse.json()) as { ok: boolean; description?: string };

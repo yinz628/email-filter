@@ -2393,21 +2393,35 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function updateCampaignStats() {
-      let totalCampaigns = 0;
-      let totalEmails = 0;
-      let valuableCount = 0;
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       
-      merchantsData.forEach(m => {
-        totalCampaigns += m.totalCampaigns || 0;
-        totalEmails += m.totalEmails || 0;
-      });
-      
+      // Display merchant count from loaded data
       document.getElementById('stat-merchants').textContent = merchantsData.length;
-      document.getElementById('stat-campaigns').textContent = totalCampaigns;
-      document.getElementById('stat-campaign-emails').textContent = totalEmails;
       
-      // Get valuable count from all campaigns
+      // Get campaign and email counts from data-stats API (which supports worker filtering)
+      try {
+        let statsUrl = '/api/campaign/data-stats';
+        if (workerName) statsUrl += '?workerName=' + encodeURIComponent(workerName);
+        const statsRes = await fetch(statsUrl, { headers: getHeaders() });
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          document.getElementById('stat-campaigns').textContent = statsData.totalCampaigns || 0;
+          document.getElementById('stat-campaign-emails').textContent = statsData.totalEmails || 0;
+        }
+      } catch (e) {
+        // Fallback to merchant data if API fails
+        let totalCampaigns = 0;
+        let totalEmails = 0;
+        merchantsData.forEach(m => {
+          totalCampaigns += m.totalCampaigns || 0;
+          totalEmails += m.totalEmails || 0;
+        });
+        document.getElementById('stat-campaigns').textContent = totalCampaigns;
+        document.getElementById('stat-campaign-emails').textContent = totalEmails;
+      }
+      
+      // Get valuable count from campaigns API (which supports worker filtering)
+      let valuableCount = 0;
       try {
         let valuableUrl = '/api/campaign/campaigns?valuable=true';
         if (workerName) valuableUrl += '&workerName=' + encodeURIComponent(workerName);

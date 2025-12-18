@@ -97,6 +97,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .value-tag-0 { background: #e9ecef; color: #666; }
     .value-tag-1 { background: #d4edda; color: #155724; }
     .value-tag-2 { background: #fff3cd; color: #856404; }
+    .value-tag-3 { background: #f8d7da; color: #721c24; }
     .path-node { padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; background: #fff; }
     .path-node.highlighted { border-color: #27ae60; background: #e8f5e9; }
     .path-node.highlighted.high-value { border-color: #ffc107; background: #fff8e1; }
@@ -565,6 +566,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 <option value="">全部活动</option>
                 <option value="1">有价值</option>
                 <option value="2">高价值</option>
+                <option value="3">无价值</option>
                 <option value="0">未标记</option>
               </select>
               <select id="campaign-sort-field" onchange="sortCampaignList()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
@@ -3280,8 +3282,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       tbody.innerHTML = sortedCampaigns.map(c => {
         const tag = c.tag || 0;
-        const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值' };
-        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2' };
+        const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值', 3: '无价值' };
+        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-0' };
         const tagBadge = '<span class="' + tagClasses[tag] + '" style="padding:2px 8px;border-radius:4px;font-size:11px;">' + tagLabels[tag] + '</span>';
         const firstSeen = (c.firstSeenAt || c.firstSeen) ? new Date(c.firstSeenAt || c.firstSeen).toLocaleDateString('zh-CN') : '-';
         
@@ -3292,8 +3294,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + tagBadge + '</td>' +
           '<td>' + firstSeen + '</td>' +
           '<td class="actions" onclick="event.stopPropagation()">' +
-            '<button class="btn btn-sm btn-success" onclick="tagCampaign(\\'' + c.id + '\\', 1)">标记有价值</button>' +
-            '<button class="btn btn-sm btn-warning" onclick="tagCampaign(\\'' + c.id + '\\', 2)">标记高价值</button>' +
+            '<button class="btn btn-sm btn-success" onclick="tagCampaign(\\'' + c.id + '\\', 1)">有价值</button>' +
+            '<button class="btn btn-sm btn-warning" onclick="tagCampaign(\\'' + c.id + '\\', 2)">高价值</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="tagCampaign(\\'' + c.id + '\\', 3)">无价值</button>' +
           '</td></tr>';
       }).join('');
     }
@@ -3313,8 +3316,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const campaign = await res.json();
         
         const tag = campaign.tag || 0;
-        const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值', 3: '一般营销', 4: '可忽略' };
-        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-0', 4: 'value-tag-0' };
+        const tagLabels = { 0: '未标记', 1: '有价值', 2: '高价值', 3: '无价值' };
+        const tagClasses = { 0: 'value-tag-0', 1: 'value-tag-1', 2: 'value-tag-2', 3: 'value-tag-0' };
         const firstSeen = campaign.firstSeenAt ? new Date(campaign.firstSeenAt).toLocaleString('zh-CN') : '-';
         const lastSeen = campaign.lastSeenAt ? new Date(campaign.lastSeenAt).toLocaleString('zh-CN') : '-';
         
@@ -3351,8 +3354,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         // Tag buttons
         content += '<div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid #eee;">' +
           '<button class="btn btn-sm btn-secondary" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 0)">清除标记</button>' +
-          '<button class="btn btn-sm btn-success" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 1)">标记有价值</button>' +
-          '<button class="btn btn-sm btn-warning" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 2)">标记高价值</button>' +
+          '<button class="btn btn-sm btn-success" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 1)">有价值</button>' +
+          '<button class="btn btn-sm btn-warning" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 2)">高价值</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="tagCampaignFromDetail(\\'' + campaignId + '\\', 3)">无价值</button>' +
           '</div>';
         
         contentDiv.innerHTML = content;

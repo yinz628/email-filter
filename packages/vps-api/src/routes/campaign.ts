@@ -339,6 +339,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * PUT /api/campaign/merchants/:id
    * Update merchant information
+   * Supports per-worker-instance display name via workerName parameter
    * 
    * Requirements: 1.4
    */
@@ -355,7 +356,14 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const merchant = service.updateMerchant(request.params.id, validation.data);
+      // Get workerName from body (optional, defaults to 'global')
+      const body = request.body as Record<string, unknown>;
+      const workerName = typeof body.workerName === 'string' ? body.workerName : 'global';
+
+      const merchant = service.updateMerchant(request.params.id, {
+        ...validation.data,
+        workerName,
+      });
       if (!merchant) {
         return reply.status(404).send({ error: 'Merchant not found' });
       }

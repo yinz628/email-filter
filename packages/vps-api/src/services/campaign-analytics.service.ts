@@ -254,7 +254,8 @@ export class CampaignAnalyticsService {
             COALESCE(wc.campaign_count, 0) as total_campaigns,
             COALESCE(wc.email_count, 0) as total_emails,
             COALESCE(wc.valuable_count, 0) as valuable_campaigns,
-            COALESCE(mws.analysis_status, m.analysis_status, 'pending') as analysis_status
+            COALESCE(mws.analysis_status, m.analysis_status, 'pending') as analysis_status,
+            COALESCE(mws.display_name, m.display_name) as display_name
           FROM merchants m
           LEFT JOIN (
             SELECT 
@@ -486,36 +487,79 @@ export class CampaignAnalyticsService {
 
   /**
    * Update merchant information
+   * Supports per-instance display name when workerName is provided
    * 
    * @param id - Merchant ID to update
-   * @param data - Update data
+   * @param data - Update data (including optional workerName for per-instance update)
    * @returns Updated Merchant or null if not found
    * 
    * Requirements: 1.4
    */
-  updateMerchant(id: string, data: UpdateMerchantDTO): Merchant | null {
+  updateMerchant(id: string, data: UpdateMerchantDTO & { workerName?: string }): Merchant | null {
     const now = new Date().toISOString();
-    
-    const stmt = this.db.prepare(`
-      UPDATE merchants
-      SET display_name = COALESCE(?, display_name),
-          note = COALESCE(?, note),
-          updated_at = ?
-      WHERE id = ?
-    `);
+    const workerName = data.workerName || 'global';
 
-    const result = stmt.run(
-      data.displayName ?? null,
-      data.note ?? null,
-      now,
-      id
-    );
-
-    if (result.changes === 0) {
+    // Check if merchant exists
+    const merchantExists = this.db.prepare('SELECT id FROM merchants WHERE id = ?').get(id);
+    if (!merchantExists) {
       return null;
     }
 
-    return this.getMerchantById(id);
+    // If workerName is 'global', update the merchants table directly
+    if (workerName === 'global') {
+      const stmt = this.db.prepare(`
+        UPDATE merchants
+        SET display_name = COALESCE(?, display_name),
+            note = COALESCE(?, note),
+            updated_at = ?
+        WHERE id = ?
+      `);
+
+      stmt.run(
+        data.displayName ?? null,
+        data.note ?? null,
+        now,
+        id
+      );
+
+      return this.getMerchantById(id);
+    }
+
+    // For specific worker instances, update merchant_worker_status table
+    const tableExists = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+    `).get();
+
+    if (tableExists && data.displayName !== undefined) {
+      // Check if record exists
+      const existing = this.db.prepare(`
+        SELECT id FROM merchant_worker_status WHERE merchant_id = ? AND worker_name = ?
+      `).get(id, workerName);
+
+      if (existing) {
+        // Update existing record
+        this.db.prepare(`
+          UPDATE merchant_worker_status 
+          SET display_name = ?, updated_at = ?
+          WHERE merchant_id = ? AND worker_name = ?
+        `).run(data.displayName || null, now, id, workerName);
+      } else {
+        // Insert new record
+        this.db.prepare(`
+          INSERT INTO merchant_worker_status (merchant_id, worker_name, display_name, analysis_status, created_at, updated_at)
+          VALUES (?, ?, ?, 'pending', ?, ?)
+        `).run(id, workerName, data.displayName || null, now, now);
+      }
+    }
+
+    // Also update note in global merchants table if provided
+    if (data.note !== undefined) {
+      this.db.prepare(`
+        UPDATE merchants SET note = ?, updated_at = ? WHERE id = ?
+      `).run(data.note, now, id);
+    }
+
+    return this.getMerchantById(id, workerName);
   }
 
   /**

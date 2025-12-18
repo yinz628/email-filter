@@ -2402,10 +2402,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (newName === null) return; // 用户取消
       
       try {
+        // Get current worker filter to update per-instance display name
+        const workerName = document.getElementById('campaign-worker-filter')?.value || 'global';
         const res = await fetch('/api/campaign/merchants/' + merchantId, {
           method: 'PUT',
           headers: getHeaders(),
-          body: JSON.stringify({ displayName: newName || null })
+          body: JSON.stringify({ displayName: newName || null, workerName })
         });
         if (res.ok) {
           showAlert('显示名称已更新');

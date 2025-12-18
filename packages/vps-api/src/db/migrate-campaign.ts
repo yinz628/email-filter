@@ -253,5 +253,23 @@ if (!workerStatusTableExists) {
   console.log('merchant_worker_status table already exists.');
 }
 
+// Migration: Add display_name column to merchant_worker_status table
+try {
+  const columns = db.prepare("PRAGMA table_info(merchant_worker_status)").all() as Array<{ name: string }>;
+  const hasDisplayNameColumn = columns.some(col => col.name === 'display_name');
+  
+  if (!hasDisplayNameColumn) {
+    console.log('Adding display_name column to merchant_worker_status table...');
+    db.exec(`
+      ALTER TABLE merchant_worker_status ADD COLUMN display_name TEXT;
+    `);
+    console.log('display_name column added to merchant_worker_status.');
+  } else {
+    console.log('display_name column already exists in merchant_worker_status.');
+  }
+} catch (e) {
+  console.log('display_name column migration skipped (may already exist).');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

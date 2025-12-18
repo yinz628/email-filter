@@ -210,6 +210,11 @@ export class CampaignAnalyticsService {
     const column = columnMap[sortBy] || 'm.created_at';
     const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
+    // Check if merchant_worker_status table exists
+    const workerStatusTableExists = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+    `).get();
+
     // Build WHERE clause conditions
     const conditions: string[] = [];
     const params: (string | number)[] = [];
@@ -219,7 +224,11 @@ export class CampaignAnalyticsService {
     if (filter?.workerName) {
       // Filter by worker-specific analysis status if provided
       if (filter?.analysisStatus) {
-        conditions.push(`COALESCE(mws.analysis_status, 'pending') = ?`);
+        if (workerStatusTableExists) {
+          conditions.push(`COALESCE(mws.analysis_status, m.analysis_status, 'pending') = ?`);
+        } else {
+          conditions.push(`COALESCE(m.analysis_status, 'pending') = ?`);
+        }
         params.push(filter.analysisStatus);
       }
 
@@ -235,33 +244,63 @@ export class CampaignAnalyticsService {
         conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       // Query with worker-specific counts and status
-      const stmt = this.db.prepare(`
-        SELECT 
-          m.*,
-          COALESCE(wc.campaign_count, 0) as total_campaigns,
-          COALESCE(wc.email_count, 0) as total_emails,
-          COALESCE(wc.valuable_count, 0) as valuable_campaigns,
-          COALESCE(mws.analysis_status, 'pending') as analysis_status
-        FROM merchants m
-        LEFT JOIN (
-          SELECT 
-            c.merchant_id,
-            COUNT(DISTINCT c.id) as campaign_count,
-            COUNT(ce.id) as email_count,
-            COUNT(DISTINCT CASE WHEN c.is_valuable = 1 THEN c.id END) as valuable_count
-          FROM campaigns c
-          JOIN campaign_emails ce ON c.id = ce.campaign_id
-          WHERE ce.worker_name = ?
-          GROUP BY c.merchant_id
-        ) wc ON m.id = wc.merchant_id
-        LEFT JOIN merchant_worker_status mws ON m.id = mws.merchant_id AND mws.worker_name = ?
-        ${whereClause}
-        ORDER BY ${column} ${order}
-        LIMIT ? OFFSET ?
-      `);
+      let query: string;
+      let queryParams: (string | number)[];
 
-      // Add workerName params for subqueries, then limit/offset
-      const queryParams = [filter.workerName, filter.workerName, ...params, limit, offset];
+      if (workerStatusTableExists) {
+        query = `
+          SELECT 
+            m.*,
+            COALESCE(wc.campaign_count, 0) as total_campaigns,
+            COALESCE(wc.email_count, 0) as total_emails,
+            COALESCE(wc.valuable_count, 0) as valuable_campaigns,
+            COALESCE(mws.analysis_status, m.analysis_status, 'pending') as analysis_status
+          FROM merchants m
+          LEFT JOIN (
+            SELECT 
+              c.merchant_id,
+              COUNT(DISTINCT c.id) as campaign_count,
+              COUNT(ce.id) as email_count,
+              COUNT(DISTINCT CASE WHEN c.is_valuable = 1 THEN c.id END) as valuable_count
+            FROM campaigns c
+            JOIN campaign_emails ce ON c.id = ce.campaign_id
+            WHERE ce.worker_name = ?
+            GROUP BY c.merchant_id
+          ) wc ON m.id = wc.merchant_id
+          LEFT JOIN merchant_worker_status mws ON m.id = mws.merchant_id AND mws.worker_name = ?
+          ${whereClause}
+          ORDER BY ${column} ${order}
+          LIMIT ? OFFSET ?
+        `;
+        queryParams = [filter.workerName, filter.workerName, ...params, limit, offset];
+      } else {
+        // Fallback without merchant_worker_status table
+        query = `
+          SELECT 
+            m.*,
+            COALESCE(wc.campaign_count, 0) as total_campaigns,
+            COALESCE(wc.email_count, 0) as total_emails,
+            COALESCE(wc.valuable_count, 0) as valuable_campaigns
+          FROM merchants m
+          LEFT JOIN (
+            SELECT 
+              c.merchant_id,
+              COUNT(DISTINCT c.id) as campaign_count,
+              COUNT(ce.id) as email_count,
+              COUNT(DISTINCT CASE WHEN c.is_valuable = 1 THEN c.id END) as valuable_count
+            FROM campaigns c
+            JOIN campaign_emails ce ON c.id = ce.campaign_id
+            WHERE ce.worker_name = ?
+            GROUP BY c.merchant_id
+          ) wc ON m.id = wc.merchant_id
+          ${whereClause}
+          ORDER BY ${column} ${order}
+          LIMIT ? OFFSET ?
+        `;
+        queryParams = [filter.workerName, ...params, limit, offset];
+      }
+
+      const stmt = this.db.prepare(query);
       const rows = stmt.all(...queryParams) as MerchantRow[];
       return rows.map(toMerchant);
     }
@@ -313,16 +352,27 @@ export class CampaignAnalyticsService {
       return null;
     }
 
-    // Use UPSERT to insert or update the worker-specific status
-    const stmt = this.db.prepare(`
-      INSERT INTO merchant_worker_status (merchant_id, worker_name, analysis_status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(merchant_id, worker_name) DO UPDATE SET
-        analysis_status = excluded.analysis_status,
-        updated_at = excluded.updated_at
-    `);
+    // Check if merchant_worker_status table exists
+    const tableExists = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+    `).get();
 
-    stmt.run(id, workerName, data.status, now, now);
+    if (tableExists) {
+      // Use UPSERT to insert or update the worker-specific status
+      const stmt = this.db.prepare(`
+        INSERT INTO merchant_worker_status (merchant_id, worker_name, analysis_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(merchant_id, worker_name) DO UPDATE SET
+          analysis_status = excluded.analysis_status,
+          updated_at = excluded.updated_at
+      `);
+      stmt.run(id, workerName, data.status, now, now);
+    } else {
+      // Fallback: update global status in merchants table
+      this.db.prepare(`
+        UPDATE merchants SET analysis_status = ?, updated_at = ? WHERE id = ?
+      `).run(data.status, now, id);
+    }
 
     return this.getMerchantById(id, workerName);
   }
@@ -335,12 +385,26 @@ export class CampaignAnalyticsService {
    * @returns Analysis status or 'pending' if not set
    */
   getMerchantWorkerStatus(merchantId: string, workerName: string = 'global'): string {
-    const stmt = this.db.prepare(`
-      SELECT analysis_status FROM merchant_worker_status
-      WHERE merchant_id = ? AND worker_name = ?
+    // Check if merchant_worker_status table exists
+    const tableExists = this.db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+    `).get();
+
+    if (tableExists) {
+      const stmt = this.db.prepare(`
+        SELECT analysis_status FROM merchant_worker_status
+        WHERE merchant_id = ? AND worker_name = ?
+      `);
+      const row = stmt.get(merchantId, workerName) as { analysis_status: string } | undefined;
+      if (row) return row.analysis_status;
+    }
+
+    // Fallback: get global status from merchants table
+    const merchantStmt = this.db.prepare(`
+      SELECT analysis_status FROM merchants WHERE id = ?
     `);
-    const row = stmt.get(merchantId, workerName) as { analysis_status: string } | undefined;
-    return row?.analysis_status || 'pending';
+    const merchantRow = merchantStmt.get(merchantId) as { analysis_status: string } | undefined;
+    return merchantRow?.analysis_status || 'pending';
   }
 
   /**

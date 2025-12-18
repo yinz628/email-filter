@@ -2574,8 +2574,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           await loadProjects();
           await loadMerchantList();
           // Auto-select the newly created project
-          if (data.project && data.project.id) {
-            openProject(data.project.id);
+          // API returns the project object directly, not wrapped in { project: ... }
+          if (data && data.id) {
+            openProject(data.id);
           }
         } else {
           const err = await res.json();
@@ -2719,7 +2720,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function loadRootCampaigns() {
-      if (!currentMerchantId) return;
+      if (!currentMerchantId) {
+        const emptyDiv = document.getElementById('root-campaigns-empty');
+        if (emptyDiv) {
+          emptyDiv.style.display = 'block';
+          emptyDiv.textContent = '无法加载：请先选择一个项目';
+        }
+        return;
+      }
       
       const emptyDiv = document.getElementById('root-campaigns-empty');
       const tableContainer = document.getElementById('root-campaigns-table-container');

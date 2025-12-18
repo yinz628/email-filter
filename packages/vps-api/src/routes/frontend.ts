@@ -496,6 +496,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="50">50条</option>
               <option value="100">100条</option>
             </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="alerts-auto-refresh" onchange="toggleAutoRefresh('alerts')">
+              <span>自动</span>
+            </label>
+            <select id="alerts-refresh-interval" onchange="updateAutoRefreshInterval('alerts')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
+              <option value="30">30秒</option>
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+            </select>
             <button class="btn btn-sm btn-secondary" onclick="loadMonitoringAlerts()">🔄 刷新</button>
             <button class="btn btn-sm btn-danger" id="batch-delete-alerts-btn" onclick="batchDeleteAlerts()" style="display:none;">🗑️ 删除选中</button>
           </div>
@@ -535,6 +544,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="20" selected>20条</option>
               <option value="50">50条</option>
               <option value="0">全部</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;" title="自动心跳检查">
+              <input type="checkbox" id="heartbeat-auto-refresh" onchange="toggleAutoRefresh('heartbeat')">
+              <span>自动心跳</span>
+            </label>
+            <select id="heartbeat-refresh-interval" onchange="updateAutoRefreshInterval('heartbeat')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
+              <option value="30">30秒</option>
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="triggerHeartbeat()">💓 心跳检查</button>
             <button class="btn btn-sm btn-primary" onclick="showModal('add-monitoring-rule-modal')">+ 添加</button>
@@ -578,6 +596,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="50">50条</option>
               <option value="0">全部</option>
             </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="status-auto-refresh" onchange="toggleAutoRefresh('status')">
+              <span>自动</span>
+            </label>
+            <select id="status-refresh-interval" onchange="updateAutoRefreshInterval('status')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
+              <option value="30">30秒</option>
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+            </select>
             <button class="btn btn-sm btn-secondary" onclick="loadMonitoringStatus()">🔄 刷新</button>
           </div>
         </div>
@@ -616,6 +643,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="10" selected>10条</option>
               <option value="20">20条</option>
               <option value="0">全部</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="funnel-auto-refresh" onchange="toggleAutoRefresh('funnel')">
+              <span>自动</span>
+            </label>
+            <select id="funnel-refresh-interval" onchange="updateAutoRefreshInterval('funnel')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
+              <option value="30">30秒</option>
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="checkRatioMonitors()">🔄 检查比例</button>
             <button class="btn btn-sm btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加</button>
@@ -2842,6 +2878,68 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     // ==================== Monitoring Functions ====================
     let monitoringRules = [];
+
+    // Auto-refresh timers
+    const autoRefreshTimers = {
+      alerts: null,
+      status: null,
+      funnel: null,
+      heartbeat: null
+    };
+
+    // Auto-refresh functions
+    const autoRefreshFunctions = {
+      alerts: () => loadMonitoringAlerts(),
+      status: () => loadMonitoringStatus(),
+      funnel: () => { loadRatioMonitors(); checkRatioMonitors(); },
+      heartbeat: () => triggerHeartbeat()
+    };
+
+    function toggleAutoRefresh(type) {
+      const checkbox = document.getElementById(type + '-auto-refresh');
+      const intervalSelect = document.getElementById(type + '-refresh-interval');
+      
+      if (checkbox && checkbox.checked) {
+        const interval = parseInt(intervalSelect?.value || '60', 10) * 1000;
+        startAutoRefresh(type, interval);
+      } else {
+        stopAutoRefresh(type);
+      }
+    }
+
+    function updateAutoRefreshInterval(type) {
+      const checkbox = document.getElementById(type + '-auto-refresh');
+      if (checkbox && checkbox.checked) {
+        const intervalSelect = document.getElementById(type + '-refresh-interval');
+        const interval = parseInt(intervalSelect?.value || '60', 10) * 1000;
+        stopAutoRefresh(type);
+        startAutoRefresh(type, interval);
+      }
+    }
+
+    function startAutoRefresh(type, interval) {
+      stopAutoRefresh(type);
+      const fn = autoRefreshFunctions[type];
+      if (fn) {
+        autoRefreshTimers[type] = setInterval(fn, interval);
+        console.log('[AutoRefresh] Started ' + type + ' with interval ' + (interval/1000) + 's');
+      }
+    }
+
+    function stopAutoRefresh(type) {
+      if (autoRefreshTimers[type]) {
+        clearInterval(autoRefreshTimers[type]);
+        autoRefreshTimers[type] = null;
+        console.log('[AutoRefresh] Stopped ' + type);
+      }
+    }
+
+    function stopAllAutoRefresh() {
+      Object.keys(autoRefreshTimers).forEach(type => stopAutoRefresh(type));
+    }
+
+    // Stop auto-refresh when leaving the page
+    window.addEventListener('beforeunload', stopAllAutoRefresh);
 
     async function loadMonitoringData() {
       await Promise.all([loadMonitoringRules(), loadMonitoringStatus(), loadMonitoringAlerts()]);

@@ -2454,7 +2454,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const valuable = document.getElementById('campaign-valuable-filter').value;
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       let url = '/api/campaign/campaigns?merchantId=' + merchantId;
-      if (valuable) url += '&valuable=' + valuable;
+      if (valuable) url += '&isValuable=' + valuable;
       if (workerName) url += '&workerName=' + encodeURIComponent(workerName);
       
       try {

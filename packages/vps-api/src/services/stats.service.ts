@@ -2,10 +2,10 @@
  * Stats Service for VPS API
  * Handles statistics counting and querying
  * 
- * Requirements: 5.1, 5.2, 5.3
+ * Requirements: 2.1, 2.2, 5.1, 5.2, 5.3
  */
 
-import type { StatsRepository, RuleStats, OverallStats } from '../db/stats-repository.js';
+import type { StatsRepository, RuleStats, OverallStats, WorkerStats } from '../db/stats-repository.js';
 
 /**
  * Rule statistics with additional computed fields
@@ -95,13 +95,46 @@ export class StatsService {
   /**
    * Get complete stats summary including overall and per-rule stats
    * 
+   * @param workerName - Optional worker name filter
    * @returns StatsSummary with all statistics
    */
-  getStatsSummary(): StatsSummary {
+  getStatsSummary(workerName?: string): StatsSummary {
     return {
-      overall: this.getOverallStats(),
+      overall: workerName ? this.getOverallStatsByWorker(workerName) : this.getOverallStats(),
       ruleStats: this.getAllRuleStats(),
     };
+  }
+
+  /**
+   * Get overall statistics filtered by worker name
+   * 
+   * @param workerName - Optional worker name filter
+   * @returns OverallStats filtered by worker
+   * 
+   * Requirements: 2.1, 2.2
+   */
+  getOverallStatsByWorker(workerName?: string): OverallStats {
+    return this.statsRepository.getOverallStatsByWorker(workerName);
+  }
+
+  /**
+   * Get statistics breakdown by worker instance
+   * 
+   * @returns Array of WorkerStats for each worker
+   * 
+   * Requirements: 2.2, 2.3
+   */
+  getStatsByWorker(): WorkerStats[] {
+    return this.statsRepository.getStatsByWorker();
+  }
+
+  /**
+   * Get list of distinct worker names
+   * 
+   * @returns Array of worker names
+   */
+  getWorkerNames(): string[] {
+    return this.statsRepository.getWorkerNames();
   }
 
   /**

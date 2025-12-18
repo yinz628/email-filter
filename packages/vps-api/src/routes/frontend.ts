@@ -272,6 +272,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="filter-bar">
           <input type="text" id="log-search" placeholder="搜索主题/发件人..." style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;width:200px;" onkeydown="if(event.key==='Enter'){resetLogPage();loadLogs();}">
           <button class="btn btn-sm btn-primary" onclick="resetLogPage(); loadLogs()">搜索</button>
+          <select id="log-worker-filter" onchange="resetLogPage(); loadLogs()">
+            <option value="">全部实例</option>
+          </select>
           <select id="log-category-filter" onchange="resetLogPage(); loadLogs()">
             <option value="">全部类型</option>
             <option value="email_forward">📤 转发</option>
@@ -294,6 +297,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <tr>
                 <th style="width:40px;"><input type="checkbox" id="log-select-all" onchange="toggleSelectAllLogs()"></th>
                 <th style="width:140px;">时间</th>
+                <th style="width:80px;">Worker</th>
                 <th style="width:70px;">类型</th>
                 <th style="width:180px;">主题</th>
                 <th style="width:160px;">发件人</th>
@@ -318,6 +322,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">统计信息</h2>
           <div style="display:flex;gap:10px;align-items:center;">
+            <select id="stats-worker-filter" onchange="loadStats()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部实例</option>
+            </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
               <input type="checkbox" id="stats-auto-refresh" onchange="toggleAutoRefresh('stats')">
               <span>自动刷新</span>
@@ -342,6 +349,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">🔥 热门拦截规则</h2>
           <div style="display:flex;gap:10px;align-items:center;">
+            <select id="trending-worker-filter" onchange="loadTrendingRules()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部实例</option>
+            </select>
             <select id="trending-hours" onchange="loadTrendingRules()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="1">最近 1 小时</option>
               <option value="6">最近 6 小时</option>
@@ -358,6 +368,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <th style="width:50px;">排名</th>
               <th>规则内容</th>
               <th style="width:100px;">拦截次数</th>
+              <th style="width:200px;">实例分布</th>
               <th style="width:160px;">最后拦截</th>
             </tr>
           </thead>
@@ -393,6 +404,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
           <div style="display:flex;gap:10px;align-items:center;">
+            <select id="campaign-worker-filter" onchange="loadMerchants(); loadDataStats();" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部实例</option>
+            </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
               <input type="checkbox" id="campaign-auto-refresh" onchange="toggleAutoRefresh('campaign')">
               <span>自动刷新</span>
@@ -608,6 +622,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 <th>商户</th>
                 <th>规则名称</th>
                 <th>标签</th>
+                <th>作用范围</th>
                 <th>主题匹配</th>
                 <th>预期间隔</th>
                 <th>死亡阈值</th>
@@ -1019,6 +1034,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>标签</label>
           <input type="text" id="monitoring-tags" placeholder="多个标签用逗号分隔，例如：重要,订单">
         </div>
+        <div class="form-group">
+          <label>作用范围</label>
+          <select id="monitoring-worker-scope">
+            <option value="global">全局（所有实例）</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">选择监控规则的作用范围，全局表示统计所有实例的数据</p>
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -1066,6 +1088,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>标签</label>
           <input type="text" id="edit-monitoring-tags" placeholder="多个标签用逗号分隔">
         </div>
+        <div class="form-group">
+          <label>作用范围</label>
+          <select id="edit-monitoring-worker-scope">
+            <option value="global">全局（所有实例）</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">选择监控规则的作用范围，全局表示统计所有实例的数据</p>
+        </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
     </div>
@@ -1102,6 +1131,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="24h" selected>24小时</option>
             </select>
           </div>
+        </div>
+        <div class="form-group">
+          <label>作用范围</label>
+          <select id="ratio-worker-scope">
+            <option value="global">全局（所有实例）</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">选择漏斗监控的作用范围，全局表示统计所有实例的数据</p>
         </div>
         <div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -1164,6 +1200,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="24h">24小时</option>
             </select>
           </div>
+        </div>
+        <div class="form-group">
+          <label>作用范围</label>
+          <select id="edit-ratio-worker-scope">
+            <option value="global">全局（所有实例）</option>
+          </select>
+          <p style="color:#888;font-size:12px;margin-top:5px">选择漏斗监控的作用范围，全局表示统计所有实例的数据</p>
         </div>
         <div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -1340,6 +1383,38 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const filterOptions = '<option value="">全部 Worker</option><option value="global">全局规则</option>' +
         workers.map(w => '<option value="' + w.id + '">' + escapeHtml(w.name) + '</option>').join('');
       document.getElementById('rule-worker-filter').innerHTML = filterOptions;
+      
+      // Update logs worker filter
+      const logWorkerFilterOptions = '<option value="">全部实例</option><option value="global">全局</option>' +
+        workers.map(w => '<option value="' + escapeHtml(w.name) + '">' + escapeHtml(w.name) + '</option>').join('');
+      const logWorkerFilter = document.getElementById('log-worker-filter');
+      if (logWorkerFilter) logWorkerFilter.innerHTML = logWorkerFilterOptions;
+      
+      // Update stats worker filter
+      const statsWorkerFilter = document.getElementById('stats-worker-filter');
+      if (statsWorkerFilter) statsWorkerFilter.innerHTML = logWorkerFilterOptions;
+      
+      // Update trending rules worker filter
+      const trendingWorkerFilter = document.getElementById('trending-worker-filter');
+      if (trendingWorkerFilter) trendingWorkerFilter.innerHTML = logWorkerFilterOptions;
+      
+      // Update campaign worker filter
+      const campaignWorkerFilter = document.getElementById('campaign-worker-filter');
+      if (campaignWorkerFilter) campaignWorkerFilter.innerHTML = logWorkerFilterOptions;
+      
+      // Update monitoring worker scope dropdowns
+      const monitoringWorkerScopeOptions = '<option value="global">全局（所有实例）</option>' +
+        workers.map(w => '<option value="' + escapeHtml(w.name) + '">' + escapeHtml(w.name) + '</option>').join('');
+      const monitoringWorkerScope = document.getElementById('monitoring-worker-scope');
+      if (monitoringWorkerScope) monitoringWorkerScope.innerHTML = monitoringWorkerScopeOptions;
+      const editMonitoringWorkerScope = document.getElementById('edit-monitoring-worker-scope');
+      if (editMonitoringWorkerScope) editMonitoringWorkerScope.innerHTML = monitoringWorkerScopeOptions;
+      
+      // Update ratio monitor worker scope dropdowns
+      const ratioWorkerScope = document.getElementById('ratio-worker-scope');
+      if (ratioWorkerScope) ratioWorkerScope.innerHTML = monitoringWorkerScopeOptions;
+      const editRatioWorkerScope = document.getElementById('edit-ratio-worker-scope');
+      if (editRatioWorkerScope) editRatioWorkerScope.innerHTML = monitoringWorkerScopeOptions;
     }
 
     document.getElementById('add-worker-form').addEventListener('submit', async (e) => {
@@ -1699,12 +1774,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadLogs() {
       if (!apiToken) return;
       const category = document.getElementById('log-category-filter').value;
+      const workerName = document.getElementById('log-worker-filter').value;
       const search = document.getElementById('log-search').value.trim();
       currentSearchTerm = search;
       const pageSize = parseInt(document.getElementById('log-page-size').value) || 50;
       const offset = (logCurrentPage - 1) * pageSize;
       let url = '/api/logs?limit=' + (pageSize + 1) + '&offset=' + offset;
       if (category) url += '&category=' + category;
+      if (workerName) url += '&workerName=' + encodeURIComponent(workerName);
       if (search) url += '&search=' + encodeURIComponent(search);
       
       try {
@@ -1759,7 +1836,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('log-select-all').checked = false;
       document.getElementById('batch-delete-btn').style.display = 'none';
       if (logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">暂无日志</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">暂无日志</td></tr>';
         return;
       }
       const categoryLabels = {
@@ -1771,6 +1848,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tbody.innerHTML = logs.map((log, idx) => {
         const time = new Date(log.createdAt).toLocaleString('zh-CN');
         const cat = categoryLabels[log.category] || log.category;
+        const workerName = log.workerName || 'global';
+        const workerDisplay = workerName === 'global' ? '<span class="tag" style="background:#e3f2fd;color:#1565c0;">全局</span>' : '<span class="tag">' + escapeHtml(workerName) + '</span>';
         const d = log.details || {};
         const subject = d.subject || '-';
         const from = d.from || '-';
@@ -1779,6 +1858,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return '<tr>' +
           '<td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="' + log.id + '" onchange="updateBatchDeleteBtn()"></td>' +
           '<td style="font-size:12px;color:#666;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + time + '</td>' +
+          '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + workerDisplay + '</td>' +
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + cat + '</td>' +
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(subject.length > 22 ? subject.substring(0,22) + '...' : subject) + '</td>' +
           '<td style="font-size:12px;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(from.length > 20 ? from.substring(0,20) + '...' : from) + '</td>' +
@@ -1845,9 +1925,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!log) return;
       const d = log.details || {};
       const time = new Date(log.createdAt).toLocaleString('zh-CN');
+      const workerName = log.workerName || 'global';
       const categoryNames = {email_forward:'转发',email_drop:'拦截',admin_action:'管理操作',system:'系统'};
       const content = 
         '<p><strong>时间:</strong> ' + time + '</p>' +
+        '<p><strong>Worker 实例:</strong> ' + escapeHtml(workerName === 'global' ? '全局' : workerName) + '</p>' +
         '<p><strong>类型:</strong> ' + (categoryNames[log.category] || log.category) + '</p>' +
         '<p><strong>消息:</strong> ' + escapeHtml(log.message) + '</p>' +
         '<hr style="margin:10px 0;border:none;border-top:1px solid #eee">' +
@@ -1886,8 +1968,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadStats() {
       if (!apiToken) return;
       try {
+        const workerName = document.getElementById('stats-worker-filter').value;
+        const statsUrl = workerName ? '/api/stats?workerName=' + encodeURIComponent(workerName) : '/api/stats';
+        
         const [statsRes, rulesRes, workersRes, watchRes] = await Promise.all([
-          fetch('/api/stats', { headers: getHeaders() }),
+          fetch(statsUrl, { headers: getHeaders() }),
           fetch('/api/rules', { headers: getHeaders() }),
           fetch('/api/workers', { headers: getHeaders() }),
           fetch('/api/watch', { headers: getHeaders() })
@@ -1913,26 +1998,39 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadTrendingRules() {
       if (!apiToken) return;
       const hours = document.getElementById('trending-hours').value || '24';
+      const workerName = document.getElementById('trending-worker-filter').value;
       try {
-        const res = await fetch('/api/stats/trending?hours=' + hours + '&limit=5', { headers: getHeaders() });
+        let url = '/api/stats/trending?hours=' + hours + '&limit=5';
+        if (workerName) {
+          url += '&workerName=' + encodeURIComponent(workerName);
+        }
+        const res = await fetch(url, { headers: getHeaders() });
         const data = await res.json();
-        renderTrendingRules(data.trending || []);
+        renderTrendingRules(data.trending || [], workerName);
       } catch (e) { console.error('Error loading trending rules:', e); }
     }
 
-    function renderTrendingRules(rules) {
+    function renderTrendingRules(rules, filterWorkerName) {
       const tbody = document.getElementById('trending-rules-table');
       if (rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999">暂无拦截记录</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999">暂无拦截记录</td></tr>';
         return;
       }
       tbody.innerHTML = rules.map((r, idx) => {
         const lastSeen = r.lastSeen ? new Date(r.lastSeen).toLocaleString('zh-CN') : '-';
         const rankIcon = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : (idx + 1);
+        // Render worker breakdown
+        let breakdownHtml = '-';
+        if (r.workerBreakdown && r.workerBreakdown.length > 0) {
+          breakdownHtml = r.workerBreakdown.map(wb => 
+            '<span class="tag" style="margin:2px;">' + escapeHtml(wb.workerName) + ': ' + wb.count + '</span>'
+          ).join('');
+        }
         return '<tr>' +
           '<td style="text-align:center;font-size:18px;">' + rankIcon + '</td>' +
           '<td>' + escapeHtml(r.pattern) + '</td>' +
           '<td style="font-size:18px;font-weight:bold;color:#e74c3c;text-align:center;">' + r.count + '</td>' +
+          '<td style="font-size:12px;">' + breakdownHtml + '</td>' +
           '<td style="font-size:12px;color:#666">' + lastSeen + '</td>' +
         '</tr>';
       }).join('');
@@ -2116,7 +2214,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadDataStats() {
       if (!apiToken) return;
       try {
-        const res = await fetch('/api/campaign/data-stats', { headers: getHeaders() });
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        let url = '/api/campaign/data-stats';
+        if (workerName) url += '?workerName=' + encodeURIComponent(workerName);
+        const res = await fetch(url, { headers: getHeaders() });
         if (res.ok) {
           const data = await res.json();
           document.getElementById('stat-active-data').textContent = data.activeMerchants;
@@ -2130,12 +2231,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function cleanupIgnoredData() {
-      if (!confirm('确定要清理所有已忽略商户的数据吗？此操作不可恢复！')) return;
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      const confirmMsg = workerName 
+        ? '确定要清理实例 "' + workerName + '" 中已忽略商户的邮件数据吗？此操作不可恢复！'
+        : '确定要清理所有已忽略商户的数据吗？此操作不可恢复！';
+      if (!confirm(confirmMsg)) return;
       try {
         const res = await fetch('/api/campaign/cleanup-ignored', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({})
+          body: JSON.stringify({ workerName: workerName || undefined })
         });
         if (res.ok) {
           const data = await res.json();
@@ -2152,12 +2257,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function cleanupPendingData() {
       const days = parseInt(document.getElementById('pending-cleanup-days').value) || 30;
-      if (!confirm('确定要清理 ' + days + ' 天前的待分析商户数据吗？此操作不可恢复！')) return;
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      const confirmMsg = workerName
+        ? '确定要清理实例 "' + workerName + '" 中 ' + days + ' 天前的待分析商户邮件数据吗？此操作不可恢复！'
+        : '确定要清理 ' + days + ' 天前的待分析商户数据吗？此操作不可恢复！';
+      if (!confirm(confirmMsg)) return;
       try {
         const res = await fetch('/api/campaign/cleanup-pending', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({ days })
+          body: JSON.stringify({ days, workerName: workerName || undefined })
         });
         if (res.ok) {
           const data = await res.json();
@@ -2176,8 +2285,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!apiToken) return;
       try {
         const statusFilter = document.getElementById('merchant-status-filter')?.value || '';
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
         let url = '/api/campaign/merchants';
-        if (statusFilter) url += '?analysisStatus=' + statusFilter;
+        const params = [];
+        if (statusFilter) params.push('analysisStatus=' + encodeURIComponent(statusFilter));
+        if (workerName) params.push('workerName=' + encodeURIComponent(workerName));
+        if (params.length > 0) url += '?' + params.join('&');
         
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
@@ -2265,6 +2378,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       let totalCampaigns = 0;
       let totalEmails = 0;
       let valuableCount = 0;
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       
       merchantsData.forEach(m => {
         totalCampaigns += m.totalCampaigns || 0;
@@ -2277,7 +2391,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       // Get valuable count from all campaigns
       try {
-        const res = await fetch('/api/campaign/campaigns?valuable=true', { headers: getHeaders() });
+        let valuableUrl = '/api/campaign/campaigns?valuable=true';
+        if (workerName) valuableUrl += '&workerName=' + encodeURIComponent(workerName);
+        const res = await fetch(valuableUrl, { headers: getHeaders() });
         if (res.ok) {
           const data = await res.json();
           valuableCount = (data.campaigns || []).length;
@@ -2302,8 +2418,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadCampaigns(merchantId) {
       if (!apiToken || !merchantId) return;
       const valuable = document.getElementById('campaign-valuable-filter').value;
+      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       let url = '/api/campaign/campaigns?merchantId=' + merchantId;
       if (valuable) url += '&valuable=' + valuable;
+      if (workerName) url += '&workerName=' + encodeURIComponent(workerName);
       
       try {
         const res = await fetch(url, { headers: getHeaders() });
@@ -3068,7 +3186,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function renderMonitoringRules() {
       const tbody = document.getElementById('monitoring-rules-table');
       if (monitoringRules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#999">暂无监控规则</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#999">暂无监控规则</td></tr>';
         return;
       }
       const limit = parseInt(document.getElementById('rules-rows-limit')?.value || '20', 10);
@@ -3077,10 +3195,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const enabledStatus = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const tagsHtml = (r.tags || []).map(t => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
         const matchModeText = r.matchMode === 'regex' ? '正则' : '包含';
+        const workerScope = r.workerScope || 'global';
+        const scopeBadge = workerScope === 'global' 
+          ? '<span class="tag" style="background:#e3f2fd;color:#1565c0;">🌐 全局</span>'
+          : '<span class="tag" style="background:#fff3e0;color:#e65100;">📍 ' + escapeHtml(workerScope) + '</span>';
         return '<tr>' +
           '<td>' + escapeHtml(r.merchant) + '</td>' +
           '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
           '<td>' + (tagsHtml || '-') + '</td>' +
+          '<td>' + scopeBadge + '</td>' +
           '<td><code style="font-size:11px;">' + escapeHtml(r.subjectPattern) + '</code> <span class="tag">' + matchModeText + '</span></td>' +
           '<td>' + r.expectedIntervalMinutes + ' 分钟</td>' +
           '<td>' + r.deadAfterMinutes + ' 分钟</td>' +
@@ -3094,7 +3217,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         '</tr>';
       }).join('');
       if (limit > 0 && monitoringRules.length > limit) {
-        tbody.innerHTML += '<tr><td colspan="9" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + monitoringRules.length + ' 条</td></tr>';
+        tbody.innerHTML += '<tr><td colspan="10" style="text-align:center;color:#999;font-size:12px;">显示 ' + limit + ' / ' + monitoringRules.length + ' 条</td></tr>';
       }
     }
 
@@ -3433,6 +3556,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         expectedIntervalMinutes: expectedIntervalMinutes,
         deadAfterMinutes: deadAfterMinutes,
         tags: tags,
+        workerScope: document.getElementById('monitoring-worker-scope').value,
         enabled: true
       };
       try {
@@ -3467,6 +3591,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-monitoring-interval').value = rule.expectedIntervalMinutes;
       document.getElementById('edit-monitoring-dead-after').value = rule.deadAfterMinutes;
       document.getElementById('edit-monitoring-tags').value = (rule.tags || []).join(', ');
+      document.getElementById('edit-monitoring-worker-scope').value = rule.workerScope || 'global';
       showModal('edit-monitoring-rule-modal');
     }
 
@@ -3494,7 +3619,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         matchMode: document.getElementById('edit-monitoring-match-mode').value,
         expectedIntervalMinutes: expectedIntervalMinutes,
         deadAfterMinutes: deadAfterMinutes,
-        tags: tags
+        tags: tags,
+        workerScope: document.getElementById('edit-monitoring-worker-scope').value
       };
       try {
         const res = await fetch('/api/monitoring/rules/' + id, {
@@ -3698,11 +3824,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           }
         }
         
+        const workerScope = r.workerScope || 'global';
+        const scopeBadge = workerScope === 'global' 
+          ? '<span class="tag" style="background:#e3f2fd;color:#1565c0;">🌐 全局</span>'
+          : '<span class="tag" style="background:#fff3e0;color:#e65100;">📍 ' + escapeHtml(workerScope) + '</span>';
+        
         return '<div style="border:1px solid #eee;border-radius:8px;padding:15px;margin-bottom:15px;background:#fafafa;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
             '<div>' +
               '<strong style="font-size:16px;">' + escapeHtml(r.name) + '</strong>' +
               ' <span class="tag">' + escapeHtml(r.tag) + '</span>' +
+              ' ' + scopeBadge +
               ' ' + enabledStatus +
             '</div>' +
             '<div class="actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
@@ -3798,6 +3930,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         steps: steps.slice(2).map((s, idx) => ({ ruleId: s.ruleId, order: idx + 3, thresholdPercent: s.thresholdPercent })),
         thresholdPercent: steps[1].thresholdPercent,
         timeWindow: document.getElementById('ratio-time-window').value,
+        workerScope: document.getElementById('ratio-worker-scope').value,
         enabled: true
       };
       try {
@@ -3869,6 +4002,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-ratio-tag').value = monitor.tag;
       document.getElementById('edit-ratio-threshold').value = monitor.thresholdPercent;
       document.getElementById('edit-ratio-time-window').value = monitor.timeWindow;
+      document.getElementById('edit-ratio-worker-scope').value = monitor.workerScope || 'global';
       
       // Build steps UI - collect all steps first, then build HTML once
       const container = document.getElementById('edit-funnel-steps-container');
@@ -3937,7 +4071,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         secondRuleId: steps[1].ruleId,
         steps: steps.slice(2).map((s, idx) => ({ ruleId: s.ruleId, order: idx + 3, thresholdPercent: s.thresholdPercent })),
         thresholdPercent: steps[1].thresholdPercent,
-        timeWindow: document.getElementById('edit-ratio-time-window').value
+        timeWindow: document.getElementById('edit-ratio-time-window').value,
+        workerScope: document.getElementById('edit-ratio-worker-scope').value
       };
       try {
         const res = await fetch('/api/monitoring/ratio/' + id, {

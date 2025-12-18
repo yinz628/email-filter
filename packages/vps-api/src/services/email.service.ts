@@ -88,6 +88,9 @@ export class EmailService {
       ? `拦截邮件: ${payload.subject}`
       : `转发邮件: ${payload.subject}`;
     
+    // Include workerName from payload (defaults to 'global' if not provided)
+    const workerName = payload.workerName || 'global';
+    
     this.logRepository.create(category, message, {
       from: payload.from,
       to: payload.to,
@@ -96,7 +99,7 @@ export class EmailService {
       forwardTo: filterResult.forwardTo,
       matchedRule: filterResult.matchedRule?.pattern,
       reason: filterResult.reason,
-    });
+    }, 'info', workerName);
   }
 
   /**

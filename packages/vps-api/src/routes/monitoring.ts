@@ -45,6 +45,7 @@ interface GetRulesQuery {
   merchant?: string;
   tag?: string;
   enabled?: string;
+  workerScope?: string;
 }
 
 interface GetAlertsQuery {
@@ -101,6 +102,7 @@ function validateCreateRuleBody(body: unknown): { valid: boolean; error?: string
       expectedIntervalMinutes: data.expectedIntervalMinutes as number,
       deadAfterMinutes: data.deadAfterMinutes as number,
       tags,
+      workerScope: typeof data.workerScope === 'string' ? data.workerScope : 'global',
       enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
     },
   };
@@ -150,6 +152,12 @@ function validateUpdateRuleBody(body: unknown): { valid: boolean; error?: string
     } else if (typeof data.tags === 'string') {
       updateData.tags = data.tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
     }
+  }
+  if (data.workerScope !== undefined) {
+    if (typeof data.workerScope !== 'string') {
+      return { valid: false, error: 'workerScope must be a string' };
+    }
+    updateData.workerScope = data.workerScope;
   }
   if (data.enabled !== undefined) {
     updateData.enabled = Boolean(data.enabled);
@@ -262,8 +270,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const ruleRepo = new MonitoringRuleRepository(db);
       const ruleService = new MonitoringRuleService(ruleRepo);
 
-      const { merchant, tag, enabled } = request.query;
-      const filter: { merchant?: string; tag?: string; enabled?: boolean } = {};
+      const { merchant, tag, enabled, workerScope } = request.query;
+      const filter: { merchant?: string; tag?: string; enabled?: boolean; workerScope?: string } = {};
 
       if (merchant) {
         filter.merchant = merchant;
@@ -273,6 +281,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       }
       if (enabled !== undefined) {
         filter.enabled = enabled === 'true';
+      }
+      if (workerScope) {
+        filter.workerScope = workerScope;
       }
 
       const rules = ruleService.getRules(Object.keys(filter).length > 0 ? filter : undefined);

@@ -4,6 +4,7 @@
  * **Feature: email-realtime-monitoring, Property 10: 状态转换告警矩阵**
  * **Feature: email-realtime-monitoring, Property 11: 告警内容完整性**
  * **Feature: email-realtime-monitoring, Property 13: 状态格式化输出**
+ * **Feature: worker-instance-data-separation, Property 6: Alert Scope Marking**
  * **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 6.3**
  */
 
@@ -33,6 +34,11 @@ const signalStateArbitrary = fc.constantFrom<SignalState>('ACTIVE', 'WEAK', 'DEA
 const positiveIntArbitrary = fc.integer({ min: 0, max: 10000 });
 const merchantArbitrary = fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0);
 const ruleNameArbitrary = fc.string({ minLength: 1, maxLength: 100 }).filter((s) => s.trim().length > 0);
+// Worker scope can be 'global' or a specific worker name
+const workerScopeArbitrary = fc.oneof(
+  fc.constant('global'),
+  fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0 && s !== 'global')
+);
 
 /**
  * Test-specific AlertRepository that works with sql.js
@@ -52,22 +58,24 @@ class TestAlertRepository {
       count12h: row[7] as number,
       count24h: row[8] as number,
       message: row[9] as string,
-      sentAt: row[10] ? new Date(row[10] as string) : null,
-      createdAt: new Date(row[11] as string),
+      workerScope: (row[10] as string) || 'global',
+      sentAt: row[11] ? new Date(row[11] as string) : null,
+      createdAt: new Date(row[12] as string),
     };
   }
 
   create(dto: CreateAlertDTO): Alert {
     const id = uuidv4();
     const now = new Date().toISOString();
+    const workerScope = dto.workerScope || 'global';
 
     this.db.run(
       `INSERT INTO alerts (
         id, rule_id, alert_type, previous_state, current_state,
         gap_minutes, count_1h, count_12h, count_24h,
-        message, sent_at, created_at
+        message, worker_scope, sent_at, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       [
         id,
         dto.ruleId,
@@ -79,6 +87,7 @@ class TestAlertRepository {
         dto.count12h,
         dto.count24h,
         dto.message,
+        workerScope,
         now,
       ]
     );
@@ -94,6 +103,7 @@ class TestAlertRepository {
       count12h: dto.count12h,
       count24h: dto.count24h,
       message: dto.message,
+      workerScope,
       sentAt: null,
       createdAt: new Date(now),
     };
@@ -196,6 +206,7 @@ class TestAlertService {
       count12h,
       count24h,
       message,
+      workerScope: rule.workerScope,
     });
   }
 
@@ -473,6 +484,139 @@ describe('AlertService', () => {
       const alert = service.createAlertFromStateChange(rule, 'ACTIVE', 'ACTIVE', 30, 5, 20, 50);
 
       expect(alert).toBeNull();
+    });
+  });
+
+  /**
+   * **Feature: worker-instance-data-separation, Property 6: Alert Scope Marking**
+   * *For any* alert triggered by a scoped rule, the alert should contain the rule's worker scope information.
+   * **Validates: Requirements 5.5**
+   */
+  describe('Property 6: Alert Scope Marking', () => {
+    it('alerts should contain the same workerScope as the rule that triggered them', () => {
+      fc.assert(
+        fc.property(
+          workerScopeArbitrary,
+          merchantArbitrary,
+          ruleNameArbitrary,
+          positiveIntArbitrary,
+          positiveIntArbitrary,
+          positiveIntArbitrary,
+          positiveIntArbitrary,
+          (workerScope, merchant, name, gapMinutes, count1h, count12h, count24h) => {
+            const ruleId = uuidv4();
+            const rule: MonitoringRule = {
+              id: ruleId,
+              merchant,
+              name,
+              subjectPattern: '.*',
+              matchMode: 'contains',
+              expectedIntervalMinutes: 60,
+              deadAfterMinutes: 120,
+              tags: [],
+              workerScope,
+              enabled: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
+
+            // Insert rule into database
+            const now = new Date().toISOString();
+            db.run(
+              `INSERT INTO monitoring_rules (id, merchant, name, subject_pattern, expected_interval_minutes, dead_after_minutes, worker_scope, enabled, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [rule.id, rule.merchant, rule.name, rule.subjectPattern, rule.expectedIntervalMinutes, rule.deadAfterMinutes, workerScope, 1, now, now]
+            );
+
+            // Create alert from state change (ACTIVE -> WEAK triggers FREQUENCY_DOWN)
+            const alert = service.createAlertFromStateChange(
+              rule,
+              'ACTIVE',
+              'WEAK',
+              gapMinutes,
+              count1h,
+              count12h,
+              count24h
+            );
+
+            // Alert should be created and contain the rule's workerScope
+            expect(alert).not.toBeNull();
+            expect(alert!.workerScope).toBe(workerScope);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('alerts with global scope should have workerScope set to "global"', () => {
+      const ruleId = uuidv4();
+      const rule: MonitoringRule = {
+        id: ruleId,
+        merchant: 'test-merchant',
+        name: 'Test Rule',
+        subjectPattern: '.*',
+        matchMode: 'contains',
+        expectedIntervalMinutes: 60,
+        deadAfterMinutes: 120,
+        tags: [],
+        workerScope: 'global',
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Insert rule into database
+      const now = new Date().toISOString();
+      db.run(
+        `INSERT INTO monitoring_rules (id, merchant, name, subject_pattern, expected_interval_minutes, dead_after_minutes, worker_scope, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [rule.id, rule.merchant, rule.name, rule.subjectPattern, rule.expectedIntervalMinutes, rule.deadAfterMinutes, 'global', 1, now, now]
+      );
+
+      const alert = service.createAlertFromStateChange(rule, 'ACTIVE', 'DEAD', 150, 0, 5, 20);
+
+      expect(alert).not.toBeNull();
+      expect(alert!.workerScope).toBe('global');
+    });
+
+    it('alerts with specific worker scope should preserve that scope', () => {
+      fc.assert(
+        fc.property(
+          fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0 && s !== 'global'),
+          (specificWorker) => {
+            const ruleId = uuidv4();
+            const rule: MonitoringRule = {
+              id: ruleId,
+              merchant: 'test-merchant',
+              name: 'Test Rule',
+              subjectPattern: '.*',
+              matchMode: 'contains',
+              expectedIntervalMinutes: 60,
+              deadAfterMinutes: 120,
+              tags: [],
+              workerScope: specificWorker,
+              enabled: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
+
+            // Insert rule into database
+            const now = new Date().toISOString();
+            db.run(
+              `INSERT INTO monitoring_rules (id, merchant, name, subject_pattern, expected_interval_minutes, dead_after_minutes, worker_scope, enabled, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [rule.id, rule.merchant, rule.name, rule.subjectPattern, rule.expectedIntervalMinutes, rule.deadAfterMinutes, specificWorker, 1, now, now]
+            );
+
+            // Test WEAK -> DEAD transition (triggers SIGNAL_DEAD)
+            const alert = service.createAlertFromStateChange(rule, 'WEAK', 'DEAD', 200, 0, 2, 10);
+
+            expect(alert).not.toBeNull();
+            expect(alert!.workerScope).toBe(specificWorker);
+          }
+        ),
+        { numRuns: 100 }
+      );
     });
   });
 });

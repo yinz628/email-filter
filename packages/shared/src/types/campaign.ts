@@ -387,6 +387,7 @@ export interface TrackEmailDTO {
   subject: string;
   recipient: string;
   receivedAt?: string;
+  workerName?: string; // Worker instance name for data separation
 }
 
 /**
@@ -442,6 +443,7 @@ export interface CampaignFilter {
   isValuable?: boolean;
   tag?: CampaignTag; // Filter by specific tag
   excludeTag?: CampaignTag; // Exclude campaigns with this tag (e.g., 4 for ignorable)
+  workerName?: string; // Filter by worker instance name
   sortBy?: 'firstSeenAt' | 'lastSeenAt' | 'totalEmails' | 'uniqueRecipients';
   sortOrder?: 'asc' | 'desc';
   limit?: number;
@@ -453,6 +455,7 @@ export interface CampaignFilter {
  */
 export interface MerchantFilter {
   analysisStatus?: MerchantAnalysisStatus; // Filter by analysis status
+  workerName?: string; // Filter by worker instance name
   sortBy?: 'domain' | 'totalCampaigns' | 'totalEmails' | 'createdAt';
   sortOrder?: 'asc' | 'desc';
   limit?: number;

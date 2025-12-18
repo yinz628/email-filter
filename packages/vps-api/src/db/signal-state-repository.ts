@@ -49,6 +49,7 @@ export class SignalStateRepository {
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
       tags,
+      workerScope: (row as any).worker_scope || 'global',
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -65,7 +66,7 @@ export class SignalStateRepository {
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
         mr.id, mr.merchant, mr.name, mr.subject_pattern, mr.match_mode,
         mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
-        mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
+        mr.worker_scope, mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
       JOIN monitoring_rules mr ON ss.rule_id = mr.id
       WHERE ss.rule_id = ?
@@ -91,6 +92,7 @@ export class SignalStateRepository {
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
       tags,
+      workerScope: row.worker_scope || 'global',
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.rule_updated_at),
@@ -125,7 +127,7 @@ export class SignalStateRepository {
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
         mr.id, mr.merchant, mr.name, mr.subject_pattern, mr.match_mode,
         mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
-        mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
+        mr.worker_scope, mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
       JOIN monitoring_rules mr ON ss.rule_id = mr.id
       ORDER BY 
@@ -156,6 +158,7 @@ export class SignalStateRepository {
         expectedIntervalMinutes: row.expected_interval_minutes,
         deadAfterMinutes: row.dead_after_minutes,
         tags,
+        workerScope: row.worker_scope || 'global',
         enabled: row.enabled === 1,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.rule_updated_at),
@@ -190,7 +193,7 @@ export class SignalStateRepository {
         ss.count_1h, ss.count_12h, ss.count_24h, ss.updated_at,
         mr.id, mr.merchant, mr.name, mr.subject_pattern, mr.match_mode,
         mr.expected_interval_minutes, mr.dead_after_minutes, mr.tags,
-        mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
+        mr.worker_scope, mr.enabled, mr.created_at, mr.updated_at as rule_updated_at
       FROM signal_states ss
       JOIN monitoring_rules mr ON ss.rule_id = mr.id
       WHERE mr.enabled = 1
@@ -222,6 +225,7 @@ export class SignalStateRepository {
         expectedIntervalMinutes: row.expected_interval_minutes,
         deadAfterMinutes: row.dead_after_minutes,
         tags,
+        workerScope: row.worker_scope || 'global',
         enabled: row.enabled === 1,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.rule_updated_at),

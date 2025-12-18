@@ -113,7 +113,7 @@ export class RatioMonitorService {
   /**
    * Get all ratio monitors
    */
-  getAll(filter?: { tag?: string; enabled?: boolean }): RatioMonitor[] {
+  getAll(filter?: { tag?: string; enabled?: boolean; workerScope?: string }): RatioMonitor[] {
     return this.ratioRepo.getAll(filter);
   }
 
@@ -148,7 +148,7 @@ export class RatioMonitorService {
   /**
    * Get current status of all ratio monitors
    */
-  getAllStatus(filter?: { tag?: string; enabled?: boolean }): RatioStatus[] {
+  getAllStatus(filter?: { tag?: string; enabled?: boolean; workerScope?: string }): RatioStatus[] {
     const monitors = this.ratioRepo.getAll(filter);
     return monitors.map((monitor) => this.getStatus(monitor));
   }

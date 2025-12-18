@@ -200,6 +200,7 @@ export class AlertService {
       count12h,
       count24h,
       message,
+      workerScope: rule.workerScope,
     });
 
     // Send Telegram notification

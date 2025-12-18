@@ -60,6 +60,7 @@ class TestMonitoringRuleRepository {
   constructor(private db: SqlJsDatabase) {}
 
   private rowToRule(row: any[]): MonitoringRule {
+    // Schema: id, merchant, name, subject_pattern, expected_interval_minutes, dead_after_minutes, tags, worker_scope, enabled, created_at, updated_at
     return {
       id: row[0] as string,
       merchant: row[1] as string,
@@ -67,9 +68,10 @@ class TestMonitoringRuleRepository {
       subjectPattern: row[3] as string,
       expectedIntervalMinutes: row[4] as number,
       deadAfterMinutes: row[5] as number,
-      enabled: row[6] === 1,
-      createdAt: new Date(row[7] as string),
-      updatedAt: new Date(row[8] as string),
+      workerScope: (row[7] as string) || 'global',
+      enabled: row[8] === 1,
+      createdAt: new Date(row[9] as string),
+      updatedAt: new Date(row[10] as string),
     };
   }
 
@@ -82,10 +84,10 @@ class TestMonitoringRuleRepository {
       `INSERT INTO monitoring_rules (
         id, merchant, name, subject_pattern, 
         expected_interval_minutes, dead_after_minutes, 
-        enabled, created_at, updated_at
+        tags, worker_scope, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, dto.merchant, dto.name, dto.subjectPattern, dto.expectedIntervalMinutes, dto.deadAfterMinutes, enabled ? 1 : 0, now, now]
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, dto.merchant, dto.name, dto.subjectPattern, dto.expectedIntervalMinutes, dto.deadAfterMinutes, '[]', 'global', enabled ? 1 : 0, now, now]
     );
 
     this.db.run(
@@ -101,6 +103,7 @@ class TestMonitoringRuleRepository {
       subjectPattern: dto.subjectPattern,
       expectedIntervalMinutes: dto.expectedIntervalMinutes,
       deadAfterMinutes: dto.deadAfterMinutes,
+      workerScope: 'global',
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),

@@ -45,11 +45,10 @@ describe('Property 4: 正则匹配正确性', () => {
           fc.string({ minLength: 0, maxLength: 20 }),
           fc.string({ minLength: 0, maxLength: 20 }),
           (pattern, prefix, suffix) => {
-            // Escape special regex characters in the pattern
-            const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Use contains mode (default) which does literal matching
             const subject = prefix + pattern + suffix;
             
-            const result = matchSubject(escapedPattern, subject);
+            const result = matchSubject(pattern, subject, 'contains');
             
             // Should match because subject contains the pattern
             expect(result.matched).toBe(true);
@@ -66,7 +65,8 @@ describe('Property 4: 正则匹配正确性', () => {
           simplePatternArbitrary,
           subjectArbitrary,
           (pattern, subject) => {
-            const result = matchSubject(pattern, subject);
+            // Use regex mode to compare with native RegExp behavior
+            const result = matchSubject(pattern, subject, 'regex');
             
             // Compare with native RegExp behavior
             try {

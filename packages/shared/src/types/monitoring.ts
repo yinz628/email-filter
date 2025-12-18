@@ -50,6 +50,13 @@ export type AlertChannelType = 'webhook' | 'email';
 export type SubjectMatchMode = 'contains' | 'regex';
 
 /**
+ * Worker scope type for monitoring rules
+ * - 'global': Monitor all worker instances
+ * - specific worker name: Monitor only that worker instance
+ */
+export type WorkerScope = 'global' | string;
+
+/**
  * Monitoring rule defining a signal to track
  */
 export interface MonitoringRule {
@@ -61,6 +68,7 @@ export interface MonitoringRule {
   expectedIntervalMinutes: number;     // Expected appearance interval (minutes)
   deadAfterMinutes: number;            // Death threshold (minutes)
   tags: string[];                      // Tags for categorization
+  workerScope: WorkerScope;            // Worker scope: 'global' or specific worker name
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -77,6 +85,7 @@ export interface CreateMonitoringRuleDTO {
   expectedIntervalMinutes: number;
   deadAfterMinutes: number;
   tags?: string[];
+  workerScope?: WorkerScope;           // Default: 'global'
   enabled?: boolean;
 }
 
@@ -92,6 +101,7 @@ export interface UpdateMonitoringRuleDTO {
   expectedIntervalMinutes?: number;
   deadAfterMinutes?: number;
   tags?: string[];
+  workerScope?: WorkerScope;
   enabled?: boolean;
 }
 
@@ -102,6 +112,7 @@ export interface MonitoringRuleFilter {
   merchant?: string;
   tag?: string;
   enabled?: boolean;
+  workerScope?: WorkerScope;           // Filter by worker scope
 }
 
 // ============================================================================
@@ -154,6 +165,7 @@ export interface Alert {
   count12h: number;
   count24h: number;
   message: string;
+  workerScope: WorkerScope;            // Worker scope from the rule
   sentAt: Date | null;
   createdAt: Date;
 }
@@ -171,6 +183,7 @@ export interface CreateAlertDTO {
   count12h: number;
   count24h: number;
   message: string;
+  workerScope?: WorkerScope;           // Worker scope from the rule
 }
 
 /**
@@ -424,6 +437,7 @@ export interface RatioMonitor {
   steps: FunnelStep[];                 // Additional steps for funnel (step 3+)
   thresholdPercent: number;            // Alert when ratio < threshold (e.g., 80 = 80%)
   timeWindow: RatioTimeWindow;         // Time window for calculation
+  workerScope: WorkerScope;            // Worker scope: 'global' or specific worker name
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -440,6 +454,7 @@ export interface CreateRatioMonitorDTO {
   steps?: FunnelStep[];                // Optional additional steps
   thresholdPercent: number;
   timeWindow: RatioTimeWindow;
+  workerScope?: WorkerScope;           // Default: 'global'
   enabled?: boolean;
 }
 
@@ -454,6 +469,7 @@ export interface UpdateRatioMonitorDTO {
   steps?: FunnelStep[];
   thresholdPercent?: number;
   timeWindow?: RatioTimeWindow;
+  workerScope?: WorkerScope;
   enabled?: boolean;
 }
 

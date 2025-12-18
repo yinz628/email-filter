@@ -67,6 +67,35 @@ class TestCampaignAnalyticsService {
     return { merchant, isNew: true };
   }
 
+  getMerchants(filter?: { workerName?: string }): any[] {
+    let query = 'SELECT * FROM merchants';
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    // Filter by workerName - only show merchants that have emails from this worker
+    if (filter?.workerName) {
+      conditions.push(`id IN (
+        SELECT DISTINCT c.merchant_id 
+        FROM campaigns c 
+        JOIN campaign_emails ce ON c.id = ce.campaign_id 
+        WHERE ce.worker_name = ?
+      )`);
+      params.push(filter.workerName);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    const result = this.db.exec(query, params);
+    if (result.length === 0) {
+      return [];
+    }
+
+    const columns = result[0].columns;
+    return result[0].values.map(row => this.rowToMerchant(columns, row));
+  }
+
   getCampaignByMerchantAndSubject(merchantId: string, subjectHash: string): any | null {
     const result = this.db.exec(
       'SELECT * FROM campaigns WHERE merchant_id = ? AND subject_hash = ?',
@@ -136,7 +165,7 @@ class TestCampaignAnalyticsService {
     return { campaign: created, isNew: true };
   }
 
-  trackEmail(data: { sender: string; subject: string; recipient: string; receivedAt?: string }): any {
+  trackEmail(data: { sender: string; subject: string; recipient: string; receivedAt?: string; workerName?: string }): any {
     const domain = extractDomain(data.sender);
     if (!domain) {
       throw new Error('Invalid sender email');
@@ -145,6 +174,7 @@ class TestCampaignAnalyticsService {
     const receivedAt = data.receivedAt ? new Date(data.receivedAt) : new Date();
     const receivedAtStr = receivedAt.toISOString();
     const now = new Date().toISOString();
+    const workerName = data.workerName || 'global';
     
     const { merchant, isNew: isNewMerchant } = this.getOrCreateMerchant(domain);
     const { campaign, isNew: isNewCampaign } = this.createOrUpdateCampaign(
@@ -153,11 +183,11 @@ class TestCampaignAnalyticsService {
       receivedAt
     );
 
-    // Record the email
+    // Record the email with worker_name
     this.db.run(
-      `INSERT INTO campaign_emails (campaign_id, recipient, received_at)
-       VALUES (?, ?, ?)`,
-      [campaign.id, data.recipient, receivedAtStr]
+      `INSERT INTO campaign_emails (campaign_id, recipient, received_at, worker_name)
+       VALUES (?, ?, ?, ?)`,
+      [campaign.id, data.recipient, receivedAtStr, workerName]
     );
 
     // Update merchant total emails
@@ -253,7 +283,7 @@ class TestCampaignAnalyticsService {
     };
   }
 
-  getCampaigns(filter?: { merchantId?: string; isValuable?: boolean }): any[] {
+  getCampaigns(filter?: { merchantId?: string; isValuable?: boolean; workerName?: string }): any[] {
     let query = 'SELECT * FROM campaigns';
     const params: any[] = [];
     const conditions: string[] = [];
@@ -266,6 +296,16 @@ class TestCampaignAnalyticsService {
     if (filter?.isValuable !== undefined) {
       conditions.push('is_valuable = ?');
       params.push(filter.isValuable ? 1 : 0);
+    }
+
+    // Filter by workerName - only show campaigns that have emails from this worker
+    if (filter?.workerName) {
+      conditions.push(`id IN (
+        SELECT DISTINCT campaign_id 
+        FROM campaign_emails 
+        WHERE worker_name = ?
+      )`);
+      params.push(filter.workerName);
     }
 
     if (conditions.length > 0) {
@@ -679,7 +719,7 @@ async function createTestDb(): Promise<SqlJsDatabase> {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
   
-  // Load campaign schema
+  // Load campaign schema (includes worker_name column)
   const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
   const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
   db.run(campaignSchema);
@@ -2378,6 +2418,175 @@ describe('CampaignAnalyticsService', () => {
                   const maxSourcePercentage = Math.max(...sourceNodes.map((n: any) => n.percentage));
                   expect(edge.percentage).toBeLessThanOrEqual(maxSourcePercentage + 0.01);
                 }
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: worker-instance-data-separation, Property 2: Filter Consistency (campaign part)**
+   * **Validates: Requirements 4.2, 4.3**
+   * 
+   * For any query with a specific worker name filter, all returned campaigns and merchants
+   * should only include data from that worker instance.
+   */
+  describe('Property 2: Filter Consistency (campaign part)', () => {
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker-a'),
+      fc.constant('worker-b'),
+      fc.constant('worker-c'),
+      fc.stringOf(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789-'.split('')), { minLength: 1, maxLength: 20 })
+    );
+
+    it('should only return campaigns that have emails from the specified worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          validEmailArb, // sender
+          fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 2, maxLength: 4 })
+            .filter(arr => new Set(arr).size === arr.length), // unique subjects
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb.filter(w => w !== 'global'), // different worker
+          (sender, subjects, recipient, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              const domain = extractDomain(sender);
+              if (!domain) return;
+
+              // Track some emails with workerA
+              const workerACampaignIds = new Set<string>();
+              for (let i = 0; i < Math.min(2, subjects.length); i++) {
+                const result = service.trackEmail({
+                  sender,
+                  subject: subjects[i],
+                  recipient,
+                  workerName: workerA,
+                });
+                workerACampaignIds.add(result.campaignId);
+              }
+
+              // Track some emails with workerB (different subjects)
+              const workerBCampaignIds = new Set<string>();
+              for (let i = Math.min(2, subjects.length); i < subjects.length; i++) {
+                const result = service.trackEmail({
+                  sender,
+                  subject: subjects[i],
+                  recipient,
+                  workerName: workerB,
+                });
+                workerBCampaignIds.add(result.campaignId);
+              }
+
+              // Query campaigns filtered by workerA
+              const campaignsForWorkerA = service.getCampaigns({ workerName: workerA });
+              
+              // All returned campaigns should be from workerA
+              for (const campaign of campaignsForWorkerA) {
+                expect(workerACampaignIds.has(campaign.id)).toBe(true);
+                expect(workerBCampaignIds.has(campaign.id)).toBe(false);
+              }
+
+              // Query campaigns filtered by workerB
+              const campaignsForWorkerB = service.getCampaigns({ workerName: workerB });
+              
+              // All returned campaigns should be from workerB
+              for (const campaign of campaignsForWorkerB) {
+                expect(workerBCampaignIds.has(campaign.id)).toBe(true);
+                expect(workerACampaignIds.has(campaign.id)).toBe(false);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should only return merchants that have emails from the specified worker', async () => {
+      const SQL = await initSqlJs();
+      
+      fc.assert(
+        fc.property(
+          fc.array(validEmailArb, { minLength: 2, maxLength: 4 })
+            .filter(arr => {
+              // Ensure unique domains
+              const domains = arr.map(e => extractDomain(e)).filter(d => d !== null);
+              return new Set(domains).size === domains.length;
+            }),
+          fc.string({ minLength: 1, maxLength: 50 }), // subject
+          validEmailArb, // recipient
+          workerNameArb,
+          workerNameArb.filter(w => w !== 'global'),
+          (senders, subject, recipient, workerA, workerB) => {
+            // Ensure workers are different
+            if (workerA === workerB) return;
+            if (senders.length < 2) return;
+            
+            // Create fresh database for each iteration
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              // Track emails from first sender with workerA
+              const workerAMerchantIds = new Set<string>();
+              const result1 = service.trackEmail({
+                sender: senders[0],
+                subject,
+                recipient,
+                workerName: workerA,
+              });
+              workerAMerchantIds.add(result1.merchantId);
+
+              // Track emails from second sender with workerB
+              const workerBMerchantIds = new Set<string>();
+              const result2 = service.trackEmail({
+                sender: senders[1],
+                subject,
+                recipient,
+                workerName: workerB,
+              });
+              workerBMerchantIds.add(result2.merchantId);
+
+              // Query merchants filtered by workerA
+              const merchantsForWorkerA = service.getMerchants({ workerName: workerA });
+              
+              // All returned merchants should have emails from workerA
+              for (const merchant of merchantsForWorkerA) {
+                expect(workerAMerchantIds.has(merchant.id)).toBe(true);
+                expect(workerBMerchantIds.has(merchant.id)).toBe(false);
+              }
+
+              // Query merchants filtered by workerB
+              const merchantsForWorkerB = service.getMerchants({ workerName: workerB });
+              
+              // All returned merchants should have emails from workerB
+              for (const merchant of merchantsForWorkerB) {
+                expect(workerBMerchantIds.has(merchant.id)).toBe(true);
+                expect(workerAMerchantIds.has(merchant.id)).toBe(false);
               }
             } finally {
               db.close();

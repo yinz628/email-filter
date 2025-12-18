@@ -17,6 +17,7 @@ interface MonitoringRuleRow {
   expected_interval_minutes: number;
   dead_after_minutes: number;
   tags: string;
+  worker_scope: string;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -47,6 +48,7 @@ export class MonitoringRuleRepository {
       expectedIntervalMinutes: row.expected_interval_minutes,
       deadAfterMinutes: row.dead_after_minutes,
       tags,
+      workerScope: row.worker_scope || 'global',
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -62,14 +64,15 @@ export class MonitoringRuleRepository {
     const enabled = dto.enabled !== undefined ? dto.enabled : true;
     const tags = dto.tags || [];
     const matchMode = dto.matchMode || 'contains';
+    const workerScope = dto.workerScope || 'global';
 
     const stmt = this.db.prepare(`
       INSERT INTO monitoring_rules (
         id, merchant, name, subject_pattern, match_mode,
         expected_interval_minutes, dead_after_minutes, 
-        tags, enabled, created_at, updated_at
+        tags, worker_scope, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -81,6 +84,7 @@ export class MonitoringRuleRepository {
       dto.expectedIntervalMinutes,
       dto.deadAfterMinutes,
       JSON.stringify(tags),
+      workerScope,
       enabled ? 1 : 0,
       now,
       now
@@ -102,6 +106,7 @@ export class MonitoringRuleRepository {
       expectedIntervalMinutes: dto.expectedIntervalMinutes,
       deadAfterMinutes: dto.deadAfterMinutes,
       tags,
+      workerScope,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -137,6 +142,11 @@ export class MonitoringRuleRepository {
     if (filter?.enabled !== undefined) {
       query += ' AND enabled = ?';
       params.push(filter.enabled ? 1 : 0);
+    }
+
+    if (filter?.workerScope) {
+      query += ' AND worker_scope = ?';
+      params.push(filter.workerScope);
     }
 
     query += ' ORDER BY created_at DESC';
@@ -198,6 +208,10 @@ export class MonitoringRuleRepository {
       updates.push('tags = ?');
       params.push(JSON.stringify(dto.tags));
     }
+    if (dto.workerScope !== undefined) {
+      updates.push('worker_scope = ?');
+      params.push(dto.workerScope);
+    }
     if (dto.enabled !== undefined) {
       updates.push('enabled = ?');
       params.push(dto.enabled ? 1 : 0);
@@ -257,6 +271,11 @@ export class MonitoringRuleRepository {
     if (filter?.enabled !== undefined) {
       query += ' AND enabled = ?';
       params.push(filter.enabled ? 1 : 0);
+    }
+
+    if (filter?.workerScope) {
+      query += ' AND worker_scope = ?';
+      params.push(filter.workerScope);
     }
 
     const stmt = this.db.prepare(query);

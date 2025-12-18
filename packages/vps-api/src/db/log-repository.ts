@@ -9,6 +9,7 @@ export interface SystemLog {
   level: LogLevel;
   message: string;
   details?: Record<string, unknown>;
+  workerName: string;
   createdAt: Date;
 }
 
@@ -18,12 +19,14 @@ interface LogRow {
   level: string;
   message: string;
   details: string | null;
+  worker_name: string;
   created_at: string;
 }
 
 export interface LogFilter {
   category?: LogCategory;
   level?: LogLevel;
+  workerName?: string;
   limit?: number;
   offset?: number;
   search?: string;
@@ -42,6 +45,7 @@ export class LogRepository {
       level: row.level as LogLevel,
       message: row.message,
       details: row.details ? JSON.parse(row.details) : undefined,
+      workerName: row.worker_name || 'global',
       createdAt: new Date(row.created_at),
     };
   }
@@ -49,15 +53,15 @@ export class LogRepository {
   /**
    * Create a new log entry
    */
-  create(category: LogCategory, message: string, details?: Record<string, unknown>, level: LogLevel = 'info'): SystemLog {
+  create(category: LogCategory, message: string, details?: Record<string, unknown>, level: LogLevel = 'info', workerName: string = 'global'): SystemLog {
     const now = new Date().toISOString();
     const detailsJson = details ? JSON.stringify(details) : null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO system_logs (category, level, message, details, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO system_logs (category, level, message, details, worker_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
-    const result = stmt.run(category, level, message, detailsJson, now);
+    const result = stmt.run(category, level, message, detailsJson, workerName, now);
 
     return {
       id: result.lastInsertRowid as number,
@@ -65,6 +69,7 @@ export class LogRepository {
       level,
       message,
       details,
+      workerName,
       createdAt: new Date(now),
     };
   }
@@ -83,6 +88,10 @@ export class LogRepository {
     if (filter?.level) {
       query += ' AND level = ?';
       params.push(filter.level);
+    }
+    if (filter?.workerName) {
+      query += ' AND worker_name = ?';
+      params.push(filter.workerName);
     }
     if (filter?.search) {
       query += ' AND (message LIKE ? OR details LIKE ?)';
@@ -171,9 +180,22 @@ export class LogRepository {
    * Get top blocked rules by count in recent time period
    * @param hours - Time period in hours (default: 24)
    * @param limit - Max number of results (default: 5)
+   * @param workerName - Optional worker name filter
+   * @returns Array of trending rules with worker breakdown
+   * 
+   * Requirements: 3.1, 3.2, 3.3
    */
-  getTopBlockedRules(hours: number = 24, limit: number = 5): { pattern: string; count: number; lastSeen: string }[] {
+  getTopBlockedRules(hours: number = 24, limit: number = 5, workerName?: string): { pattern: string; count: number; lastSeen: string; workerBreakdown: { workerName: string; count: number }[] }[] {
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const params: (string | number)[] = [cutoff];
+
+    let workerFilter = '';
+    if (workerName) {
+      workerFilter = ' AND worker_name = ?';
+      params.push(workerName);
+    }
+
+    params.push(limit);
 
     // Query logs where category is email_drop and extract matchedRule from details JSON
     const stmt = this.db.prepare(`
@@ -185,17 +207,64 @@ export class LogRepository {
       WHERE category = 'email_drop' 
         AND created_at >= ?
         AND json_extract(details, '$.matchedRule') IS NOT NULL
+        ${workerFilter}
       GROUP BY json_extract(details, '$.matchedRule')
       ORDER BY count DESC
       LIMIT ?
     `);
 
-    const rows = stmt.all(cutoff, limit) as { pattern: string; count: number; last_seen: string }[];
+    const rows = stmt.all(...params) as { pattern: string; count: number; last_seen: string }[];
+
+    // Get worker breakdown for each pattern
+    const results = rows.map((row) => {
+      const workerBreakdown = this.getWorkerBreakdownForPattern(row.pattern, cutoff, workerName);
+      return {
+        pattern: row.pattern,
+        count: row.count,
+        lastSeen: row.last_seen,
+        workerBreakdown,
+      };
+    });
+
+    return results;
+  }
+
+  /**
+   * Get worker breakdown for a specific pattern
+   * @param pattern - The matched rule pattern
+   * @param cutoff - ISO timestamp cutoff for time filtering
+   * @param workerName - Optional worker name filter
+   * @returns Array of worker name and count pairs
+   * 
+   * Requirements: 3.2
+   */
+  private getWorkerBreakdownForPattern(pattern: string, cutoff: string, workerName?: string): { workerName: string; count: number }[] {
+    const params: string[] = [cutoff, pattern];
+
+    let workerFilter = '';
+    if (workerName) {
+      workerFilter = ' AND worker_name = ?';
+      params.push(workerName);
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT 
+        worker_name,
+        COUNT(*) as count
+      FROM system_logs 
+      WHERE category = 'email_drop' 
+        AND created_at >= ?
+        AND json_extract(details, '$.matchedRule') = ?
+        ${workerFilter}
+      GROUP BY worker_name
+      ORDER BY count DESC
+    `);
+
+    const rows = stmt.all(...params) as { worker_name: string; count: number }[];
 
     return rows.map((row) => ({
-      pattern: row.pattern,
+      workerName: row.worker_name || 'global',
       count: row.count,
-      lastSeen: row.last_seen,
     }));
   }
 }

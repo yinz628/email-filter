@@ -25,6 +25,13 @@ export interface OverallStats {
   totalErrors: number;
 }
 
+export interface WorkerStats {
+  workerName: string;
+  total: number;
+  forwarded: number;
+  dropped: number;
+}
+
 /**
  * Repository for rule statistics operations
  */
@@ -193,5 +200,95 @@ export class StatsRepository {
     const stmt = this.db.prepare('DELETE FROM rule_stats WHERE rule_id = ?');
     const result = stmt.run(ruleId);
     return result.changes > 0;
+  }
+
+  /**
+   * Get overall statistics filtered by worker name
+   * Calculates stats from system_logs table based on worker_name
+   * 
+   * @param workerName - Optional worker name filter. If not provided, returns global stats.
+   */
+  getOverallStatsByWorker(workerName?: string): OverallStats {
+    const rulesStmt = this.db.prepare(`
+      SELECT 
+        COUNT(*) as total_rules,
+        SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_rules
+      FROM filter_rules
+    `);
+    const rulesResult = rulesStmt.get() as { total_rules: number; enabled_rules: number };
+
+    // Get stats from system_logs filtered by worker_name
+    let logsQuery = `
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN category = 'email_forward' THEN 1 ELSE 0 END) as forwarded,
+        SUM(CASE WHEN category = 'email_drop' THEN 1 ELSE 0 END) as dropped
+      FROM system_logs
+      WHERE category IN ('email_forward', 'email_drop')
+    `;
+    const params: string[] = [];
+
+    if (workerName) {
+      logsQuery += ' AND worker_name = ?';
+      params.push(workerName);
+    }
+
+    const logsStmt = this.db.prepare(logsQuery);
+    const logsResult = logsStmt.get(...params) as { total: number; forwarded: number; dropped: number } | undefined;
+
+    // Get error count from rule_stats
+    const errorStmt = this.db.prepare(`
+      SELECT COALESCE(SUM(error_count), 0) as total_errors FROM rule_stats
+    `);
+    const errorResult = errorStmt.get() as { total_errors: number };
+
+    return {
+      totalRules: rulesResult.total_rules,
+      enabledRules: rulesResult.enabled_rules || 0,
+      totalProcessed: logsResult?.total || 0,
+      totalForwarded: logsResult?.forwarded || 0,
+      totalDeleted: logsResult?.dropped || 0,
+      totalErrors: errorResult.total_errors,
+    };
+  }
+
+  /**
+   * Get statistics breakdown by worker
+   * Returns stats for each worker instance
+   */
+  getStatsByWorker(): WorkerStats[] {
+    const stmt = this.db.prepare(`
+      SELECT 
+        worker_name,
+        COUNT(*) as total,
+        SUM(CASE WHEN category = 'email_forward' THEN 1 ELSE 0 END) as forwarded,
+        SUM(CASE WHEN category = 'email_drop' THEN 1 ELSE 0 END) as dropped
+      FROM system_logs
+      WHERE category IN ('email_forward', 'email_drop')
+      GROUP BY worker_name
+      ORDER BY total DESC
+    `);
+
+    const rows = stmt.all() as { worker_name: string; total: number; forwarded: number; dropped: number }[];
+
+    return rows.map(row => ({
+      workerName: row.worker_name || 'global',
+      total: row.total,
+      forwarded: row.forwarded,
+      dropped: row.dropped,
+    }));
+  }
+
+  /**
+   * Get list of distinct worker names from logs
+   */
+  getWorkerNames(): string[] {
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT worker_name FROM system_logs 
+      WHERE worker_name IS NOT NULL 
+      ORDER BY worker_name
+    `);
+    const rows = stmt.all() as { worker_name: string }[];
+    return rows.map(row => row.worker_name || 'global');
   }
 }

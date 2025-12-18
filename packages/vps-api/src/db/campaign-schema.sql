@@ -40,11 +40,13 @@ CREATE TABLE IF NOT EXISTS campaign_emails (
   campaign_id TEXT NOT NULL,
   recipient TEXT NOT NULL,                -- 收件人邮箱
   received_at TEXT NOT NULL,              -- 接收时间
+  worker_name TEXT DEFAULT 'global',      -- Worker实例名称
   FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_campaign_emails_campaign ON campaign_emails(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_campaign_emails_recipient ON campaign_emails(recipient);
+CREATE INDEX IF NOT EXISTS idx_campaign_emails_worker ON campaign_emails(worker_name);
 
 -- 收件人路径表
 CREATE TABLE IF NOT EXISTS recipient_paths (

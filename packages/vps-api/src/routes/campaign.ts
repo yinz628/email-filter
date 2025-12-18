@@ -113,7 +113,7 @@ function validateSetCampaignTag(body: unknown): { valid: boolean; error?: string
 
 /**
  * Validate TrackEmailDTO
- * Requirements: 8.2
+ * Requirements: 8.2, 7.2
  */
 export function validateTrackEmail(body: unknown): { valid: boolean; error?: string; data?: TrackEmailDTO } {
   if (!body || typeof body !== 'object') {
@@ -147,6 +147,14 @@ export function validateTrackEmail(body: unknown): { valid: boolean; error?: str
       return { valid: false, error: 'receivedAt must be a string (ISO date format)' };
     }
     result.receivedAt = data.receivedAt;
+  }
+
+  // Optional workerName for worker instance data separation (Requirements: 7.2)
+  if (data.workerName !== undefined) {
+    if (typeof data.workerName !== 'string') {
+      return { valid: false, error: 'workerName must be a string' };
+    }
+    result.workerName = data.workerName.trim() || 'global';
   }
 
   return { valid: true, data: result };
@@ -203,6 +211,7 @@ interface RecipientParams {
 
 interface GetMerchantsQuery {
   analysisStatus?: string;
+  workerName?: string;
   sortBy?: string;
   sortOrder?: string;
   limit?: string;
@@ -212,6 +221,7 @@ interface GetMerchantsQuery {
 interface GetCampaignsQuery {
   merchantId?: string;
   isValuable?: string;
+  workerName?: string;
   sortBy?: string;
   sortOrder?: string;
   limit?: string;
@@ -255,11 +265,15 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const { analysisStatus, sortBy, sortOrder, limit, offset } = request.query;
+      const { analysisStatus, workerName, sortBy, sortOrder, limit, offset } = request.query;
       const filter: MerchantFilter = {};
 
       if (analysisStatus && ['pending', 'active', 'ignored'].includes(analysisStatus)) {
         filter.analysisStatus = analysisStatus as MerchantAnalysisStatus;
+      }
+      // Add workerName filter for instance-based filtering (Requirements: 4.3)
+      if (workerName) {
+        filter.workerName = workerName;
       }
       if (sortBy && ['domain', 'totalCampaigns', 'totalEmails', 'createdAt'].includes(sortBy)) {
         filter.sortBy = sortBy as MerchantFilter['sortBy'];
@@ -408,7 +422,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const { merchantId, isValuable, sortBy, sortOrder, limit, offset } = request.query;
+      const { merchantId, isValuable, workerName, sortBy, sortOrder, limit, offset } = request.query;
       const filter: CampaignFilter = {};
 
       if (merchantId) {
@@ -416,6 +430,10 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       }
       if (isValuable !== undefined) {
         filter.isValuable = isValuable === 'true';
+      }
+      // Add workerName filter for instance-based filtering (Requirements: 4.2)
+      if (workerName) {
+        filter.workerName = workerName;
       }
       if (sortBy && ['firstSeenAt', 'lastSeenAt', 'totalEmails', 'uniqueRecipients'].includes(sortBy)) {
         filter.sortBy = sortBy as CampaignFilter['sortBy'];
@@ -1073,16 +1091,18 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * GET /api/campaign/data-stats
    * Get data statistics for all merchants
+   * Query params: workerName (optional) - filter by worker instance (Requirements: 4.5)
    */
   fastify.get('/data-stats', async (
-    request: FastifyRequest,
+    request: FastifyRequest<{ Querystring: { workerName?: string } }>,
     reply: FastifyReply
   ) => {
     try {
+      const { workerName } = request.query;
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const stats = service.getDataStatistics();
+      const stats = service.getDataStatistics(workerName);
 
       return reply.send(stats);
     } catch (error) {
@@ -1094,16 +1114,19 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * POST /api/campaign/cleanup-ignored
    * Clean up data for ignored merchants
+   * Body params: workerName (optional) - filter by worker instance (Requirements: 4.5)
    */
   fastify.post('/cleanup-ignored', async (
-    request: FastifyRequest,
+    request: FastifyRequest<{ Body: { workerName?: string } }>,
     reply: FastifyReply
   ) => {
     try {
+      const body = request.body as { workerName?: string } | undefined;
+      const workerName = body?.workerName;
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const result = service.cleanupIgnoredMerchantData();
+      const result = service.cleanupIgnoredMerchantData(workerName);
 
       return reply.send({
         message: 'Cleanup completed',
@@ -1118,14 +1141,16 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * POST /api/campaign/cleanup-pending
    * Clean up old pending merchant data
+   * Body params: days (optional), workerName (optional) - filter by worker instance (Requirements: 4.5)
    */
   fastify.post('/cleanup-pending', async (
-    request: FastifyRequest<{ Body: { days?: number } }>,
+    request: FastifyRequest<{ Body: { days?: number; workerName?: string } }>,
     reply: FastifyReply
   ) => {
     try {
-      const body = request.body as { days?: number } | undefined;
+      const body = request.body as { days?: number; workerName?: string } | undefined;
       const days = body?.days || 30; // Default 30 days
+      const workerName = body?.workerName;
 
       if (days < 1) {
         return reply.status(400).send({ error: 'Invalid request', message: 'days must be at least 1' });
@@ -1134,7 +1159,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const result = service.cleanupOldPendingData(days);
+      const result = service.cleanupOldPendingData(days, workerName);
 
       return reply.send({
         message: `Cleaned up pending data older than ${days} days`,

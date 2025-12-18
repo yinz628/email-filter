@@ -188,10 +188,10 @@ export class CampaignAnalyticsService {
   /**
    * Get all merchants with optional filtering
    * 
-   * @param filter - Optional filter options
+   * @param filter - Optional filter options (including workerName for instance filtering)
    * @returns Array of Merchant objects
    * 
-   * Requirements: 1.3, 7.1
+   * Requirements: 1.3, 4.3, 7.1
    */
   getMerchants(filter?: MerchantFilter): Merchant[] {
     const sortBy = filter?.sortBy || 'created_at';
@@ -210,14 +210,27 @@ export class CampaignAnalyticsService {
     const column = columnMap[sortBy] || 'm.created_at';
     const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    // Build WHERE clause for analysis status filter
-    let whereClause = '';
+    // Build WHERE clause conditions
+    const conditions: string[] = [];
     const params: (string | number)[] = [];
     
     if (filter?.analysisStatus) {
-      whereClause = 'WHERE m.analysis_status = ?';
+      conditions.push('m.analysis_status = ?');
       params.push(filter.analysisStatus);
     }
+
+    // Filter by workerName - only show merchants that have emails from this worker
+    if (filter?.workerName) {
+      conditions.push(`m.id IN (
+        SELECT DISTINCT c.merchant_id 
+        FROM campaigns c 
+        JOIN campaign_emails ce ON c.id = ce.campaign_id 
+        WHERE ce.worker_name = ?
+      )`);
+      params.push(filter.workerName);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Query merchants with valuable campaigns count calculated from campaigns table
     const stmt = this.db.prepare(`
@@ -399,10 +412,10 @@ export class CampaignAnalyticsService {
   /**
    * Get campaigns with optional filtering
    * 
-   * @param filter - Optional filter options
+   * @param filter - Optional filter options (including workerName for instance filtering)
    * @returns Array of Campaign objects
    * 
-   * Requirements: 2.5, 3.3, 3.4
+   * Requirements: 2.5, 3.3, 3.4, 4.2
    */
   getCampaigns(filter?: CampaignFilter): Campaign[] {
     const conditions: string[] = [];
@@ -432,6 +445,16 @@ export class CampaignAnalyticsService {
       } else {
         conditions.push('(tag IS NULL OR tag = 0 OR tag = 3 OR tag = 4)');
       }
+    }
+
+    // Filter by workerName - only show campaigns that have emails from this worker
+    if (filter?.workerName) {
+      conditions.push(`id IN (
+        SELECT DISTINCT campaign_id 
+        FROM campaign_emails 
+        WHERE worker_name = ?
+      )`);
+      params.push(filter.workerName);
     }
 
     const whereClause = conditions.length > 0 
@@ -681,7 +704,7 @@ export class CampaignAnalyticsService {
   /**
    * Track an email - creates/updates merchant, campaign, and recipient path
    * 
-   * @param data - Email tracking data (sender, subject, recipient, receivedAt)
+   * @param data - Email tracking data (sender, subject, recipient, receivedAt, workerName)
    * @returns TrackResult with merchant and campaign IDs
    * 
    * Requirements: 4.1, 4.2, 4.3
@@ -695,6 +718,7 @@ export class CampaignAnalyticsService {
     const receivedAt = data.receivedAt ? new Date(data.receivedAt) : new Date();
     const receivedAtStr = receivedAt.toISOString();
     const now = new Date().toISOString();
+    const workerName = data.workerName || 'global';
 
     // Get or create merchant
     const { merchant, isNew: isNewMerchant } = this.getOrCreateMerchant(domain);
@@ -706,11 +730,11 @@ export class CampaignAnalyticsService {
       receivedAt
     );
 
-    // Record the email in campaign_emails
+    // Record the email in campaign_emails with worker_name
     this.db.prepare(`
-      INSERT INTO campaign_emails (campaign_id, recipient, received_at)
-      VALUES (?, ?, ?)
-    `).run(campaign.id, data.recipient, receivedAtStr);
+      INSERT INTO campaign_emails (campaign_id, recipient, received_at, worker_name)
+      VALUES (?, ?, ?, ?)
+    `).run(campaign.id, data.recipient, receivedAtStr, workerName);
 
     // Update merchant total emails
     this.db.prepare(`
@@ -2037,8 +2061,10 @@ export class CampaignAnalyticsService {
   /**
    * Get data statistics for all merchants
    * 统计各类数据占用情况
+   * 
+   * @param workerName - Optional worker name filter for instance-based filtering (Requirements: 4.5)
    */
-  getDataStatistics(): {
+  getDataStatistics(workerName?: string): {
     totalMerchants: number;
     activeMerchants: number;
     pendingMerchants: number;
@@ -2054,6 +2080,71 @@ export class CampaignAnalyticsService {
       paths: number;
     }[];
   } {
+    // Build worker filter condition for campaign_emails
+    const workerFilter = workerName ? 'AND ce.worker_name = ?' : '';
+    const workerParams = workerName ? [workerName] : [];
+
+    if (workerName) {
+      // When filtering by worker, we need to find merchants that have emails from this worker
+      const merchantsWithWorker = this.db.prepare(`
+        SELECT DISTINCT m.id, COALESCE(m.analysis_status, 'pending') as status
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+      `).all(workerName) as Array<{ id: string; status: string }>;
+
+      const statusCounts = { active: 0, pending: 0, ignored: 0 };
+      merchantsWithWorker.forEach(m => {
+        if (m.status in statusCounts) {
+          statusCounts[m.status as keyof typeof statusCounts]++;
+        }
+      });
+
+      // Get totals filtered by worker
+      const totals = this.db.prepare(`
+        SELECT 
+          COUNT(DISTINCT m.id) as total_merchants,
+          COUNT(DISTINCT c.id) as total_campaigns,
+          COUNT(ce.id) as total_emails,
+          (SELECT COUNT(*) FROM recipient_paths rp 
+           JOIN campaigns c2 ON rp.campaign_id = c2.id 
+           JOIN campaign_emails ce2 ON c2.id = ce2.campaign_id
+           WHERE ce2.worker_name = ?) as total_paths
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+      `).get(workerName, workerName) as { total_merchants: number; total_campaigns: number; total_emails: number; total_paths: number };
+
+      // Get detailed stats by status for this worker
+      const detailedStats = this.db.prepare(`
+        SELECT 
+          COALESCE(m.analysis_status, 'pending') as status,
+          COUNT(DISTINCT m.id) as merchants,
+          COUNT(DISTINCT c.id) as campaigns,
+          COUNT(ce.id) as emails,
+          0 as paths
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+        GROUP BY COALESCE(m.analysis_status, 'pending')
+      `).all(workerName) as Array<{ status: string; merchants: number; campaigns: number; emails: number; paths: number }>;
+
+      return {
+        totalMerchants: totals.total_merchants,
+        activeMerchants: statusCounts.active,
+        pendingMerchants: statusCounts.pending,
+        ignoredMerchants: statusCounts.ignored,
+        totalCampaigns: totals.total_campaigns,
+        totalEmails: totals.total_emails,
+        totalPaths: totals.total_paths,
+        byStatus: detailedStats,
+      };
+    }
+
+    // Original logic for no worker filter
     // Get merchant counts by status
     const merchantStats = this.db.prepare(`
       SELECT 
@@ -2116,9 +2207,10 @@ export class CampaignAnalyticsService {
    * Clean up data for ignored merchants
    * 清理已忽略商户的营销数据
    * 
+   * @param workerName - Optional worker name filter for instance-based cleanup (Requirements: 4.5)
    * @returns Number of records deleted
    */
-  cleanupIgnoredMerchantData(): {
+  cleanupIgnoredMerchantData(workerName?: string): {
     merchantsDeleted: number;
     campaignsDeleted: number;
     emailsDeleted: number;
@@ -2136,6 +2228,38 @@ export class CampaignAnalyticsService {
     const merchantIds = ignoredMerchants.map(m => m.id);
     const placeholders = merchantIds.map(() => '?').join(',');
 
+    // If workerName is specified, only delete emails from that worker
+    // Otherwise delete all data for ignored merchants
+    if (workerName) {
+      // Get campaign IDs for these merchants
+      const campaigns = this.db.prepare(`
+        SELECT id FROM campaigns WHERE merchant_id IN (${placeholders})
+      `).all(...merchantIds) as Array<{ id: string }>;
+
+      let emailsDeleted = 0;
+      if (campaigns.length > 0) {
+        const campaignIds = campaigns.map(c => c.id);
+        const campaignPlaceholders = campaignIds.map(() => '?').join(',');
+        
+        // Delete campaign emails only for the specified worker
+        const emailsResult = this.db.prepare(`
+          DELETE FROM campaign_emails 
+          WHERE campaign_id IN (${campaignPlaceholders}) AND worker_name = ?
+        `).run(...campaignIds, workerName);
+        emailsDeleted = emailsResult.changes;
+      }
+
+      // Don't delete merchants, campaigns, or paths when filtering by worker
+      // Only delete the emails from that specific worker
+      return {
+        merchantsDeleted: 0,
+        campaignsDeleted: 0,
+        emailsDeleted,
+        pathsDeleted: 0,
+      };
+    }
+
+    // Original logic: delete all data for ignored merchants
     // Delete recipient paths
     const pathsResult = this.db.prepare(`
       DELETE FROM recipient_paths WHERE merchant_id IN (${placeholders})
@@ -2181,9 +2305,10 @@ export class CampaignAnalyticsService {
    * 清理超过指定天数的待分析商户数据
    * 
    * @param days - Number of days to keep pending data
+   * @param workerName - Optional worker name filter for instance-based cleanup (Requirements: 4.5)
    * @returns Number of records deleted
    */
-  cleanupOldPendingData(days: number): {
+  cleanupOldPendingData(days: number, workerName?: string): {
     merchantsDeleted: number;
     campaignsDeleted: number;
     emailsDeleted: number;
@@ -2207,6 +2332,38 @@ export class CampaignAnalyticsService {
     const merchantIds = oldPendingMerchants.map(m => m.id);
     const placeholders = merchantIds.map(() => '?').join(',');
 
+    // If workerName is specified, only delete emails from that worker
+    if (workerName) {
+      // Get campaign IDs for these merchants
+      const campaigns = this.db.prepare(`
+        SELECT id FROM campaigns WHERE merchant_id IN (${placeholders})
+      `).all(...merchantIds) as Array<{ id: string }>;
+
+      let emailsDeleted = 0;
+      if (campaigns.length > 0) {
+        const campaignIds = campaigns.map(c => c.id);
+        const campaignPlaceholders = campaignIds.map(() => '?').join(',');
+        
+        // Delete campaign emails only for the specified worker and older than cutoff
+        const emailsResult = this.db.prepare(`
+          DELETE FROM campaign_emails 
+          WHERE campaign_id IN (${campaignPlaceholders}) 
+          AND worker_name = ?
+          AND received_at < ?
+        `).run(...campaignIds, workerName, cutoffStr);
+        emailsDeleted = emailsResult.changes;
+      }
+
+      // Don't delete merchants, campaigns, or paths when filtering by worker
+      return {
+        merchantsDeleted: 0,
+        campaignsDeleted: 0,
+        emailsDeleted,
+        pathsDeleted: 0,
+      };
+    }
+
+    // Original logic: delete all data for old pending merchants
     // Delete recipient paths
     const pathsResult = this.db.prepare(`
       DELETE FROM recipient_paths WHERE merchant_id IN (${placeholders})

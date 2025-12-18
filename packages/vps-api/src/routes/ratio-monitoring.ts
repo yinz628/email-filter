@@ -20,6 +20,7 @@ interface RatioMonitorParams {
 interface RatioMonitorQuery {
   tag?: string;
   enabled?: string;
+  workerScope?: string;
 }
 
 /**
@@ -43,11 +44,12 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
     async (request: FastifyRequest<{ Querystring: RatioMonitorQuery }>, reply: FastifyReply) => {
       try {
         const service = getService();
-        const { tag, enabled } = request.query;
-        const filter: { tag?: string; enabled?: boolean } = {};
+        const { tag, enabled, workerScope } = request.query;
+        const filter: { tag?: string; enabled?: boolean; workerScope?: string } = {};
 
         if (tag) filter.tag = tag;
         if (enabled !== undefined) filter.enabled = enabled === 'true';
+        if (workerScope) filter.workerScope = workerScope;
 
         const monitors = service.getAll(filter);
         return reply.send({ monitors, total: monitors.length });
@@ -65,11 +67,12 @@ export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<v
     async (request: FastifyRequest<{ Querystring: RatioMonitorQuery }>, reply: FastifyReply) => {
       try {
         const service = getService();
-        const { tag, enabled } = request.query;
-        const filter: { tag?: string; enabled?: boolean } = {};
+        const { tag, enabled, workerScope } = request.query;
+        const filter: { tag?: string; enabled?: boolean; workerScope?: string } = {};
 
         if (tag) filter.tag = tag;
         if (enabled !== undefined) filter.enabled = enabled === 'true';
+        if (workerScope) filter.workerScope = workerScope;
 
         const statuses = service.getAllStatus(filter);
         return reply.send({ statuses, total: statuses.length });

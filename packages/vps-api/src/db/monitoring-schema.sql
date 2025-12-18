@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS monitoring_rules (
   expected_interval_minutes INTEGER NOT NULL,
   dead_after_minutes INTEGER NOT NULL,
   tags TEXT NOT NULL DEFAULT '[]',
+  worker_scope TEXT NOT NULL DEFAULT 'global',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS monitoring_rules (
 
 CREATE INDEX IF NOT EXISTS idx_monitoring_rules_merchant ON monitoring_rules(merchant);
 CREATE INDEX IF NOT EXISTS idx_monitoring_rules_enabled ON monitoring_rules(enabled);
+CREATE INDEX IF NOT EXISTS idx_monitoring_rules_worker_scope ON monitoring_rules(worker_scope);
 
 -- 信号状态表
 CREATE TABLE IF NOT EXISTS signal_states (
@@ -59,6 +61,7 @@ CREATE TABLE IF NOT EXISTS alerts (
   count_12h INTEGER NOT NULL,
   count_24h INTEGER NOT NULL,
   message TEXT NOT NULL,
+  worker_scope TEXT NOT NULL DEFAULT 'global',
   sent_at TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
@@ -67,6 +70,7 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE INDEX IF NOT EXISTS idx_alerts_rule_id ON alerts(rule_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at);
 CREATE INDEX IF NOT EXISTS idx_alerts_alert_type ON alerts(alert_type);
+CREATE INDEX IF NOT EXISTS idx_alerts_worker_scope ON alerts(worker_scope);
 
 -- 心跳检查日志表
 CREATE TABLE IF NOT EXISTS heartbeat_logs (
@@ -104,6 +108,7 @@ CREATE TABLE IF NOT EXISTS ratio_monitors (
   steps TEXT NOT NULL DEFAULT '[]',
   threshold_percent REAL NOT NULL,
   time_window TEXT NOT NULL DEFAULT '24h',
+  worker_scope TEXT NOT NULL DEFAULT 'global',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -113,6 +118,7 @@ CREATE TABLE IF NOT EXISTS ratio_monitors (
 
 CREATE INDEX IF NOT EXISTS idx_ratio_monitors_tag ON ratio_monitors(tag);
 CREATE INDEX IF NOT EXISTS idx_ratio_monitors_enabled ON ratio_monitors(enabled);
+CREATE INDEX IF NOT EXISTS idx_ratio_monitors_worker_scope ON ratio_monitors(worker_scope);
 
 -- 比例状态表
 CREATE TABLE IF NOT EXISTS ratio_states (

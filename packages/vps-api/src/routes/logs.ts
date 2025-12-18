@@ -13,6 +13,7 @@ import { authMiddleware } from '../middleware/auth.js';
 interface GetLogsQuery {
   category?: string;
   level?: string;
+  workerName?: string;
   limit?: string;
   offset?: string;
   search?: string;
@@ -33,14 +34,17 @@ export async function logsRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const logRepository = new LogRepository(db);
 
-      const { category, level, limit, offset, search } = request.query;
-      const filter: { category?: LogCategory; level?: LogLevel; limit?: number; offset?: number; search?: string } = {};
+      const { category, level, workerName, limit, offset, search } = request.query;
+      const filter: { category?: LogCategory; level?: LogLevel; workerName?: string; limit?: number; offset?: number; search?: string } = {};
 
       if (category && VALID_CATEGORIES.includes(category as LogCategory)) {
         filter.category = category as LogCategory;
       }
       if (level && VALID_LEVELS.includes(level as LogLevel)) {
         filter.level = level as LogLevel;
+      }
+      if (workerName && workerName.trim()) {
+        filter.workerName = workerName.trim();
       }
       if (limit) {
         filter.limit = Math.min(parseInt(limit, 10) || 100, 500);

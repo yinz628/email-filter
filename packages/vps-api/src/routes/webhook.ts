@@ -126,6 +126,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Track email for campaign analytics (regardless of filter result)
+      // Include workerName for worker instance data separation (Requirements: 7.2)
       try {
         const analyticsService = new CampaignAnalyticsService(db);
         analyticsService.trackEmailSelective({
@@ -133,6 +134,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
           subject: payload.subject,
           recipient: payload.to,
           receivedAt: new Date(payload.timestamp).toISOString(),
+          workerName: payload.workerName || 'global',
         });
       } catch (analyticsError) {
         // Don't fail the webhook if analytics tracking fails

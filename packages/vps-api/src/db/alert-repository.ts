@@ -13,6 +13,7 @@ interface AlertRow {
   count_12h: number;
   count_24h: number;
   message: string;
+  worker_scope: string;
   sent_at: string | null;
   created_at: string;
 }
@@ -38,6 +39,7 @@ export class AlertRepository {
       count12h: row.count_12h,
       count24h: row.count_24h,
       message: row.message,
+      workerScope: row.worker_scope || 'global',
       sentAt: row.sent_at ? new Date(row.sent_at) : null,
       createdAt: new Date(row.created_at),
     };
@@ -49,14 +51,15 @@ export class AlertRepository {
   create(dto: CreateAlertDTO): Alert {
     const id = uuidv4();
     const now = new Date().toISOString();
+    const workerScope = dto.workerScope || 'global';
 
     const stmt = this.db.prepare(`
       INSERT INTO alerts (
         id, rule_id, alert_type, previous_state, current_state,
         gap_minutes, count_1h, count_12h, count_24h,
-        message, sent_at, created_at
+        message, worker_scope, sent_at, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     `);
 
     stmt.run(
@@ -70,6 +73,7 @@ export class AlertRepository {
       dto.count12h,
       dto.count24h,
       dto.message,
+      workerScope,
       now
     );
 
@@ -84,6 +88,7 @@ export class AlertRepository {
       count12h: dto.count12h,
       count24h: dto.count24h,
       message: dto.message,
+      workerScope,
       sentAt: null,
       createdAt: new Date(now),
     };

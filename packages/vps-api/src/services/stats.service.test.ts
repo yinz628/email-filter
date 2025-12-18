@@ -3,6 +3,9 @@
  * 
  * **Feature: vps-email-filter, Property 7: 统计计数递增**
  * **Validates: Requirements 5.1, 5.3**
+ * 
+ * **Feature: worker-instance-data-separation, Property 3: Global Stats Aggregation**
+ * **Validates: Requirements 2.1**
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -297,5 +300,285 @@ describe('StatsService', () => {
         { numRuns: 100 }
       );
     });
+  });
+});
+
+// Types for log entries
+type LogCategory = 'email_forward' | 'email_drop' | 'admin_action' | 'system';
+type LogLevel = 'info' | 'warn' | 'error';
+
+// Arbitraries for generating valid test data
+const workerNameArb = fc.oneof(
+  fc.constant('global'),
+  fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9_-]{0,19}$/)
+);
+
+const logCategoryArb: fc.Arbitrary<LogCategory> = fc.constantFrom('email_forward', 'email_drop');
+const logLevelArb: fc.Arbitrary<LogLevel> = fc.constantFrom('info', 'warn', 'error');
+const messageArb = fc.string({ minLength: 1, maxLength: 100 }).filter(s => s.trim().length > 0 && !s.includes("'"));
+
+/**
+ * Test-specific LogRepository for creating logs with worker names
+ */
+class TestLogRepository {
+  constructor(private db: SqlJsDatabase) {}
+
+  create(category: LogCategory, message: string, details?: Record<string, unknown>, level: LogLevel = 'info', workerName: string = 'global'): { id: number; workerName: string } {
+    const now = new Date().toISOString();
+    const detailsJson = details ? JSON.stringify(details) : null;
+
+    this.db.run(
+      `INSERT INTO system_logs (category, level, message, details, worker_name, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      [category, level, message, detailsJson, workerName, now]
+    );
+
+    const result = this.db.exec('SELECT last_insert_rowid()');
+    const id = result[0].values[0][0] as number;
+
+    return { id, workerName };
+  }
+}
+
+/**
+ * Test-specific StatsRepository for worker-based stats
+ */
+class TestWorkerStatsRepository {
+  constructor(private db: SqlJsDatabase) {}
+
+  /**
+   * Get overall statistics (global - all workers combined)
+   */
+  getOverallStats(): { totalProcessed: number; totalForwarded: number; totalDeleted: number } {
+    const result = this.db.exec(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN category = 'email_forward' THEN 1 ELSE 0 END) as forwarded,
+        SUM(CASE WHEN category = 'email_drop' THEN 1 ELSE 0 END) as dropped
+      FROM system_logs
+      WHERE category IN ('email_forward', 'email_drop')
+    `);
+
+    if (result.length === 0 || result[0].values.length === 0) {
+      return { totalProcessed: 0, totalForwarded: 0, totalDeleted: 0 };
+    }
+
+    const row = result[0].values[0];
+    return {
+      totalProcessed: (row[0] as number) || 0,
+      totalForwarded: (row[1] as number) || 0,
+      totalDeleted: (row[2] as number) || 0,
+    };
+  }
+
+  /**
+   * Get statistics filtered by worker name
+   */
+  getOverallStatsByWorker(workerName?: string): { totalProcessed: number; totalForwarded: number; totalDeleted: number } {
+    let query = `
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN category = 'email_forward' THEN 1 ELSE 0 END) as forwarded,
+        SUM(CASE WHEN category = 'email_drop' THEN 1 ELSE 0 END) as dropped
+      FROM system_logs
+      WHERE category IN ('email_forward', 'email_drop')
+    `;
+    const params: string[] = [];
+
+    if (workerName) {
+      query += ' AND worker_name = ?';
+      params.push(workerName);
+    }
+
+    const result = this.db.exec(query, params);
+
+    if (result.length === 0 || result[0].values.length === 0) {
+      return { totalProcessed: 0, totalForwarded: 0, totalDeleted: 0 };
+    }
+
+    const row = result[0].values[0];
+    return {
+      totalProcessed: (row[0] as number) || 0,
+      totalForwarded: (row[1] as number) || 0,
+      totalDeleted: (row[2] as number) || 0,
+    };
+  }
+
+  /**
+   * Get statistics breakdown by worker
+   */
+  getStatsByWorker(): { workerName: string; total: number; forwarded: number; dropped: number }[] {
+    const result = this.db.exec(`
+      SELECT 
+        worker_name,
+        COUNT(*) as total,
+        SUM(CASE WHEN category = 'email_forward' THEN 1 ELSE 0 END) as forwarded,
+        SUM(CASE WHEN category = 'email_drop' THEN 1 ELSE 0 END) as dropped
+      FROM system_logs
+      WHERE category IN ('email_forward', 'email_drop')
+      GROUP BY worker_name
+      ORDER BY total DESC
+    `);
+
+    if (result.length === 0) {
+      return [];
+    }
+
+    return result[0].values.map(row => ({
+      workerName: (row[0] as string) || 'global',
+      total: (row[1] as number) || 0,
+      forwarded: (row[2] as number) || 0,
+      dropped: (row[3] as number) || 0,
+    }));
+  }
+}
+
+/**
+ * Apply the worker instance migration to the database
+ */
+function applyWorkerInstanceMigration(db: SqlJsDatabase): void {
+  db.run("ALTER TABLE system_logs ADD COLUMN worker_name TEXT DEFAULT 'global'");
+  db.run('CREATE INDEX IF NOT EXISTS idx_logs_worker_name ON system_logs(worker_name)');
+}
+
+/**
+ * **Feature: worker-instance-data-separation, Property 3: Global Stats Aggregation**
+ * **Validates: Requirements 2.1**
+ * 
+ * For any global stats query, the totals should equal the sum of all individual worker stats.
+ */
+describe('Property 3: Global Stats Aggregation', () => {
+  let SQL: any;
+  let db: SqlJsDatabase;
+  let logRepository: TestLogRepository;
+  let workerStatsRepository: TestWorkerStatsRepository;
+
+  beforeEach(async () => {
+    SQL = await initSqlJs();
+    db = new SQL.Database();
+
+    // Load and execute main schema
+    const schemaPath = join(__dirname, '../db/schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
+
+    // Apply worker instance migration
+    applyWorkerInstanceMigration(db);
+
+    logRepository = new TestLogRepository(db);
+    workerStatsRepository = new TestWorkerStatsRepository(db);
+  });
+
+  afterEach(() => {
+    if (db) {
+      db.close();
+    }
+  });
+
+  /**
+   * **Feature: worker-instance-data-separation, Property 3: Global Stats Aggregation**
+   * **Validates: Requirements 2.1**
+   * 
+   * For any global stats query, the totals should equal the sum of all individual worker stats.
+   */
+  it('global stats should equal sum of all worker stats', () => {
+    fc.assert(
+      fc.property(
+        // Generate multiple logs with different worker names
+        fc.array(
+          fc.tuple(logCategoryArb, messageArb, workerNameArb),
+          { minLength: 5, maxLength: 50 }
+        ),
+        (logConfigs) => {
+          // Create logs with various worker names
+          for (const [category, message, workerName] of logConfigs) {
+            logRepository.create(category, message, undefined, 'info', workerName);
+          }
+
+          // Get global stats (all workers combined)
+          const globalStats = workerStatsRepository.getOverallStats();
+
+          // Get stats breakdown by worker
+          const workerStats = workerStatsRepository.getStatsByWorker();
+
+          // Sum up all worker stats
+          const sumTotal = workerStats.reduce((sum, ws) => sum + ws.total, 0);
+          const sumForwarded = workerStats.reduce((sum, ws) => sum + ws.forwarded, 0);
+          const sumDropped = workerStats.reduce((sum, ws) => sum + ws.dropped, 0);
+
+          // Verify global stats equal sum of worker stats
+          expect(globalStats.totalProcessed).toBe(sumTotal);
+          expect(globalStats.totalForwarded).toBe(sumForwarded);
+          expect(globalStats.totalDeleted).toBe(sumDropped);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('worker-specific stats should be subset of global stats', () => {
+    fc.assert(
+      fc.property(
+        // Generate multiple logs with different worker names
+        fc.array(
+          fc.tuple(logCategoryArb, messageArb, workerNameArb),
+          { minLength: 5, maxLength: 30 }
+        ),
+        // Pick a worker name to query
+        workerNameArb,
+        (logConfigs, queryWorkerName) => {
+          // Create logs with various worker names
+          for (const [category, message, workerName] of logConfigs) {
+            logRepository.create(category, message, undefined, 'info', workerName);
+          }
+          
+          // Also create some logs with the query worker name
+          logRepository.create('email_forward', 'Test forward', undefined, 'info', queryWorkerName);
+          logRepository.create('email_drop', 'Test drop', undefined, 'info', queryWorkerName);
+
+          // Get global stats
+          const globalStats = workerStatsRepository.getOverallStats();
+
+          // Get worker-specific stats
+          const workerStats = workerStatsRepository.getOverallStatsByWorker(queryWorkerName);
+
+          // Worker stats should be <= global stats
+          expect(workerStats.totalProcessed).toBeLessThanOrEqual(globalStats.totalProcessed);
+          expect(workerStats.totalForwarded).toBeLessThanOrEqual(globalStats.totalForwarded);
+          expect(workerStats.totalDeleted).toBeLessThanOrEqual(globalStats.totalDeleted);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('sum of forwarded and dropped should equal total processed for each worker', () => {
+    fc.assert(
+      fc.property(
+        // Generate multiple logs with different worker names
+        fc.array(
+          fc.tuple(logCategoryArb, messageArb, workerNameArb),
+          { minLength: 5, maxLength: 30 }
+        ),
+        (logConfigs) => {
+          // Create logs with various worker names
+          for (const [category, message, workerName] of logConfigs) {
+            logRepository.create(category, message, undefined, 'info', workerName);
+          }
+
+          // Get stats breakdown by worker
+          const workerStats = workerStatsRepository.getStatsByWorker();
+
+          // For each worker, forwarded + dropped should equal total
+          for (const ws of workerStats) {
+            expect(ws.forwarded + ws.dropped).toBe(ws.total);
+          }
+
+          // Also verify for global stats
+          const globalStats = workerStatsRepository.getOverallStats();
+          expect(globalStats.totalForwarded + globalStats.totalDeleted).toBe(globalStats.totalProcessed);
+        }
+      ),
+      { numRuns: 100 }
+    );
   });
 });

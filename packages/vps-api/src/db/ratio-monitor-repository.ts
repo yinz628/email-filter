@@ -19,6 +19,7 @@ interface RatioMonitorRow {
   steps: string;
   threshold_percent: number;
   time_window: string;
+  worker_scope: string;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -56,6 +57,7 @@ export class RatioMonitorRepository {
       steps,
       thresholdPercent: row.threshold_percent,
       timeWindow: row.time_window as RatioTimeWindow,
+      workerScope: row.worker_scope || 'global',
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -71,10 +73,11 @@ export class RatioMonitorRepository {
     const now = new Date().toISOString();
     const steps = dto.steps || [];
     const stepsJson = JSON.stringify(steps);
+    const workerScope = dto.workerScope || 'global';
 
     const stmt = this.db.prepare(`
-      INSERT INTO ratio_monitors (id, name, tag, first_rule_id, second_rule_id, steps, threshold_percent, time_window, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ratio_monitors (id, name, tag, first_rule_id, second_rule_id, steps, threshold_percent, time_window, worker_scope, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -86,6 +89,7 @@ export class RatioMonitorRepository {
       stepsJson,
       dto.thresholdPercent,
       dto.timeWindow,
+      workerScope,
       dto.enabled !== false ? 1 : 0,
       now,
       now
@@ -107,6 +111,7 @@ export class RatioMonitorRepository {
       steps,
       thresholdPercent: dto.thresholdPercent,
       timeWindow: dto.timeWindow,
+      workerScope,
       enabled: dto.enabled !== false,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -125,7 +130,7 @@ export class RatioMonitorRepository {
   /**
    * Get all ratio monitors
    */
-  getAll(filter?: { tag?: string; enabled?: boolean }): RatioMonitor[] {
+  getAll(filter?: { tag?: string; enabled?: boolean; workerScope?: string }): RatioMonitor[] {
     let query = 'SELECT * FROM ratio_monitors WHERE 1=1';
     const params: (string | number)[] = [];
 
@@ -137,6 +142,11 @@ export class RatioMonitorRepository {
     if (filter?.enabled !== undefined) {
       query += ' AND enabled = ?';
       params.push(filter.enabled ? 1 : 0);
+    }
+
+    if (filter?.workerScope) {
+      query += ' AND worker_scope = ?';
+      params.push(filter.workerScope);
     }
 
     query += ' ORDER BY created_at DESC';
@@ -179,6 +189,10 @@ export class RatioMonitorRepository {
     if (dto.timeWindow !== undefined) {
       updates.push('time_window = ?');
       params.push(dto.timeWindow);
+    }
+    if (dto.workerScope !== undefined) {
+      updates.push('worker_scope = ?');
+      params.push(dto.workerScope);
     }
     if (dto.enabled !== undefined) {
       updates.push('enabled = ?');

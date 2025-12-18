@@ -471,6 +471,79 @@ export interface SetMerchantAnalysisStatusDTO {
 }
 
 // ============================================
+// Analysis Project Types
+// ============================================
+
+/**
+ * Analysis project status
+ */
+export type AnalysisProjectStatus = 'active' | 'completed' | 'archived';
+
+/**
+ * Analysis project status labels
+ */
+export const AnalysisProjectStatusLabels: Record<AnalysisProjectStatus, string> = {
+  active: '进行中',
+  completed: '已完成',
+  archived: '已归档',
+};
+
+/**
+ * Analysis project entity - represents a project for analyzing a merchant's campaigns
+ */
+export interface AnalysisProject {
+  id: string;
+  name: string;
+  merchantId: string;
+  workerName: string;
+  status: AnalysisProjectStatus;
+  note?: string;
+  // Computed fields from merchant
+  merchantDomain?: string;
+  totalCampaigns?: number;
+  totalEmails?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * DTO for creating an analysis project
+ */
+export interface CreateAnalysisProjectDTO {
+  name: string;
+  merchantId: string;
+  workerName: string;
+  note?: string;
+}
+
+/**
+ * DTO for updating an analysis project
+ */
+export interface UpdateAnalysisProjectDTO {
+  name?: string;
+  status?: AnalysisProjectStatus;
+  note?: string;
+}
+
+/**
+ * Raw analysis project row from database
+ */
+export interface AnalysisProjectRow {
+  id: string;
+  name: string;
+  merchant_id: string;
+  worker_name: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  merchant_domain?: string;
+  total_campaigns?: number;
+  total_emails?: number;
+}
+
+// ============================================
 // Database Row Types (for internal use)
 // ============================================
 
@@ -598,3 +671,22 @@ export const ROOT_CAMPAIGN_KEYWORDS = [
   '激活',
   '开始',
 ];
+
+/**
+ * Convert AnalysisProjectRow to AnalysisProject
+ */
+export function toAnalysisProject(row: AnalysisProjectRow): AnalysisProject {
+  return {
+    id: row.id,
+    name: row.name,
+    merchantId: row.merchant_id,
+    workerName: row.worker_name,
+    status: (row.status as AnalysisProjectStatus) || 'active',
+    note: row.note ?? undefined,
+    merchantDomain: row.merchant_domain ?? undefined,
+    totalCampaigns: row.total_campaigns ?? 0,
+    totalEmails: row.total_emails ?? 0,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}

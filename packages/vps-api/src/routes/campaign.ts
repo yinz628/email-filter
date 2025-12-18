@@ -17,6 +17,9 @@ import type {
   MerchantFilter,
   MerchantAnalysisStatus,
   SetMerchantAnalysisStatusDTO,
+  AnalysisProjectStatus,
+  CreateAnalysisProjectDTO,
+  UpdateAnalysisProjectDTO,
 } from '@email-filter/shared';
 import { CampaignAnalyticsService } from '../services/campaign-analytics.service.js';
 import { getDatabase } from '../db/index.js';
@@ -1215,6 +1218,198 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       });
     } catch (error) {
       request.log.error(error, 'Error cleaning up old user paths');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  // ============================================
+  // Analysis Project Routes
+  // ============================================
+
+  /**
+   * GET /api/campaign/projects
+   * Get all analysis projects with optional filtering
+   */
+  fastify.get('/projects', async (
+    request: FastifyRequest<{ Querystring: { workerName?: string; status?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const { workerName, status } = request.query;
+      const filter: { workerName?: string; status?: AnalysisProjectStatus } = {};
+
+      if (workerName) filter.workerName = workerName;
+      if (status && ['active', 'completed', 'archived'].includes(status)) {
+        filter.status = status as AnalysisProjectStatus;
+      }
+
+      const projects = service.getAnalysisProjects(filter);
+
+      return reply.send({ projects });
+    } catch (error) {
+      request.log.error(error, 'Error fetching analysis projects');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/projects/:id
+   * Get a single analysis project by ID
+   */
+  fastify.get('/projects/:id', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const project = service.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      return reply.send(project);
+    } catch (error) {
+      request.log.error(error, 'Error fetching analysis project');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/projects
+   * Create a new analysis project
+   */
+  fastify.post('/projects', async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    const body = request.body as Record<string, unknown>;
+
+    // Validate required fields
+    if (!body?.name || typeof body.name !== 'string' || body.name.trim() === '') {
+      return reply.status(400).send({ error: 'Invalid request', message: 'name is required' });
+    }
+    if (!body?.merchantId || typeof body.merchantId !== 'string') {
+      return reply.status(400).send({ error: 'Invalid request', message: 'merchantId is required' });
+    }
+    if (!body?.workerName || typeof body.workerName !== 'string') {
+      return reply.status(400).send({ error: 'Invalid request', message: 'workerName is required' });
+    }
+
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const data: CreateAnalysisProjectDTO = {
+        name: body.name.trim(),
+        merchantId: body.merchantId,
+        workerName: body.workerName,
+        note: typeof body.note === 'string' ? body.note : undefined,
+      };
+
+      const project = service.createAnalysisProject(data);
+
+      return reply.status(201).send(project);
+    } catch (error: any) {
+      if (error.message === 'Merchant not found') {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+      request.log.error(error, 'Error creating analysis project');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * PUT /api/campaign/projects/:id
+   * Update an analysis project
+   */
+  fastify.put('/projects/:id', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    const body = request.body as Record<string, unknown>;
+
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const data: UpdateAnalysisProjectDTO = {};
+
+      if (body?.name !== undefined) {
+        if (typeof body.name !== 'string' || body.name.trim() === '') {
+          return reply.status(400).send({ error: 'Invalid request', message: 'name cannot be empty' });
+        }
+        data.name = body.name.trim();
+      }
+
+      if (body?.status !== undefined) {
+        if (!['active', 'completed', 'archived'].includes(body.status as string)) {
+          return reply.status(400).send({ error: 'Invalid request', message: 'status must be active, completed, or archived' });
+        }
+        data.status = body.status as AnalysisProjectStatus;
+      }
+
+      if (body?.note !== undefined) {
+        data.note = typeof body.note === 'string' ? body.note : undefined;
+      }
+
+      const project = service.updateAnalysisProject(request.params.id, data);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      return reply.send(project);
+    } catch (error) {
+      request.log.error(error, 'Error updating analysis project');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * DELETE /api/campaign/projects/:id
+   * Delete an analysis project
+   */
+  fastify.delete('/projects/:id', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const deleted = service.deleteAnalysisProject(request.params.id);
+      if (!deleted) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      return reply.send({ message: 'Project deleted' });
+    } catch (error) {
+      request.log.error(error, 'Error deleting analysis project');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/workers/:workerName/merchants
+   * Get merchants for a specific worker (for project creation)
+   */
+  fastify.get('/workers/:workerName/merchants', async (
+    request: FastifyRequest<{ Params: { workerName: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const merchants = service.getMerchantsForWorker(request.params.workerName);
+
+      return reply.send({ merchants });
+    } catch (error) {
+      request.log.error(error, 'Error fetching merchants for worker');
       return reply.status(500).send({ error: 'Internal error' });
     }
   });

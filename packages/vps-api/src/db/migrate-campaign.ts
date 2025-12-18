@@ -271,5 +271,33 @@ try {
   console.log('display_name column migration skipped (may already exist).');
 }
 
+// Migration: Create analysis_projects table for project-based analysis
+const analysisProjectsTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='analysis_projects'
+`).get();
+
+if (!analysisProjectsTableExists) {
+  console.log('Creating analysis_projects table...');
+  db.exec(`
+    CREATE TABLE analysis_projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      merchant_id TEXT NOT NULL,
+      worker_name TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+    );
+    CREATE INDEX idx_analysis_projects_merchant ON analysis_projects(merchant_id);
+    CREATE INDEX idx_analysis_projects_worker ON analysis_projects(worker_name);
+    CREATE INDEX idx_analysis_projects_status ON analysis_projects(status);
+  `);
+  console.log('analysis_projects table created.');
+} else {
+  console.log('analysis_projects table already exists.');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

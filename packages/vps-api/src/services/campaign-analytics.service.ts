@@ -47,8 +47,13 @@ import type {
   PathAnalysisResult,
   MerchantAnalysisStatus,
   SetMerchantAnalysisStatusDTO,
+  AnalysisProject,
+  AnalysisProjectRow,
+  AnalysisProjectStatus,
+  CreateAnalysisProjectDTO,
+  UpdateAnalysisProjectDTO,
 } from '@email-filter/shared';
-import { toMerchant, toCampaign, ROOT_CAMPAIGN_KEYWORDS } from '@email-filter/shared';
+import { toMerchant, toCampaign, toAnalysisProject, ROOT_CAMPAIGN_KEYWORDS } from '@email-filter/shared';
 
 /**
  * Common second-level TLDs that should be treated as part of the TLD
@@ -2967,5 +2972,205 @@ export class CampaignAnalyticsService {
 
     // Use normal tracking for non-ignored merchants
     return this.trackEmail(data);
+  }
+
+  // ============================================
+  // Analysis Project Methods
+  // ============================================
+
+  /**
+   * Get all analysis projects with optional filtering
+   * 
+   * @param filter - Optional filter (workerName, status)
+   * @returns Array of AnalysisProject objects
+   */
+  getAnalysisProjects(filter?: { workerName?: string; status?: AnalysisProjectStatus }): AnalysisProject[] {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (filter?.workerName) {
+      conditions.push('ap.worker_name = ?');
+      params.push(filter.workerName);
+    }
+
+    if (filter?.status) {
+      conditions.push('ap.status = ?');
+      params.push(filter.status);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const stmt = this.db.prepare(`
+      SELECT 
+        ap.*,
+        m.domain as merchant_domain,
+        COALESCE(wc.campaign_count, 0) as total_campaigns,
+        COALESCE(wc.email_count, 0) as total_emails
+      FROM analysis_projects ap
+      LEFT JOIN merchants m ON ap.merchant_id = m.id
+      LEFT JOIN (
+        SELECT 
+          c.merchant_id,
+          ce.worker_name,
+          COUNT(DISTINCT c.id) as campaign_count,
+          COUNT(ce.id) as email_count
+        FROM campaigns c
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        GROUP BY c.merchant_id, ce.worker_name
+      ) wc ON ap.merchant_id = wc.merchant_id AND ap.worker_name = wc.worker_name
+      ${whereClause}
+      ORDER BY ap.created_at DESC
+    `);
+
+    const rows = stmt.all(...params) as AnalysisProjectRow[];
+    return rows.map(toAnalysisProject);
+  }
+
+  /**
+   * Get analysis project by ID
+   * 
+   * @param id - Project ID
+   * @returns AnalysisProject or null
+   */
+  getAnalysisProjectById(id: string): AnalysisProject | null {
+    const stmt = this.db.prepare(`
+      SELECT 
+        ap.*,
+        m.domain as merchant_domain,
+        COALESCE(wc.campaign_count, 0) as total_campaigns,
+        COALESCE(wc.email_count, 0) as total_emails
+      FROM analysis_projects ap
+      LEFT JOIN merchants m ON ap.merchant_id = m.id
+      LEFT JOIN (
+        SELECT 
+          c.merchant_id,
+          ce.worker_name,
+          COUNT(DISTINCT c.id) as campaign_count,
+          COUNT(ce.id) as email_count
+        FROM campaigns c
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        GROUP BY c.merchant_id, ce.worker_name
+      ) wc ON ap.merchant_id = wc.merchant_id AND ap.worker_name = wc.worker_name
+      WHERE ap.id = ?
+    `);
+
+    const row = stmt.get(id) as AnalysisProjectRow | undefined;
+    return row ? toAnalysisProject(row) : null;
+  }
+
+  /**
+   * Create a new analysis project
+   * 
+   * @param data - Project creation data
+   * @returns Created AnalysisProject
+   */
+  createAnalysisProject(data: CreateAnalysisProjectDTO): AnalysisProject {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    // Check if merchant exists
+    const merchant = this.getMerchantById(data.merchantId);
+    if (!merchant) {
+      throw new Error('Merchant not found');
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT INTO analysis_projects (id, name, merchant_id, worker_name, status, note, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+    `);
+
+    stmt.run(id, data.name, data.merchantId, data.workerName, data.note || null, now, now);
+
+    return this.getAnalysisProjectById(id)!;
+  }
+
+  /**
+   * Update an analysis project
+   * 
+   * @param id - Project ID
+   * @param data - Update data
+   * @returns Updated AnalysisProject or null
+   */
+  updateAnalysisProject(id: string, data: UpdateAnalysisProjectDTO): AnalysisProject | null {
+    const now = new Date().toISOString();
+
+    // Check if project exists
+    const existing = this.getAnalysisProjectById(id);
+    if (!existing) {
+      return null;
+    }
+
+    const updates: string[] = ['updated_at = ?'];
+    const params: (string | null)[] = [now];
+
+    if (data.name !== undefined) {
+      updates.push('name = ?');
+      params.push(data.name);
+    }
+
+    if (data.status !== undefined) {
+      updates.push('status = ?');
+      params.push(data.status);
+    }
+
+    if (data.note !== undefined) {
+      updates.push('note = ?');
+      params.push(data.note || null);
+    }
+
+    params.push(id);
+
+    this.db.prepare(`
+      UPDATE analysis_projects SET ${updates.join(', ')} WHERE id = ?
+    `).run(...params);
+
+    return this.getAnalysisProjectById(id);
+  }
+
+  /**
+   * Delete an analysis project
+   * 
+   * @param id - Project ID
+   * @returns true if deleted, false if not found
+   */
+  deleteAnalysisProject(id: string): boolean {
+    const result = this.db.prepare(`
+      DELETE FROM analysis_projects WHERE id = ?
+    `).run(id);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Get merchants for a specific worker (for project creation)
+   * Only returns merchants that have emails from this worker
+   * 
+   * @param workerName - Worker name
+   * @returns Array of Merchant objects
+   */
+  getMerchantsForWorker(workerName: string): Merchant[] {
+    const stmt = this.db.prepare(`
+      SELECT 
+        m.*,
+        COALESCE(wc.campaign_count, 0) as total_campaigns,
+        COALESCE(wc.email_count, 0) as total_emails,
+        COALESCE(wc.valuable_count, 0) as valuable_campaigns
+      FROM merchants m
+      INNER JOIN (
+        SELECT 
+          c.merchant_id,
+          COUNT(DISTINCT c.id) as campaign_count,
+          COUNT(ce.id) as email_count,
+          COUNT(DISTINCT CASE WHEN c.is_valuable = 1 THEN c.id END) as valuable_count
+        FROM campaigns c
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+        GROUP BY c.merchant_id
+      ) wc ON m.id = wc.merchant_id
+      ORDER BY wc.email_count DESC
+    `);
+
+    const rows = stmt.all(workerName) as MerchantRow[];
+    return rows.map(toMerchant);
   }
 }

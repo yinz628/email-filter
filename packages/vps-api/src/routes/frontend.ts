@@ -2971,7 +2971,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       try {
         // Add workerName parameter for instance filtering
-        const workerParam = selectedWorkerName ? '?workerName=' + encodeURIComponent(selectedWorkerName) : '';
+        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        const workerParam = workerName ? '?workerName=' + encodeURIComponent(workerName) : '';
         const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/root-campaigns' + workerParam, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
@@ -3582,8 +3583,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function updateCampaignStats() {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       
-      // Display merchant count from loaded data
-      document.getElementById('stat-merchants').textContent = merchantsData.length;
+      // Display merchant count from loaded data (with null check)
+      const statMerchants = document.getElementById('stat-merchants');
+      if (statMerchants) statMerchants.textContent = merchantsData.length;
       
       // Get campaign and email counts from data-stats API (which supports worker filtering)
       try {
@@ -3592,8 +3594,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const statsRes = await fetch(statsUrl, { headers: getHeaders() });
         if (statsRes.ok) {
           const statsData = await statsRes.json();
-          document.getElementById('stat-campaigns').textContent = statsData.totalCampaigns || 0;
-          document.getElementById('stat-campaign-emails').textContent = statsData.totalEmails || 0;
+          const statCampaigns = document.getElementById('stat-campaigns');
+          const statEmails = document.getElementById('stat-campaign-emails');
+          if (statCampaigns) statCampaigns.textContent = statsData.totalCampaigns || 0;
+          if (statEmails) statEmails.textContent = statsData.totalEmails || 0;
         }
       } catch (e) {
         // Fallback to merchant data if API fails
@@ -3603,8 +3607,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           totalCampaigns += m.totalCampaigns || 0;
           totalEmails += m.totalEmails || 0;
         });
-        document.getElementById('stat-campaigns').textContent = totalCampaigns;
-        document.getElementById('stat-campaign-emails').textContent = totalEmails;
+        const statCampaigns = document.getElementById('stat-campaigns');
+        const statEmails = document.getElementById('stat-campaign-emails');
+        if (statCampaigns) statCampaigns.textContent = totalCampaigns;
+        if (statEmails) statEmails.textContent = totalEmails;
       }
       
       // Get valuable count from campaigns API (which supports worker filtering)
@@ -3618,7 +3624,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           valuableCount = (data.campaigns || []).length;
         }
       } catch (e) {}
-      document.getElementById('stat-valuable').textContent = valuableCount;
+      const statValuable = document.getElementById('stat-valuable');
+      if (statValuable) statValuable.textContent = valuableCount;
     }
 
     async function showCampaigns(merchantId, domain) {

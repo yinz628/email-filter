@@ -2771,16 +2771,27 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
       });
       
-      // Check which merchants have projects
-      const merchantsWithProjects = new Set(projectsData.map(p => p.merchantId));
+      // Check which merchants have projects (per worker)
+      // Build a map: merchantId -> Set of workerNames that have projects
+      const merchantProjectWorkers = new Map();
+      projectsData.forEach(p => {
+        if (!merchantProjectWorkers.has(p.merchantId)) {
+          merchantProjectWorkers.set(p.merchantId, new Set());
+        }
+        // Add all workers from workerNames array (for multi-worker projects)
+        const workers = p.workerNames && p.workerNames.length > 0 ? p.workerNames : (p.workerName ? [p.workerName] : []);
+        workers.forEach(w => merchantProjectWorkers.get(p.merchantId).add(w));
+      });
       
       tbody.innerHTML = sortedMerchants.map(m => {
-        const hasProject = merchantsWithProjects.has(m.id);
-        const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
-        
         // Get worker name from merchant data (for merchants-by-worker API) or from filter
         const merchantWorkerName = m.workerName || workerFilter;
         const hasWorkerName = merchantWorkerName && merchantWorkerName !== '__all__';
+        
+        // Check if this specific merchant+worker combination has a project
+        const workerSet = merchantProjectWorkers.get(m.id);
+        const hasProject = workerSet && workerSet.has(merchantWorkerName);
+        const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
         
         // Worker tag column (only shown when "全部实例" is selected)
         let workerTagCell = '';
@@ -4298,11 +4309,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       showMerchantEmptyState('hidden');
       tableContainer.style.display = 'table';
 
-      // Check which merchants have projects
-      const merchantsWithProjects = new Set(projectsData.map(p => p.merchantId));
+      // Check which merchants have projects (per worker)
+      // Build a map: merchantId -> Set of workerNames that have projects
+      const merchantProjectWorkers = new Map();
+      projectsData.forEach(p => {
+        if (!merchantProjectWorkers.has(p.merchantId)) {
+          merchantProjectWorkers.set(p.merchantId, new Set());
+        }
+        // Add all workers from workerNames array (for multi-worker projects)
+        const workers = p.workerNames && p.workerNames.length > 0 ? p.workerNames : (p.workerName ? [p.workerName] : []);
+        workers.forEach(w => merchantProjectWorkers.get(p.merchantId).add(w));
+      });
       
       tbody.innerHTML = merchantsData.map(m => {
-        const hasProject = merchantsWithProjects.has(m.id);
+        // Check if this specific merchant+worker combination has a project
+        const workerSet = merchantProjectWorkers.get(m.id);
+        const hasProject = workerSet && workerSet.has(workerName);
         const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
         
         return '<tr>' +

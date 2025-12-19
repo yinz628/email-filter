@@ -205,6 +205,7 @@ function validateEmailHitBody(body: unknown): { valid: boolean; error?: string; 
       subject: data.subject as string,
       recipient: data.recipient as string,
       receivedAt,
+      workerName: typeof data.workerName === 'string' ? data.workerName : undefined,
     },
   };
 }

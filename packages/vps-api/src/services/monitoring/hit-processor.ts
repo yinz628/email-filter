@@ -92,12 +92,12 @@ export class HitProcessor {
    * Match an email against all enabled monitoring rules
    *
    * Matches based on:
-   * - Merchant (from sender domain)
+   * - Worker scope (global rules match all, specific rules only match their worker)
    * - Subject pattern (contains or regex match based on rule's matchMode)
    *
    * Requirements: 1.5, 3.1
    *
-   * @param email - Email metadata
+   * @param email - Email metadata (including optional workerName)
    * @returns Array of matched monitoring rules
    */
   matchRules(email: EmailMetadata): MonitoringRule[] {
@@ -105,13 +105,19 @@ export class HitProcessor {
     const matchedRules: MonitoringRule[] = [];
 
     for (const rule of enabledRules) {
+      // Check worker scope - rule must be global or match the email's worker
+      // If email has no workerName, only match global rules
+      const workerMatches = rule.workerScope === 'global' || 
+        (email.workerName && rule.workerScope === email.workerName);
+      
+      if (!workerMatches) {
+        continue;
+      }
+
       // Match subject against the rule's pattern using the rule's matchMode
       const matchResult = matchSubject(rule.subjectPattern, email.subject, rule.matchMode || 'contains');
 
       if (matchResult.matched) {
-        // Optionally verify merchant matches sender domain
-        // For now, we match purely on subject pattern
-        // Merchant filtering can be added if needed
         matchedRules.push(rule);
       }
     }

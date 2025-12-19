@@ -209,6 +209,7 @@ export interface EmailMetadata {
   subject: string;
   recipient: string;
   receivedAt: Date;
+  workerName?: string;  // Worker instance name for scope filtering
 }
 
 /**

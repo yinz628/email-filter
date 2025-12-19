@@ -149,6 +149,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
           subject: payload.subject,
           recipient: payload.to,
           receivedAt: new Date(payload.timestamp),
+          workerName: payload.workerName,  // Pass worker name for scope filtering
         });
       } catch (monitoringError) {
         // Don't fail the webhook if monitoring tracking fails

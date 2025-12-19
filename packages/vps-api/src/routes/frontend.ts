@@ -2569,11 +2569,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadProjects() {
       if (!apiToken) return;
       try {
-        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        const workerFilterValue = document.getElementById('campaign-worker-filter')?.value || '';
         const statusFilter = document.getElementById('project-status-filter')?.value || '';
         let url = '/api/campaign/projects';
         const params = [];
-        if (workerName) params.push('workerName=' + encodeURIComponent(workerName));
+        // Only pass workerName if a specific worker is selected (not "__all__")
+        if (workerFilterValue && workerFilterValue !== '__all__') {
+          params.push('workerName=' + encodeURIComponent(workerFilterValue));
+        }
         if (statusFilter) params.push('status=' + encodeURIComponent(statusFilter));
         if (params.length > 0) url += '?' + params.join('&');
         
@@ -3527,27 +3530,77 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tableContainer.style.display = 'none';
       
       try {
-        // Use project's workerName for instance filtering
-        const workerName = currentProjectWorkerName || '';
-        const workerParam = workerName ? '?workerName=' + encodeURIComponent(workerName) : '';
-        const res = await fetch('/api/campaign/merchants/' + currentMerchantId + '/root-campaigns' + workerParam, { headers: getHeaders() });
-        if (!res.ok) throw new Error('Failed');
-        const data = await res.json();
-        const rootCampaigns = data.rootCampaigns || [];
+        // Use project's workerNames for multi-worker filtering
+        const workerNames = currentProjectWorkerNames && currentProjectWorkerNames.length > 0 
+          ? currentProjectWorkerNames 
+          : (currentProjectWorkerName ? [currentProjectWorkerName] : []);
+        
+        // Fetch all campaigns for this merchant (not just root candidates)
+        let campaignsUrl = '/api/campaign/campaigns?merchantId=' + currentMerchantId + '&limit=500';
+        if (workerNames.length === 1) {
+          campaignsUrl += '&workerName=' + encodeURIComponent(workerNames[0]);
+        }
+        
+        // Also fetch root campaigns info to get candidate status
+        let rootUrl = '/api/campaign/merchants/' + currentMerchantId + '/root-campaigns';
+        if (workerNames.length === 1) {
+          rootUrl += '?workerName=' + encodeURIComponent(workerNames[0]);
+        }
+        
+        const [campaignsRes, rootRes] = await Promise.all([
+          fetch(campaignsUrl, { headers: getHeaders() }),
+          fetch(rootUrl, { headers: getHeaders() })
+        ]);
+        
+        if (!campaignsRes.ok || !rootRes.ok) throw new Error('Failed');
+        
+        const campaignsData = await campaignsRes.json();
+        const rootData = await rootRes.json();
+        
+        const allCampaigns = campaignsData.campaigns || [];
+        const rootCampaignsInfo = rootData.rootCampaigns || [];
+        
+        // Create a map of root campaign info
+        const rootInfoMap = new Map();
+        rootCampaignsInfo.forEach(r => {
+          rootInfoMap.set(r.campaignId, r);
+        });
+        
+        // Merge campaign data with root info
+        const mergedCampaigns = allCampaigns.map(c => {
+          const rootInfo = rootInfoMap.get(c.id);
+          return {
+            campaignId: c.id,
+            subject: c.subject,
+            totalEmails: c.totalEmails,
+            isConfirmed: rootInfo?.isConfirmed || false,
+            isCandidate: rootInfo?.isCandidate || false,
+            candidateReason: rootInfo?.candidateReason,
+            newUserCount: rootInfo?.newUserCount || 0
+          };
+        });
+        
+        // Sort: confirmed first, then candidates, then by email count
+        mergedCampaigns.sort((a, b) => {
+          if (a.isConfirmed !== b.isConfirmed) return a.isConfirmed ? -1 : 1;
+          if (a.isCandidate !== b.isCandidate) return a.isCandidate ? -1 : 1;
+          return b.totalEmails - a.totalEmails;
+        });
         
         // Find current root (isConfirmed = true)
-        const confirmedRoot = rootCampaigns.find(c => c.isConfirmed);
+        const confirmedRoot = mergedCampaigns.find(c => c.isConfirmed);
         if (confirmedRoot) {
           currentProjectRootId = confirmedRoot.campaignId;
           currentRootDiv.style.display = 'block';
-          document.getElementById('root-current-name').textContent = confirmedRoot.subject || '未知主题';
+          document.getElementById('root-current-name').innerHTML = escapeHtml(confirmedRoot.subject || '未知主题') + 
+            ' <button class="btn btn-sm btn-danger" onclick="unsetRoot(\\'' + confirmedRoot.campaignId + '\\')" style="margin-left:10px;">取消选择</button>';
         } else {
           currentProjectRootId = null;
           currentRootDiv.style.display = 'none';
         }
         
-        if (rootCampaigns.length === 0) {
-          emptyDiv.textContent = '该商户暂无 Root 候选活动。请先在"营销活动"标签页中查看活动列表。';
+        if (mergedCampaigns.length === 0) {
+          emptyDiv.textContent = '该商户暂无营销活动数据。';
           return;
         }
         
@@ -3555,18 +3608,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         tableContainer.style.display = 'table';
         
         const tbody = document.getElementById('root-campaigns-table');
-        tbody.innerHTML = rootCampaigns.map(c => {
+        tbody.innerHTML = mergedCampaigns.map(c => {
           const isRoot = c.isConfirmed;
           const statusBadge = isRoot 
             ? '<span class="root-badge">当前 Root</span>' 
-            : (c.isCandidate ? '<span style="color:#666;font-size:11px;">候选: ' + escapeHtml(c.candidateReason || '系统推荐') + '</span>' : '-');
+            : (c.isCandidate ? '<span style="color:#666;font-size:11px;">候选: ' + escapeHtml(c.candidateReason || '系统推荐') + '</span>' : '<span style="color:#999;font-size:11px;">-</span>');
           const actionBtn = isRoot 
-            ? '<button class="btn btn-sm btn-secondary" disabled>已选中</button>'
+            ? '<button class="btn btn-sm btn-danger" onclick="unsetRoot(\\'' + c.campaignId + '\\')">取消选择</button>'
             : '<button class="btn btn-sm btn-primary" onclick="setAsRoot(\\'' + c.campaignId + '\\')">设为 Root</button>';
           
-          return '<tr style="' + (isRoot ? 'background:#e8f5e9;' : '') + '">' +
+          return '<tr style="' + (isRoot ? 'background:#e8f5e9;' : (c.isCandidate ? 'background:#fff8e1;' : '')) + '">' +
             '<td>' + escapeHtml(c.subject || '未知主题') + '</td>' +
-            '<td>' + (c.newUserCount || 0) + '</td>' +
+            '<td>' + (c.totalEmails || 0) + '</td>' +
             '<td>' + (c.isConfirmed ? '已确认' : (c.isCandidate ? '候选' : '-')) + '</td>' +
             '<td>' + statusBadge + '</td>' +
             '<td class="actions">' + actionBtn + '</td></tr>';
@@ -3631,6 +3684,35 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
+    async function unsetRoot(campaignId) {
+      if (!currentMerchantId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      if (!confirm('确定要取消此活动的 Root 状态吗？')) return;
+      
+      try {
+        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/root', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ isRoot: false })
+        });
+        
+        if (res.ok) {
+          currentProjectRootId = null;
+          showAlert('Root 已取消');
+          loadRootCampaigns();
+        } else {
+          const errorData = await res.json().catch(() => ({}));
+          showAlert(errorData.message || '取消失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error unsetting root:', e);
+        showAlert('取消失败', 'error');
+      }
+    }
+
     async function loadProjectCampaigns() {
       if (!currentMerchantId) return;
       
@@ -3643,11 +3725,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       try {
         const valueFilter = document.getElementById('campaign-valuable-filter')?.value || '';
-        // Use project's workerName instead of the page filter
-        const workerName = currentProjectWorkerName || '';
+        // Use project's workerNames for multi-worker support
+        const workerNames = currentProjectWorkerNames && currentProjectWorkerNames.length > 0 
+          ? currentProjectWorkerNames 
+          : (currentProjectWorkerName ? [currentProjectWorkerName] : []);
         let url = '/api/campaign/campaigns?merchantId=' + currentMerchantId;
         if (valueFilter) url += '&tag=' + valueFilter;
-        if (workerName) url += '&workerName=' + encodeURIComponent(workerName);
+        if (workerNames.length > 0) url += '&workerNames=' + encodeURIComponent(workerNames.join(','));
         
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');

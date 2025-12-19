@@ -223,6 +223,7 @@ interface GetCampaignsQuery {
   merchantId?: string;
   isValuable?: string;
   workerName?: string;
+  workerNames?: string; // Comma-separated list of worker names
   sortBy?: string;
   sortOrder?: string;
   limit?: string;
@@ -469,7 +470,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new CampaignAnalyticsService(db);
 
-      const { merchantId, isValuable, workerName, sortBy, sortOrder, limit, offset } = request.query;
+      const { merchantId, isValuable, workerName, workerNames, sortBy, sortOrder, limit, offset } = request.query;
       const filter: CampaignFilter = {};
 
       if (merchantId) {
@@ -478,8 +479,10 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       if (isValuable !== undefined) {
         filter.isValuable = isValuable === 'true';
       }
-      // Add workerName filter for instance-based filtering (Requirements: 4.2)
-      if (workerName) {
+      // Support both single workerName and multiple workerNames (comma-separated)
+      if (workerNames) {
+        filter.workerNames = workerNames.split(',').map(w => w.trim()).filter(w => w);
+      } else if (workerName) {
         filter.workerName = workerName;
       }
       if (sortBy && ['firstSeenAt', 'lastSeenAt', 'totalEmails', 'uniqueRecipients'].includes(sortBy)) {

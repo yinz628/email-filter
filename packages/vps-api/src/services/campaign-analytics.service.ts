@@ -670,7 +670,41 @@ export class CampaignAnalyticsService {
     const limit = filter?.limit || 100;
     const offset = filter?.offset || 0;
 
-    // When workerName is specified, calculate worker-specific email counts
+    // When workerNames array is specified, filter by multiple workers
+    if (filter?.workerNames && filter.workerNames.length > 0) {
+      const workerConditions = [...conditions];
+      const workerParams = [...params];
+      
+      // Add worker filter for the join (multiple workers)
+      const placeholders = filter.workerNames.map(() => '?').join(', ');
+      workerConditions.push(`ce.worker_name IN (${placeholders})`);
+      workerParams.push(...filter.workerNames);
+
+      const whereClause = workerConditions.length > 0 
+        ? `WHERE ${workerConditions.join(' AND ')}` 
+        : '';
+
+      // Use subquery to calculate worker-specific counts
+      const stmt = this.db.prepare(`
+        SELECT 
+          c.id, c.merchant_id, c.subject, c.tag, c.is_valuable,
+          c.first_seen_at, c.last_seen_at, c.created_at, c.updated_at,
+          COUNT(ce.id) as total_emails,
+          COUNT(DISTINCT ce.recipient) as unique_recipients
+        FROM campaigns c
+        INNER JOIN campaign_emails ce ON c.id = ce.campaign_id
+        ${whereClause}
+        GROUP BY c.id
+        ORDER BY ${column === 'total_emails' || column === 'unique_recipients' ? column : 'c.' + column} ${order}
+        LIMIT ? OFFSET ?
+      `);
+
+      workerParams.push(limit, offset);
+      const rows = stmt.all(...workerParams) as CampaignRow[];
+      return rows.map(toCampaign);
+    }
+
+    // When single workerName is specified, calculate worker-specific email counts
     if (filter?.workerName) {
       const workerConditions = [...conditions];
       const workerParams = [...params];
@@ -3191,9 +3225,12 @@ export class CampaignAnalyticsService {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
 
+    // When filtering by workerName, include projects that:
+    // 1. Have worker_name matching the filter, OR
+    // 2. Have worker_names array containing the filter value
     if (filter?.workerName) {
-      conditions.push('ap.worker_name = ?');
-      params.push(filter.workerName);
+      conditions.push(`(ap.worker_name = ? OR ap.worker_names LIKE '%"' || ? || '"%')`);
+      params.push(filter.workerName, filter.workerName);
     }
 
     if (filter?.status) {
@@ -3203,30 +3240,47 @@ export class CampaignAnalyticsService {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // First get all projects with basic info
     const stmt = this.db.prepare(`
       SELECT 
         ap.*,
-        m.domain as merchant_domain,
-        COALESCE(wc.campaign_count, 0) as total_campaigns,
-        COALESCE(wc.email_count, 0) as total_emails
+        m.domain as merchant_domain
       FROM analysis_projects ap
       LEFT JOIN merchants m ON ap.merchant_id = m.id
-      LEFT JOIN (
-        SELECT 
-          c.merchant_id,
-          ce.worker_name,
-          COUNT(DISTINCT c.id) as campaign_count,
-          COUNT(ce.id) as email_count
-        FROM campaigns c
-        JOIN campaign_emails ce ON c.id = ce.campaign_id
-        GROUP BY c.merchant_id, ce.worker_name
-      ) wc ON ap.merchant_id = wc.merchant_id AND ap.worker_name = wc.worker_name
       ${whereClause}
       ORDER BY ap.created_at DESC
     `);
 
     const rows = stmt.all(...params) as AnalysisProjectRow[];
-    return rows.map(toAnalysisProject);
+    
+    // For each project, calculate stats based on all workers in worker_names (or worker_name if no worker_names)
+    return rows.map(row => {
+      const project = toAnalysisProject(row);
+      
+      // Determine which workers to use for stats calculation
+      const workers = project.workerNames && project.workerNames.length > 0 
+        ? project.workerNames 
+        : (project.workerName ? [project.workerName] : []);
+      
+      if (workers.length > 0) {
+        const placeholders = workers.map(() => '?').join(', ');
+        const statsStmt = this.db.prepare(`
+          SELECT 
+            COUNT(DISTINCT c.id) as campaign_count,
+            COUNT(ce.id) as email_count
+          FROM campaigns c
+          JOIN campaign_emails ce ON c.id = ce.campaign_id
+          WHERE c.merchant_id = ? AND ce.worker_name IN (${placeholders})
+        `);
+        const stats = statsStmt.get(project.merchantId, ...workers) as { campaign_count: number; email_count: number } | undefined;
+        if (stats) {
+          project.totalCampaigns = stats.campaign_count;
+          project.totalEmails = stats.email_count;
+        }
+      }
+      
+      return project;
+    });
   }
 
   /**
@@ -3239,26 +3293,40 @@ export class CampaignAnalyticsService {
     const stmt = this.db.prepare(`
       SELECT 
         ap.*,
-        m.domain as merchant_domain,
-        COALESCE(wc.campaign_count, 0) as total_campaigns,
-        COALESCE(wc.email_count, 0) as total_emails
+        m.domain as merchant_domain
       FROM analysis_projects ap
       LEFT JOIN merchants m ON ap.merchant_id = m.id
-      LEFT JOIN (
-        SELECT 
-          c.merchant_id,
-          ce.worker_name,
-          COUNT(DISTINCT c.id) as campaign_count,
-          COUNT(ce.id) as email_count
-        FROM campaigns c
-        JOIN campaign_emails ce ON c.id = ce.campaign_id
-        GROUP BY c.merchant_id, ce.worker_name
-      ) wc ON ap.merchant_id = wc.merchant_id AND ap.worker_name = wc.worker_name
       WHERE ap.id = ?
     `);
 
     const row = stmt.get(id) as AnalysisProjectRow | undefined;
-    return row ? toAnalysisProject(row) : null;
+    if (!row) return null;
+    
+    const project = toAnalysisProject(row);
+    
+    // Determine which workers to use for stats calculation
+    const workers = project.workerNames && project.workerNames.length > 0 
+      ? project.workerNames 
+      : (project.workerName ? [project.workerName] : []);
+    
+    if (workers.length > 0) {
+      const placeholders = workers.map(() => '?').join(', ');
+      const statsStmt = this.db.prepare(`
+        SELECT 
+          COUNT(DISTINCT c.id) as campaign_count,
+          COUNT(ce.id) as email_count
+        FROM campaigns c
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE c.merchant_id = ? AND ce.worker_name IN (${placeholders})
+      `);
+      const stats = statsStmt.get(project.merchantId, ...workers) as { campaign_count: number; email_count: number } | undefined;
+      if (stats) {
+        project.totalCampaigns = stats.campaign_count;
+        project.totalEmails = stats.email_count;
+      }
+    }
+    
+    return project;
   }
 
   /**

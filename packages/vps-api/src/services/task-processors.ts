@@ -288,8 +288,8 @@ export async function processCampaignTasks(
         sender: payload.from,
         subject: payload.subject,
         recipient: payload.to,
-        receivedAt: new Date(payload.timestamp),
-        workerName: payload.workerName,
+        receivedAt: new Date(payload.timestamp).toISOString(),
+        workerName: payload.workerName || 'global',
       });
     } catch (error) {
       // Log error but continue processing other tasks

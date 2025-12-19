@@ -441,6 +441,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <p style="color:#666;margin-bottom:15px">商户数据按 Worker 实例分组显示。选择"全部实例"查看所有数据，或选择特定实例筛选。</p>
+        <div id="merchants-batch-actions" style="display:none;margin-bottom:10px;padding:10px;background:#f8f9fa;border-radius:4px;">
+          <span id="merchants-selected-count" style="margin-right:15px;font-weight:500;">已选择 0 项</span>
+          <button class="btn btn-sm btn-danger" onclick="showBatchDeleteModal()">🗑️ 批量删除</button>
+        </div>
         <div id="merchants-empty" style="text-align:center;padding:40px;">
           <div id="merchants-no-worker-prompt" style="display:none;color:#999;">请选择一个 Worker 实例查看商户数据。</div>
           <div id="merchants-loading" style="display:none;color:#999;">加载中...</div>
@@ -450,6 +454,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <table id="merchants-table-container" style="display:none;">
           <thead>
             <tr>
+              <th style="width:40px;"><input type="checkbox" id="merchants-select-all" onchange="toggleSelectAllMerchants(this.checked)" title="全选/取消全选"></th>
               <th>商户域名</th>
               <th id="worker-column-header">Worker 实例</th>
               <th>营销活动数</th>
@@ -1464,6 +1469,35 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;gap:10px;justify-content:flex-end;">
           <button class="btn btn-secondary" onclick="hideModal('delete-merchant-modal')">取消</button>
           <button class="btn btn-danger" onclick="confirmDeleteMerchantData()">确认删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch Delete Merchants Modal -->
+  <div id="batch-delete-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>⚠️ 批量删除商户数据</h3>
+        <button class="modal-close" onclick="hideModal('batch-delete-modal')">&times;</button>
+      </div>
+      <div style="padding:15px 0;">
+        <p style="color:#e74c3c;font-weight:bold;margin-bottom:15px;">此操作不可恢复！</p>
+        <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:15px;margin-bottom:15px;">
+          <p style="margin:0 0 10px 0;"><strong>将要删除的数据：</strong></p>
+          <p style="margin:0;">共 <strong id="batch-delete-count">0</strong> 个商户的数据</p>
+          <div id="batch-delete-list" style="max-height:200px;overflow-y:auto;margin-top:10px;font-size:13px;"></div>
+        </div>
+        <p style="color:#666;font-size:13px;margin-bottom:15px;">删除后，所选商户在对应 Worker 下的所有邮件和路径记录将被永久删除。</p>
+        <div id="batch-delete-progress" style="display:none;margin-bottom:15px;">
+          <div style="background:#e9ecef;border-radius:4px;height:20px;overflow:hidden;">
+            <div id="batch-delete-progress-bar" style="background:#007bff;height:100%;width:0%;transition:width 0.3s;"></div>
+          </div>
+          <p id="batch-delete-status" style="margin-top:5px;font-size:13px;color:#666;">正在删除...</p>
+        </div>
+        <div id="batch-delete-buttons" style="display:flex;gap:10px;justify-content:flex-end;">
+          <button class="btn btn-secondary" onclick="hideModal('batch-delete-modal')">取消</button>
+          <button class="btn btn-danger" onclick="confirmBatchDelete()">确认删除</button>
         </div>
       </div>
     </div>
@@ -2724,7 +2758,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           }
         }
         
+        // Create unique key for checkbox (merchantId + workerName for batch operations)
+        const checkboxKey = hasWorkerName ? m.id + '|' + merchantWorkerName : m.id;
+        
         return '<tr>' +
+          '<td><input type="checkbox" class="merchant-checkbox" data-merchant-id="' + m.id + '" data-worker-name="' + (hasWorkerName ? escapeHtml(merchantWorkerName) : '') + '" data-domain="' + escapeHtml(m.domain) + '" data-emails="' + m.totalEmails + '" data-campaigns="' + m.totalCampaigns + '" onchange="onMerchantCheckboxChange()" ' + (hasWorkerName ? '' : 'disabled title="请选择特定 Worker 实例以启用批量删除"') + '></td>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
           workerTagCell +
           '<td>' + m.totalCampaigns + '</td>' +
@@ -2736,6 +2774,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             (hasWorkerName ? '<button class="btn btn-sm btn-danger" onclick="showDeleteMerchantModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalEmails + ', ' + m.totalCampaigns + ', \\'' + escapeHtml(merchantWorkerName) + '\\')" style="margin-left:5px;">删除数据</button>' : '') +
           '</td></tr>';
       }).join('');
+      
+      // Reset select all checkbox and batch actions
+      const selectAllCheckbox = document.getElementById('merchants-select-all');
+      if (selectAllCheckbox) selectAllCheckbox.checked = false;
+      updateBatchActionsVisibility();
     }
 
     function sortMerchantList() {
@@ -3086,6 +3129,136 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         console.error('Error deleting merchant data:', e);
         showAlert('删除失败', 'error');
       }
+    }
+
+    // Batch delete functions
+    function toggleSelectAllMerchants(checked) {
+      const checkboxes = document.querySelectorAll('.merchant-checkbox:not([disabled])');
+      checkboxes.forEach(cb => cb.checked = checked);
+      updateBatchActionsVisibility();
+    }
+
+    function onMerchantCheckboxChange() {
+      updateBatchActionsVisibility();
+      // Update select all checkbox state
+      const checkboxes = document.querySelectorAll('.merchant-checkbox:not([disabled])');
+      const checkedBoxes = document.querySelectorAll('.merchant-checkbox:checked');
+      const selectAllCheckbox = document.getElementById('merchants-select-all');
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = checkboxes.length > 0 && checkboxes.length === checkedBoxes.length;
+        selectAllCheckbox.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
+      }
+    }
+
+    function updateBatchActionsVisibility() {
+      const checkedBoxes = document.querySelectorAll('.merchant-checkbox:checked');
+      const batchActionsDiv = document.getElementById('merchants-batch-actions');
+      const selectedCountSpan = document.getElementById('merchants-selected-count');
+      
+      if (checkedBoxes.length > 0) {
+        batchActionsDiv.style.display = 'block';
+        selectedCountSpan.textContent = '已选择 ' + checkedBoxes.length + ' 项';
+      } else {
+        batchActionsDiv.style.display = 'none';
+      }
+    }
+
+    function getSelectedMerchants() {
+      const checkedBoxes = document.querySelectorAll('.merchant-checkbox:checked');
+      return Array.from(checkedBoxes).map(cb => ({
+        merchantId: cb.dataset.merchantId,
+        workerName: cb.dataset.workerName,
+        domain: cb.dataset.domain,
+        emails: parseInt(cb.dataset.emails) || 0,
+        campaigns: parseInt(cb.dataset.campaigns) || 0
+      }));
+    }
+
+    function showBatchDeleteModal() {
+      const selectedMerchants = getSelectedMerchants();
+      if (selectedMerchants.length === 0) {
+        showAlert('请先选择要删除的商户', 'error');
+        return;
+      }
+
+      document.getElementById('batch-delete-count').textContent = selectedMerchants.length;
+      
+      // Build list of merchants to delete
+      const listHtml = selectedMerchants.map(m => 
+        '<div style="padding:4px 0;border-bottom:1px solid #eee;">' +
+          '<strong>' + escapeHtml(m.domain) + '</strong>' +
+          ' <span style="color:#666;">(' + m.workerName + ')</span>' +
+          ' - ' + m.emails + ' 封邮件, ' + m.campaigns + ' 个活动' +
+        '</div>'
+      ).join('');
+      document.getElementById('batch-delete-list').innerHTML = listHtml;
+      
+      // Reset progress UI
+      document.getElementById('batch-delete-progress').style.display = 'none';
+      document.getElementById('batch-delete-buttons').style.display = 'flex';
+      document.getElementById('batch-delete-progress-bar').style.width = '0%';
+      
+      showModal('batch-delete-modal');
+    }
+
+    async function confirmBatchDelete() {
+      const selectedMerchants = getSelectedMerchants();
+      if (selectedMerchants.length === 0) {
+        hideModal('batch-delete-modal');
+        return;
+      }
+
+      // Show progress UI
+      document.getElementById('batch-delete-progress').style.display = 'block';
+      document.getElementById('batch-delete-buttons').style.display = 'none';
+      
+      let successCount = 0;
+      let failCount = 0;
+      let totalEmails = 0;
+      let totalPaths = 0;
+      
+      for (let i = 0; i < selectedMerchants.length; i++) {
+        const m = selectedMerchants[i];
+        const progress = Math.round(((i + 1) / selectedMerchants.length) * 100);
+        document.getElementById('batch-delete-progress-bar').style.width = progress + '%';
+        document.getElementById('batch-delete-status').textContent = '正在删除 ' + (i + 1) + '/' + selectedMerchants.length + ': ' + m.domain;
+        
+        try {
+          const res = await fetch('/api/campaign/merchants/' + encodeURIComponent(m.merchantId) + '/data?workerName=' + encodeURIComponent(m.workerName), {
+            method: 'DELETE',
+            headers: getHeaders()
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            successCount++;
+            totalEmails += data.result?.emailsDeleted || 0;
+            totalPaths += data.result?.pathsDeleted || 0;
+          } else {
+            failCount++;
+          }
+        } catch (e) {
+          console.error('Error deleting merchant:', m.domain, e);
+          failCount++;
+        }
+      }
+      
+      hideModal('batch-delete-modal');
+      
+      // Show result
+      let message = '批量删除完成！\\n';
+      message += '- 成功: ' + successCount + ' 个商户\\n';
+      if (failCount > 0) {
+        message += '- 失败: ' + failCount + ' 个商户\\n';
+      }
+      message += '- 删除邮件数: ' + totalEmails + '\\n';
+      message += '- 删除路径数: ' + totalPaths;
+      
+      showAlert(message, failCount > 0 ? 'warning' : 'success');
+      
+      // Refresh data
+      await loadMerchantList();
+      await loadProjects();
     }
 
     async function openProject(projectId) {

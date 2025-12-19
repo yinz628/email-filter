@@ -442,6 +442,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <p style="color:#666;margin-bottom:15px">商户数据按 Worker 实例分组显示。选择"全部实例"查看所有数据，或选择特定实例筛选。</p>
         <div id="merchants-empty" style="text-align:center;padding:40px;">
+          <div id="merchants-no-worker-prompt" style="display:none;color:#999;">请选择一个 Worker 实例查看商户数据。</div>
           <div id="merchants-loading" style="display:none;color:#999;">加载中...</div>
           <div id="merchants-empty-data" style="display:none;color:#999;">暂无商户数据。</div>
           <div id="merchants-load-error" style="display:none;color:#e74c3c;">加载商户列表失败。</div>
@@ -2584,11 +2585,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const emptyDataDiv = document.getElementById('merchants-empty-data');
       const errorDiv = document.getElementById('merchants-load-error');
       
-      // Hide all states first
-      noWorkerPrompt.style.display = 'none';
-      loadingDiv.style.display = 'none';
-      emptyDataDiv.style.display = 'none';
-      errorDiv.style.display = 'none';
+      // Safety check - if elements don't exist, return early
+      if (!emptyDiv) return;
+      
+      // Hide all states first (with null checks)
+      if (noWorkerPrompt) noWorkerPrompt.style.display = 'none';
+      if (loadingDiv) loadingDiv.style.display = 'none';
+      if (emptyDataDiv) emptyDataDiv.style.display = 'none';
+      if (errorDiv) errorDiv.style.display = 'none';
       
       if (state === 'hidden') {
         emptyDiv.style.display = 'none';
@@ -2599,16 +2603,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       switch (state) {
         case 'no-worker':
-          noWorkerPrompt.style.display = 'block';
+          if (noWorkerPrompt) noWorkerPrompt.style.display = 'block';
           break;
         case 'loading':
-          loadingDiv.style.display = 'block';
+          if (loadingDiv) loadingDiv.style.display = 'block';
           break;
         case 'empty-data':
-          emptyDataDiv.style.display = 'block';
+          if (emptyDataDiv) emptyDataDiv.style.display = 'block';
           break;
         case 'error':
-          errorDiv.style.display = 'block';
+          if (errorDiv) errorDiv.style.display = 'block';
           break;
       }
     }

@@ -104,17 +104,11 @@ export class HitProcessor {
     const enabledRules = this.ruleRepo.getEnabled();
     const matchedRules: MonitoringRule[] = [];
 
-    // Debug log
-    console.log(`[HitProcessor] Processing email from worker: "${email.workerName}", subject: "${email.subject?.substring(0, 50)}..."`);
-
     for (const rule of enabledRules) {
       // Check worker scope - rule must be global or match the email's worker
       // If email has no workerName, only match global rules
       const workerMatches = rule.workerScope === 'global' || 
         (email.workerName && rule.workerScope === email.workerName);
-      
-      // Debug log for worker scope matching
-      console.log(`[HitProcessor] Rule "${rule.name}" (${rule.id}): workerScope="${rule.workerScope}", email.workerName="${email.workerName}", matches=${workerMatches}`);
       
       if (!workerMatches) {
         continue;

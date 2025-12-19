@@ -75,6 +75,48 @@ export class LogRepository {
   }
 
   /**
+   * Batch create log entries
+   * Requirements: 3.3 - Combine similar operations into single database writes
+   * 
+   * @param entries - Array of log entries to insert
+   * @returns Number of entries inserted
+   */
+  createBatch(entries: Array<{
+    category: LogCategory;
+    message: string;
+    details?: Record<string, unknown>;
+    level?: LogLevel;
+    workerName?: string;
+  }>): number {
+    if (entries.length === 0) return 0;
+
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`
+      INSERT INTO system_logs (category, level, message, details, worker_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertMany = this.db.transaction((logs: typeof entries) => {
+      let count = 0;
+      for (const log of logs) {
+        const detailsJson = log.details ? JSON.stringify(log.details) : null;
+        stmt.run(
+          log.category,
+          log.level || 'info',
+          log.message,
+          detailsJson,
+          log.workerName || 'global',
+          now
+        );
+        count++;
+      }
+      return count;
+    });
+
+    return insertMany(entries);
+  }
+
+  /**
    * Get logs with optional filtering
    */
   findAll(filter?: LogFilter): SystemLog[] {

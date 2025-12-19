@@ -137,6 +137,21 @@ export class WatchRepository {
   }
 
   /**
+   * Batch increment hit count for a rule
+   * Requirements: 3.3 - Combine similar operations into single database writes
+   * 
+   * @param ruleId - The rule ID to increment
+   * @param count - Number to increment by
+   */
+  incrementHitBatch(ruleId: string, count: number): void {
+    if (count <= 0) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE watch_stats SET hit_count = hit_count + ?, last_hit_at = ? WHERE rule_id = ?
+    `).run(count, now, ruleId);
+  }
+
+  /**
    * Toggle rule enabled status
    */
   toggleEnabled(id: string): WatchRule | null {

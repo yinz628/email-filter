@@ -172,6 +172,76 @@ export class StatsRepository {
   }
 
   /**
+   * Batch increment global forwarded count
+   * Requirements: 3.3 - Combine similar operations into single database writes
+   * 
+   * @param count - Number to increment by
+   */
+  incrementGlobalForwardedBatch(count: number): void {
+    if (count <= 0) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE global_stats 
+      SET total_processed = total_processed + ?, 
+          total_forwarded = total_forwarded + ?, 
+          last_updated = ?
+      WHERE id = 1
+    `).run(count, count, now);
+  }
+
+  /**
+   * Batch increment global deleted count
+   * Requirements: 3.3 - Combine similar operations into single database writes
+   * 
+   * @param count - Number to increment by
+   */
+  incrementGlobalDeletedBatch(count: number): void {
+    if (count <= 0) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE global_stats 
+      SET total_processed = total_processed + ?, 
+          total_deleted = total_deleted + ?, 
+          last_updated = ?
+      WHERE id = 1
+    `).run(count, count, now);
+  }
+
+  /**
+   * Batch increment processed count for a rule
+   * Requirements: 3.3 - Combine similar operations into single database writes
+   * 
+   * @param ruleId - The rule ID to increment
+   * @param count - Number to increment by
+   */
+  incrementProcessedBatch(ruleId: string, count: number): void {
+    if (count <= 0) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE rule_stats 
+      SET total_processed = total_processed + ?, last_updated = ?
+      WHERE rule_id = ?
+    `).run(count, now, ruleId);
+  }
+
+  /**
+   * Batch increment deleted count for a rule
+   * Requirements: 3.3 - Combine similar operations into single database writes
+   * 
+   * @param ruleId - The rule ID to increment
+   * @param count - Number to increment by
+   */
+  incrementDeletedBatch(ruleId: string, count: number): void {
+    if (count <= 0) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE rule_stats 
+      SET deleted_count = deleted_count + ?, total_processed = total_processed + ?, last_updated = ?
+      WHERE rule_id = ?
+    `).run(count, count, now, ruleId);
+  }
+
+  /**
    * Initialize global stats table if not exists
    */
   initGlobalStats(): void {

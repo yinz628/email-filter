@@ -2,7 +2,7 @@
  * Rules Routes
  * CRUD operations for filter rules
  * 
- * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5
+ * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 4.4
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -11,6 +11,7 @@ import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { getRuleCache } from '../services/rule-cache.instance.js';
 
 // Valid values for validation
 const VALID_CATEGORIES: RuleCategory[] = ['whitelist', 'blacklist', 'dynamic'];
@@ -209,7 +210,7 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
    * POST /api/rules
    * Create a new rule
    *
-   * Requirements: 3.1
+   * Requirements: 3.1, 4.4
    */
   fastify.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const validation = validateCreateRule(request.body);
@@ -231,6 +232,15 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const rule = ruleRepository.create(validation.data, workerId);
+      
+      // Invalidate cache for this worker (Requirement 4.4)
+      const ruleCache = getRuleCache();
+      ruleCache.invalidate(workerId);
+      // Also invalidate global cache if this is a global rule
+      if (!workerId) {
+        ruleCache.invalidate(undefined);
+      }
+      
       return reply.status(201).send(rule);
     } catch (error: any) {
       if (error.message === 'DUPLICATE_RULE') {
@@ -245,7 +255,7 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
    * PUT /api/rules/:id
    * Update an existing rule
    * 
-   * Requirements: 3.3
+   * Requirements: 3.3, 4.4
    */
   fastify.put('/:id', async (request: FastifyRequest<{ Params: RuleParams }>, reply: FastifyReply) => {
     const validation = validateUpdateRule(request.body);
@@ -257,6 +267,9 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const ruleRepository = new RuleRepository(db);
 
+      // Get existing rule to know which worker's cache to invalidate
+      const existingRule = ruleRepository.findById(request.params.id);
+      
       // Extract workerId from request body
       const body = request.body as Record<string, unknown>;
       const updateData = { ...validation.data } as any;
@@ -267,6 +280,19 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const rule = ruleRepository.update(request.params.id, updateData);
       if (!rule) {
         return reply.status(404).send({ error: 'Rule not found' });
+      }
+
+      // Invalidate cache for affected workers (Requirement 4.4)
+      const ruleCache = getRuleCache();
+      // Invalidate old worker's cache
+      if (existingRule) {
+        ruleCache.invalidate(existingRule.workerId);
+      }
+      // Invalidate new worker's cache (in case workerId changed)
+      ruleCache.invalidate(rule.workerId);
+      // Also invalidate global cache if either is a global rule
+      if (!existingRule?.workerId || !rule.workerId) {
+        ruleCache.invalidate(undefined);
       }
 
       return reply.send(rule);
@@ -280,7 +306,7 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
    * DELETE /api/rules/:id
    * Delete a rule and its associated statistics
    * 
-   * Requirements: 3.4
+   * Requirements: 3.4, 4.4
    */
   fastify.delete('/:id', async (request: FastifyRequest<{ Params: RuleParams }>, reply: FastifyReply) => {
     try {
@@ -288,6 +314,9 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const ruleRepository = new RuleRepository(db);
       const statsRepository = new StatsRepository(db);
 
+      // Get rule before deletion to know which worker's cache to invalidate
+      const rule = ruleRepository.findById(request.params.id);
+      
       // Delete stats first (cascade)
       statsRepository.delete(request.params.id);
 
@@ -295,6 +324,16 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const deleted = ruleRepository.delete(request.params.id);
       if (!deleted) {
         return reply.status(404).send({ error: 'Rule not found' });
+      }
+
+      // Invalidate cache for this worker (Requirement 4.4)
+      if (rule) {
+        const ruleCache = getRuleCache();
+        ruleCache.invalidate(rule.workerId);
+        // Also invalidate global cache if this was a global rule
+        if (!rule.workerId) {
+          ruleCache.invalidate(undefined);
+        }
       }
 
       return reply.status(204).send();
@@ -308,7 +347,7 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
    * POST /api/rules/:id/toggle
    * Toggle rule enabled status
    * 
-   * Requirements: 3.5
+   * Requirements: 3.5, 4.4
    */
   fastify.post('/:id/toggle', async (request: FastifyRequest<{ Params: RuleParams }>, reply: FastifyReply) => {
     try {
@@ -318,6 +357,14 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
       const rule = ruleRepository.toggle(request.params.id);
       if (!rule) {
         return reply.status(404).send({ error: 'Rule not found' });
+      }
+
+      // Invalidate cache for this worker (Requirement 4.4)
+      const ruleCache = getRuleCache();
+      ruleCache.invalidate(rule.workerId);
+      // Also invalidate global cache if this is a global rule
+      if (!rule.workerId) {
+        ruleCache.invalidate(undefined);
       }
 
       return reply.send(rule);

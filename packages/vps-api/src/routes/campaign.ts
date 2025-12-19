@@ -138,10 +138,16 @@ export function validateTrackEmail(body: unknown): { valid: boolean; error?: str
     return { valid: false, error: 'recipient is required and must be a non-empty string' };
   }
 
+  // Required workerName for worker instance data separation (Requirements: 7.2)
+  if (typeof data.workerName !== 'string' || data.workerName.trim() === '') {
+    return { valid: false, error: 'workerName is required and must be a non-empty string' };
+  }
+
   const result: TrackEmailDTO = {
     sender: data.sender.trim(),
     subject: data.subject.trim(),
     recipient: data.recipient.trim(),
+    workerName: data.workerName.trim(),
   };
 
   // Optional receivedAt
@@ -151,12 +157,6 @@ export function validateTrackEmail(body: unknown): { valid: boolean; error?: str
     }
     result.receivedAt = data.receivedAt;
   }
-
-  // Required workerName for worker instance data separation (Requirements: 7.2)
-  if (typeof data.workerName !== 'string' || data.workerName.trim() === '') {
-    return { valid: false, error: 'workerName is required and must be a non-empty string' };
-  }
-  result.workerName = data.workerName.trim();
 
   return { valid: true, data: result };
 }

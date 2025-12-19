@@ -54,6 +54,7 @@ import type {
   UpdateAnalysisProjectDTO,
   DeleteMerchantDataDTO,
   DeleteMerchantDataResult,
+  MerchantByWorker,
 } from '@email-filter/shared';
 import { toMerchant, toCampaign, toAnalysisProject, ROOT_CAMPAIGN_KEYWORDS } from '@email-filter/shared';
 
@@ -3380,6 +3381,80 @@ export class CampaignAnalyticsService {
 
     const rows = stmt.all(workerName) as MerchantRow[];
     return rows.map(toMerchant);
+  }
+
+  /**
+   * Get all merchants grouped by Worker instance
+   * Returns separate entries for each merchant-worker combination
+   * 
+   * @param workerName - Optional worker name to filter by
+   * @returns Array of MerchantByWorker objects
+   * 
+   * Requirements: 1.1, 1.2, 1.3, 3.2, 3.3
+   */
+  getMerchantsByWorker(workerName?: string): MerchantByWorker[] {
+    let query: string;
+    let params: string[];
+
+    if (workerName) {
+      // Filter by specific worker
+      query = `
+        SELECT 
+          m.id,
+          m.domain,
+          m.display_name,
+          m.note,
+          ce.worker_name,
+          COUNT(DISTINCT c.id) as total_campaigns,
+          COUNT(ce.id) as total_emails
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+        GROUP BY m.id, ce.worker_name
+        ORDER BY total_emails DESC
+      `;
+      params = [workerName];
+    } else {
+      // Get all merchants grouped by worker
+      query = `
+        SELECT 
+          m.id,
+          m.domain,
+          m.display_name,
+          m.note,
+          ce.worker_name,
+          COUNT(DISTINCT c.id) as total_campaigns,
+          COUNT(ce.id) as total_emails
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        GROUP BY m.id, ce.worker_name
+        ORDER BY ce.worker_name, total_emails DESC
+      `;
+      params = [];
+    }
+
+    const stmt = this.db.prepare(query);
+    const rows = stmt.all(...params) as Array<{
+      id: string;
+      domain: string;
+      display_name: string | null;
+      note: string | null;
+      worker_name: string;
+      total_campaigns: number;
+      total_emails: number;
+    }>;
+
+    return rows.map(row => ({
+      id: row.id,
+      domain: row.domain,
+      displayName: row.display_name || undefined,
+      note: row.note || undefined,
+      workerName: row.worker_name,
+      totalCampaigns: row.total_campaigns,
+      totalEmails: row.total_emails,
+    }));
   }
 
   // ============================================

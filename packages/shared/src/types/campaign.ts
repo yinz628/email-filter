@@ -77,6 +77,22 @@ export interface Merchant {
 }
 
 /**
+ * Merchant grouped by Worker instance
+ * Used for displaying merchants with their Worker source
+ * 
+ * Requirements: 1.1, 1.2, 1.3
+ */
+export interface MerchantByWorker {
+  id: string;
+  domain: string;
+  displayName?: string;
+  note?: string;
+  workerName: string;
+  totalCampaigns: number;
+  totalEmails: number;
+}
+
+/**
  * Campaign entity - represents a unique subject from a merchant
  */
 export interface Campaign {

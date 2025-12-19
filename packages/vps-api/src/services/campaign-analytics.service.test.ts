@@ -96,6 +96,78 @@ class TestCampaignAnalyticsService {
     return result[0].values.map(row => this.rowToMerchant(columns, row));
   }
 
+  /**
+   * Get all merchants grouped by Worker instance
+   * Returns separate entries for each merchant-worker combination
+   * 
+   * @param workerName - Optional worker name to filter by
+   * @returns Array of MerchantByWorker objects
+   */
+  getMerchantsByWorker(workerName?: string): any[] {
+    let query: string;
+    const params: any[] = [];
+
+    if (workerName) {
+      // Filter by specific worker
+      query = `
+        SELECT 
+          m.id,
+          m.domain,
+          m.display_name,
+          m.note,
+          ce.worker_name,
+          COUNT(DISTINCT c.id) as total_campaigns,
+          COUNT(ce.id) as total_emails
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+        GROUP BY m.id, ce.worker_name
+        ORDER BY total_emails DESC
+      `;
+      params.push(workerName);
+    } else {
+      // Get all merchants grouped by worker
+      query = `
+        SELECT 
+          m.id,
+          m.domain,
+          m.display_name,
+          m.note,
+          ce.worker_name,
+          COUNT(DISTINCT c.id) as total_campaigns,
+          COUNT(ce.id) as total_emails
+        FROM merchants m
+        JOIN campaigns c ON m.id = c.merchant_id
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        GROUP BY m.id, ce.worker_name
+        ORDER BY ce.worker_name, total_emails DESC
+      `;
+    }
+
+    const result = this.db.exec(query, params);
+    if (result.length === 0) {
+      return [];
+    }
+
+    const columns = result[0].columns;
+    return result[0].values.map(row => {
+      const obj: any = {};
+      columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return {
+        id: obj.id,
+        domain: obj.domain,
+        displayName: obj.display_name || undefined,
+        note: obj.note || undefined,
+        workerName: obj.worker_name,
+        totalCampaigns: obj.total_campaigns,
+        totalEmails: obj.total_emails,
+      };
+    });
+  }
+
   getCampaignByMerchantAndSubject(merchantId: string, subjectHash: string): any | null {
     const result = this.db.exec(
       'SELECT * FROM campaigns WHERE merchant_id = ? AND subject_hash = ?',
@@ -6906,6 +6978,725 @@ describe('Statistics Update After Delete', () => {
           }
         ),
         { numRuns: 50 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: campaign-analytics-ui-reorganization, Property 1: Worker Instance Separation**
+   * **Validates: Requirements 1.1, 1.2, 1.3**
+   * 
+   * For any merchant that exists in multiple Worker instances, the getMerchantsByWorker API 
+   * should return separate entries for each Worker instance with independent statistics 
+   * calculated from that Worker's data only.
+   */
+  describe('Property 1: Worker Instance Separation', () => {
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker1.store'),
+      fc.constant('worker2.store'),
+      fc.constant('worker3.store')
+    );
+
+    // Generate valid domain parts
+    const domainPartArb = fc.stringOf(
+      fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'.split('')),
+      { minLength: 3, maxLength: 10 }
+    );
+
+    // Generate valid domain
+    const validDomainArb = fc.tuple(domainPartArb, fc.constantFrom('com', 'org', 'net'))
+      .map(([name, tld]) => `${name}.${tld}`);
+
+    // Generate valid email
+    const validEmailArb = fc.tuple(domainPartArb, validDomainArb)
+      .map(([local, domain]) => `${local}@${domain}`);
+
+    it('should return separate entries for each merchant-worker combination', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          fc.array(fc.tuple(workerNameArb, fc.integer({ min: 1, max: 5 })), { minLength: 2, maxLength: 3 }),
+          (domain, workerEmailCounts) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              // Create unique worker names with their email counts
+              const workerData = new Map<string, number>();
+              for (const [worker, count] of workerEmailCounts) {
+                const existingCount = workerData.get(worker) || 0;
+                workerData.set(worker, existingCount + count);
+              }
+
+              // Track emails from different workers for the same merchant
+              const sender = `info@${domain}`;
+              const subject = 'Test Campaign';
+              let totalEmailsTracked = 0;
+
+              for (const [workerName, emailCount] of workerData) {
+                for (let i = 0; i < emailCount; i++) {
+                  service.trackEmail({
+                    sender,
+                    subject,
+                    recipient: `user${totalEmailsTracked}@test.com`,
+                    workerName,
+                  });
+                  totalEmailsTracked++;
+                }
+              }
+
+              // Get merchants by worker (all workers)
+              const merchantsByWorker = service.getMerchantsByWorker();
+
+              // Property 1: Should have separate entries for each worker
+              const uniqueWorkers = new Set(workerData.keys());
+              const entriesForDomain = merchantsByWorker.filter(m => m.domain === domain);
+              
+              expect(entriesForDomain.length).toBe(uniqueWorkers.size);
+
+              // Property 2: Each entry should have the correct worker name
+              const workerNamesInResult = new Set(entriesForDomain.map(m => m.workerName));
+              expect(workerNamesInResult).toEqual(uniqueWorkers);
+
+              // Property 3: Statistics should be calculated independently for each worker
+              for (const entry of entriesForDomain) {
+                const expectedEmailCount = workerData.get(entry.workerName);
+                expect(entry.totalEmails).toBe(expectedEmailCount);
+                // Each worker should have exactly 1 campaign (same subject)
+                expect(entry.totalCampaigns).toBe(1);
+              }
+
+              // Property 4: Filtering by specific worker should return only that worker's entry
+              for (const workerName of uniqueWorkers) {
+                const filteredMerchants = service.getMerchantsByWorker(workerName);
+                const filteredForDomain = filteredMerchants.filter(m => m.domain === domain);
+                
+                expect(filteredForDomain.length).toBe(1);
+                expect(filteredForDomain[0].workerName).toBe(workerName);
+                expect(filteredForDomain[0].totalEmails).toBe(workerData.get(workerName));
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should calculate statistics from worker-specific data only', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          fc.integer({ min: 1, max: 10 }),
+          fc.integer({ min: 1, max: 10 }),
+          (domain, worker1Emails, worker2Emails) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              const sender = `info@${domain}`;
+              const worker1 = 'worker1.store';
+              const worker2 = 'worker2.store';
+
+              // Track emails for worker1
+              for (let i = 0; i < worker1Emails; i++) {
+                service.trackEmail({
+                  sender,
+                  subject: 'Campaign A',
+                  recipient: `w1user${i}@test.com`,
+                  workerName: worker1,
+                });
+              }
+
+              // Track emails for worker2 with different subject
+              for (let i = 0; i < worker2Emails; i++) {
+                service.trackEmail({
+                  sender,
+                  subject: 'Campaign B',
+                  recipient: `w2user${i}@test.com`,
+                  workerName: worker2,
+                });
+              }
+
+              // Get all merchants by worker
+              const allMerchants = service.getMerchantsByWorker();
+              const merchantEntries = allMerchants.filter(m => m.domain === domain);
+
+              // Should have 2 entries (one per worker)
+              expect(merchantEntries.length).toBe(2);
+
+              // Find entries for each worker
+              const worker1Entry = merchantEntries.find(m => m.workerName === worker1);
+              const worker2Entry = merchantEntries.find(m => m.workerName === worker2);
+
+              expect(worker1Entry).toBeDefined();
+              expect(worker2Entry).toBeDefined();
+
+              // Statistics should be independent
+              expect(worker1Entry!.totalEmails).toBe(worker1Emails);
+              expect(worker2Entry!.totalEmails).toBe(worker2Emails);
+
+              // Each worker has 1 campaign
+              expect(worker1Entry!.totalCampaigns).toBe(1);
+              expect(worker2Entry!.totalCampaigns).toBe(1);
+
+              // Total should not be mixed
+              expect(worker1Entry!.totalEmails + worker2Entry!.totalEmails).toBe(worker1Emails + worker2Emails);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: campaign-analytics-ui-reorganization, Property 2: Worker Filter Isolation**
+   * **Validates: Requirements 1.4, 3.2, 3.3**
+   * 
+   * For any Worker filter selection, the merchant list API should only return merchants 
+   * that have data from the selected Worker instance. When "全部实例" (all instances) is 
+   * selected, all merchant-worker combinations should be returned.
+   */
+  describe('Property 2: Worker Filter Isolation', () => {
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker1.store'),
+      fc.constant('worker2.store'),
+      fc.constant('worker3.store')
+    );
+
+    // Generate valid domain parts
+    const domainPartArb = fc.stringOf(
+      fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'.split('')),
+      { minLength: 3, maxLength: 10 }
+    );
+
+    // Generate valid domain
+    const validDomainArb = fc.tuple(domainPartArb, fc.constantFrom('com', 'org', 'net'))
+      .map(([name, tld]) => `${name}.${tld}`);
+
+    it('should return only merchants from the specified worker when filtering', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          // Generate multiple unique domains
+          fc.array(validDomainArb, { minLength: 2, maxLength: 5 })
+            .filter(arr => new Set(arr).size === arr.length),
+          // Generate worker assignments for each domain
+          fc.array(workerNameArb, { minLength: 2, maxLength: 5 }),
+          (domains, workers) => {
+            // Ensure we have at least 2 different workers
+            const uniqueWorkers = new Set(workers);
+            if (uniqueWorkers.size < 2) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              // Track emails for each domain with its assigned worker
+              const domainWorkerMap = new Map<string, string>();
+              for (let i = 0; i < Math.min(domains.length, workers.length); i++) {
+                const domain = domains[i];
+                const workerName = workers[i];
+                domainWorkerMap.set(domain, workerName);
+                
+                service.trackEmail({
+                  sender: `info@${domain}`,
+                  subject: 'Test Campaign',
+                  recipient: `user${i}@test.com`,
+                  workerName,
+                });
+              }
+
+              // Test filtering by each unique worker
+              for (const targetWorker of uniqueWorkers) {
+                const filteredMerchants = service.getMerchantsByWorker(targetWorker);
+                
+                // Property: All returned merchants should have the target worker
+                for (const merchant of filteredMerchants) {
+                  expect(merchant.workerName).toBe(targetWorker);
+                }
+                
+                // Property: Should include all domains that were assigned to this worker
+                const expectedDomains = Array.from(domainWorkerMap.entries())
+                  .filter(([_, worker]) => worker === targetWorker)
+                  .map(([domain, _]) => domain);
+                
+                const returnedDomains = filteredMerchants.map(m => m.domain);
+                for (const expectedDomain of expectedDomains) {
+                  expect(returnedDomains).toContain(expectedDomain);
+                }
+                
+                // Property: Should NOT include domains from other workers
+                const otherWorkerDomains = Array.from(domainWorkerMap.entries())
+                  .filter(([_, worker]) => worker !== targetWorker)
+                  .map(([domain, _]) => domain);
+                
+                for (const otherDomain of otherWorkerDomains) {
+                  // The domain might appear if it has data from multiple workers,
+                  // but the entry should have the target worker name
+                  const entriesForDomain = filteredMerchants.filter(m => m.domain === otherDomain);
+                  for (const entry of entriesForDomain) {
+                    expect(entry.workerName).toBe(targetWorker);
+                  }
+                }
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should return all merchant-worker combinations when no filter is applied (全部实例)', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          fc.array(workerNameArb, { minLength: 2, maxLength: 3 })
+            .filter(arr => new Set(arr).size >= 2),
+          fc.integer({ min: 1, max: 3 }),
+          (domain, workers, emailsPerWorker) => {
+            const uniqueWorkers = [...new Set(workers)];
+            if (uniqueWorkers.length < 2) return;
+            
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              // Track emails from multiple workers for the same domain
+              for (const workerName of uniqueWorkers) {
+                for (let i = 0; i < emailsPerWorker; i++) {
+                  service.trackEmail({
+                    sender: `info@${domain}`,
+                    subject: `Campaign for ${workerName}`,
+                    recipient: `user${workerName}${i}@test.com`,
+                    workerName,
+                  });
+                }
+              }
+
+              // Get all merchants without filter (simulating "全部实例" selection)
+              const allMerchants = service.getMerchantsByWorker();
+              const entriesForDomain = allMerchants.filter(m => m.domain === domain);
+
+              // Property: Should have one entry per worker
+              expect(entriesForDomain.length).toBe(uniqueWorkers.length);
+
+              // Property: Each worker should have its own entry
+              const workerNamesInResult = new Set(entriesForDomain.map(m => m.workerName));
+              expect(workerNamesInResult).toEqual(new Set(uniqueWorkers));
+
+              // Property: Each entry should have correct email count for that worker
+              for (const entry of entriesForDomain) {
+                expect(entry.totalEmails).toBe(emailsPerWorker);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should isolate statistics per worker when same merchant exists in multiple workers', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          fc.integer({ min: 1, max: 10 }),
+          fc.integer({ min: 1, max: 10 }),
+          (domain, worker1Emails, worker2Emails) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            const service = new TestCampaignAnalyticsService(db);
+
+            try {
+              const worker1 = 'worker1.store';
+              const worker2 = 'worker2.store';
+
+              // Track different number of emails for each worker
+              for (let i = 0; i < worker1Emails; i++) {
+                service.trackEmail({
+                  sender: `info@${domain}`,
+                  subject: 'Campaign A',
+                  recipient: `w1user${i}@test.com`,
+                  workerName: worker1,
+                });
+              }
+
+              for (let i = 0; i < worker2Emails; i++) {
+                service.trackEmail({
+                  sender: `info@${domain}`,
+                  subject: 'Campaign B',
+                  recipient: `w2user${i}@test.com`,
+                  workerName: worker2,
+                });
+              }
+
+              // Filter by worker1
+              const worker1Merchants = service.getMerchantsByWorker(worker1);
+              const worker1Entry = worker1Merchants.find(m => m.domain === domain);
+              
+              // Property: Worker1 filter should only show worker1 statistics
+              expect(worker1Entry).toBeDefined();
+              expect(worker1Entry!.workerName).toBe(worker1);
+              expect(worker1Entry!.totalEmails).toBe(worker1Emails);
+
+              // Filter by worker2
+              const worker2Merchants = service.getMerchantsByWorker(worker2);
+              const worker2Entry = worker2Merchants.find(m => m.domain === domain);
+              
+              // Property: Worker2 filter should only show worker2 statistics
+              expect(worker2Entry).toBeDefined();
+              expect(worker2Entry!.workerName).toBe(worker2);
+              expect(worker2Entry!.totalEmails).toBe(worker2Emails);
+
+              // Property: Statistics should be isolated (not mixed)
+              expect(worker1Entry!.totalEmails).not.toBe(worker1Emails + worker2Emails);
+              expect(worker2Entry!.totalEmails).not.toBe(worker1Emails + worker2Emails);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: campaign-analytics-ui-reorganization, Property 4: Project Creation with Multiple Workers**
+   * **Validates: Requirements 5.2, 5.3**
+   * 
+   * For any project creation request with multiple Worker instances, the project should be 
+   * successfully created and the workerNames array should be stored correctly.
+   */
+  describe('Property 4: Project Creation with Multiple Workers', () => {
+    // Generate valid worker names
+    const workerNameArb = fc.oneof(
+      fc.constant('worker1.store'),
+      fc.constant('worker2.store'),
+      fc.constant('worker3.store')
+    );
+
+    // Generate valid domain parts
+    const domainPartArb = fc.stringOf(
+      fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'.split('')),
+      { minLength: 3, maxLength: 10 }
+    );
+
+    // Generate valid domain
+    const validDomainArb = fc.tuple(domainPartArb, fc.constantFrom('com', 'org', 'net'))
+      .map(([name, tld]) => `${name}.${tld}`);
+
+    // Generate valid project name
+    const projectNameArb = fc.stringOf(
+      fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789 -_'.split('')),
+      { minLength: 1, maxLength: 30 }
+    ).filter(s => s.trim().length > 0);
+
+    /**
+     * Test service extension with project creation support for sql.js
+     */
+    class TestServiceWithMultiWorkerProjects extends TestCampaignAnalyticsService {
+      createAnalysisProject(data: { 
+        name: string; 
+        merchantId: string; 
+        workerName: string; 
+        workerNames?: string[];
+        note?: string 
+      }): any {
+        const id = uuidv4();
+        const now = new Date().toISOString();
+        
+        // Serialize workerNames to JSON if provided
+        const workerNamesJson = data.workerNames && data.workerNames.length > 0 
+          ? JSON.stringify(data.workerNames) 
+          : null;
+        
+        (this as any).db.run(
+          `INSERT INTO analysis_projects (id, name, merchant_id, worker_name, worker_names, status, note, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+          [id, data.name, data.merchantId, data.workerName, workerNamesJson, data.note || null, now, now]
+        );
+        
+        return this.getAnalysisProjectById(id);
+      }
+
+      getAnalysisProjectById(id: string): any | null {
+        const result = (this as any).db.exec(
+          `SELECT ap.*, m.domain as merchant_domain
+           FROM analysis_projects ap
+           LEFT JOIN merchants m ON ap.merchant_id = m.id
+           WHERE ap.id = ?`,
+          [id]
+        );
+        if (result.length === 0 || result[0].values.length === 0) {
+          return null;
+        }
+        const row = result[0].values[0];
+        const columns = result[0].columns;
+        return this.rowToProject(columns, row);
+      }
+
+      private rowToProject(columns: string[], row: any[]): any {
+        const obj: any = {};
+        columns.forEach((col, i) => {
+          obj[col] = row[i];
+        });
+        
+        // Parse workerNames from JSON
+        let workerNames: string[] | null = null;
+        if (obj.worker_names) {
+          try {
+            workerNames = JSON.parse(obj.worker_names);
+          } catch {
+            workerNames = null;
+          }
+        }
+        
+        return {
+          id: obj.id,
+          name: obj.name,
+          merchantId: obj.merchant_id,
+          workerName: obj.worker_name,
+          workerNames,
+          status: obj.status,
+          note: obj.note,
+          merchantDomain: obj.merchant_domain,
+          createdAt: new Date(obj.created_at),
+          updatedAt: new Date(obj.updated_at),
+        };
+      }
+    }
+
+    it('should create project with single worker and store workerName correctly', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          projectNameArb,
+          workerNameArb,
+          (domain, projectName, workerName) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add worker_names column for multi-worker support
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                worker_names TEXT,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              )
+            `);
+            
+            const service = new TestServiceWithMultiWorkerProjects(db);
+
+            try {
+              // Create merchant first
+              const { merchant } = service.getOrCreateMerchant(domain);
+
+              // Create project with single worker
+              const project = service.createAnalysisProject({
+                name: projectName,
+                merchantId: merchant.id,
+                workerName,
+              });
+
+              // Property 1: Project should be created successfully
+              expect(project).toBeDefined();
+              expect(project.id).toBeDefined();
+
+              // Property 2: workerName should be stored correctly
+              expect(project.workerName).toBe(workerName);
+
+              // Property 3: workerNames should be null for single worker
+              expect(project.workerNames).toBeNull();
+
+              // Property 4: Project name should match
+              expect(project.name).toBe(projectName);
+
+              // Property 5: Merchant association should be correct
+              expect(project.merchantId).toBe(merchant.id);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should create project with multiple workers and store workerNames array correctly', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          projectNameArb,
+          fc.array(workerNameArb, { minLength: 2, maxLength: 3 })
+            .filter(arr => new Set(arr).size === arr.length), // Ensure unique workers
+          (domain, projectName, workerNames) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add worker_names column for multi-worker support
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                worker_names TEXT,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              )
+            `);
+            
+            const service = new TestServiceWithMultiWorkerProjects(db);
+
+            try {
+              // Create merchant first
+              const { merchant } = service.getOrCreateMerchant(domain);
+
+              // Create project with multiple workers
+              const project = service.createAnalysisProject({
+                name: projectName,
+                merchantId: merchant.id,
+                workerName: workerNames[0], // Primary worker
+                workerNames,
+              });
+
+              // Property 1: Project should be created successfully
+              expect(project).toBeDefined();
+              expect(project.id).toBeDefined();
+
+              // Property 2: Primary workerName should be the first in the array
+              expect(project.workerName).toBe(workerNames[0]);
+
+              // Property 3: workerNames array should be stored correctly
+              expect(project.workerNames).toBeDefined();
+              expect(project.workerNames).toEqual(workerNames);
+
+              // Property 4: workerNames should contain all specified workers
+              expect(project.workerNames!.length).toBe(workerNames.length);
+              for (const worker of workerNames) {
+                expect(project.workerNames).toContain(worker);
+              }
+
+              // Property 5: Project name should match
+              expect(project.name).toBe(projectName);
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should preserve workerNames order when creating project', async () => {
+      const SQL = await initSqlJs();
+
+      fc.assert(
+        fc.property(
+          validDomainArb,
+          projectNameArb,
+          fc.shuffledSubarray(['worker1.store', 'worker2.store', 'worker3.store'], { minLength: 2, maxLength: 3 }),
+          (domain, projectName, workerNames) => {
+            const db = new SQL.Database();
+            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
+            db.run(campaignSchema);
+            
+            // Add worker_names column for multi-worker support
+            db.run(`
+              CREATE TABLE IF NOT EXISTS analysis_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                merchant_id TEXT NOT NULL,
+                worker_name TEXT NOT NULL,
+                worker_names TEXT,
+                status TEXT DEFAULT 'active',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+              )
+            `);
+            
+            const service = new TestServiceWithMultiWorkerProjects(db);
+
+            try {
+              // Create merchant first
+              const { merchant } = service.getOrCreateMerchant(domain);
+
+              // Create project with multiple workers in specific order
+              const project = service.createAnalysisProject({
+                name: projectName,
+                merchantId: merchant.id,
+                workerName: workerNames[0],
+                workerNames,
+              });
+
+              // Property: workerNames order should be preserved
+              expect(project.workerNames).toEqual(workerNames);
+              
+              // Verify exact order
+              for (let i = 0; i < workerNames.length; i++) {
+                expect(project.workerNames![i]).toBe(workerNames[i]);
+              }
+            } finally {
+              db.close();
+            }
+          }
+        ),
+        { numRuns: 100 }
       );
     });
   });

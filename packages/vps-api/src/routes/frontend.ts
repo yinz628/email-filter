@@ -47,6 +47,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
     td { color: #333; }
     tr:hover { background: #f8f9fa; }
+    tr.clickable-row { cursor: pointer; }
+    tr.clickable-row:hover { background: #e3f2fd; }
     .status { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
     .status-enabled { background: #d4edda; color: #155724; }
     .status-disabled { background: #f8d7da; color: #721c24; }
@@ -419,24 +421,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     <!-- Campaign Analytics Tab -->
     <div id="campaign-tab" class="tab-content hidden">
-      <!-- 区域1: 标题区 (Title + Instance Selector) -->
-      <div class="card" id="campaign-header-section">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h2 style="margin:0;border:none;padding:0;">📊 营销活动分析</h2>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <select id="campaign-worker-filter" onchange="onWorkerFilterChange()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
-              <option value="">选择实例</option>
-            </select>
-            <button class="btn btn-secondary" onclick="refreshCampaignData()">🔄 刷新</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 区域2: 数据管理区 - 商户列表 (Merchant List Card) -->
+      <!-- 商户列表区 (Merchant List Card) -->
       <div class="card" id="campaign-merchants-section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">🏪 商户列表</h2>
           <div style="display:flex;gap:10px;align-items:center;">
+            <select id="campaign-worker-filter" onchange="onWorkerFilterChange()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="__all__">全部实例</option>
+            </select>
             <select id="merchant-sort-field" onchange="sortMerchantList()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="emails">按邮件数排序</option>
               <option value="campaigns">按活动数排序</option>
@@ -445,24 +437,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="desc">降序</option>
               <option value="asc">升序</option>
             </select>
+            <button class="btn btn-secondary" onclick="refreshCampaignData()">🔄 刷新</button>
           </div>
         </div>
-        <p style="color:#666;margin-bottom:15px">选择实例后显示该实例的商户列表。点击"创建项目"开始分析。</p>
+        <p style="color:#666;margin-bottom:15px">商户数据按 Worker 实例分组显示。选择"全部实例"查看所有数据，或选择特定实例筛选。</p>
         <div id="merchants-empty" style="text-align:center;padding:40px;">
-          <div id="merchants-no-worker-prompt" style="display:block;">
-            <div style="font-size:48px;margin-bottom:16px;">📋</div>
-            <div style="color:#666;font-size:16px;font-weight:500;margin-bottom:8px;">请先选择 Worker 实例</div>
-            <div style="color:#999;font-size:14px;margin-bottom:16px;">商户数据按 Worker 实例隔离显示，请在上方选择一个 Worker 实例以查看对应的商户列表。</div>
-            <button class="btn btn-primary" onclick="document.getElementById('campaign-worker-filter').focus(); document.getElementById('campaign-worker-filter').click();">选择 Worker 实例</button>
-          </div>
           <div id="merchants-loading" style="display:none;color:#999;">加载中...</div>
-          <div id="merchants-empty-data" style="display:none;color:#999;">该实例暂无商户数据。</div>
+          <div id="merchants-empty-data" style="display:none;color:#999;">暂无商户数据。</div>
           <div id="merchants-load-error" style="display:none;color:#e74c3c;">加载商户列表失败。</div>
         </div>
         <table id="merchants-table-container" style="display:none;">
           <thead>
             <tr>
               <th>商户域名</th>
+              <th id="worker-column-header">Worker 实例</th>
               <th>营销活动数</th>
               <th>邮件总数</th>
               <th>已有项目</th>
@@ -1658,9 +1646,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const trendingWorkerFilter = document.getElementById('trending-worker-filter');
       if (trendingWorkerFilter) trendingWorkerFilter.innerHTML = logWorkerFilterOptions;
       
-      // Update campaign worker filter
+      // Update campaign worker filter (uses __all__ for "全部实例" to distinguish from empty)
+      const campaignWorkerFilterOptions = '<option value="__all__">全部实例</option>' +
+        workers.map(w => '<option value="' + escapeHtml(w.name) + '">' + escapeHtml(w.name) + '</option>').join('');
       const campaignWorkerFilter = document.getElementById('campaign-worker-filter');
-      if (campaignWorkerFilter) campaignWorkerFilter.innerHTML = logWorkerFilterOptions;
+      if (campaignWorkerFilter) campaignWorkerFilter.innerHTML = campaignWorkerFilterOptions;
       
       // Update monitoring worker scope dropdowns
       const monitoringWorkerScopeOptions = '<option value="global">全局（所有实例）</option>' +
@@ -2552,20 +2542,34 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const isSelected = currentProjectId === p.id;
         const rowStyle = isSelected ? 'background:#e3f2fd;' : '';
         
-        // Format worker display
-        let workerDisplay = p.workerName || '-';
-        if (p.workerNames && p.workerNames.length > 1) {
-          workerDisplay = p.workerNames.length + '个实例';
+        // Format worker display as colored tags
+        let workerDisplay = '-';
+        const workers = p.workerNames && p.workerNames.length > 0 ? p.workerNames : (p.workerName ? [p.workerName] : []);
+        if (workers.length > 0) {
+          if (workers.length <= 2) {
+            // Show all worker names as tags
+            workerDisplay = workers.map(w => {
+              const tagColor = getWorkerTagColor(w);
+              return '<span style="background:' + tagColor.bg + ';color:' + tagColor.text + ';border:1px solid ' + tagColor.border + ';padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap;margin-right:4px;">' + escapeHtml(w) + '</span>';
+            }).join('');
+          } else {
+            // Show first worker + count for remaining
+            const firstWorker = workers[0];
+            const tagColor = getWorkerTagColor(firstWorker);
+            workerDisplay = '<span style="background:' + tagColor.bg + ';color:' + tagColor.text + ';border:1px solid ' + tagColor.border + ';padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap;margin-right:4px;">' + escapeHtml(firstWorker) + '</span>' +
+              '<span style="background:#f5f5f5;color:#666;border:1px solid #ddd;padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap;">+' + (workers.length - 1) + '个</span>';
+          }
         }
         
-        return '<tr style="' + rowStyle + '">' +
-          '<td><strong style="cursor:pointer;color:#1565c0;" onclick="openProject(\\'' + p.id + '\\')">' + escapeHtml(p.name) + '</strong></td>' +
+        return '<tr style="' + rowStyle + '" onclick="openProject(\\'' + p.id + '\\')" class="clickable-row">' +
+          '<td><strong style="cursor:pointer;color:#1565c0;">' + escapeHtml(p.name) + '</strong></td>' +
           '<td>' + escapeHtml(p.merchantDomain || '-') + '</td>' +
-          '<td><span style="font-size:12px;color:#666;">' + escapeHtml(workerDisplay) + '</span></td>' +
+          '<td>' + workerDisplay + '</td>' +
           '<td>' + statusBadge + '</td>' +
           '<td>' + createdAt + '</td>' +
-          '<td class="actions">' +
+          '<td class="actions" onclick="event.stopPropagation();">' +
             '<button class="btn btn-sm btn-primary" onclick="openProject(\\'' + p.id + '\\')">打开</button>' +
+            '<button class="btn btn-sm btn-secondary" onclick="editProject(\\'' + p.id + '\\')">编辑</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteProject(\\'' + p.id + '\\')">删除</button>' +
           '</td></tr>';
       }).join('');
@@ -2612,6 +2616,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function loadMerchantList() {
       const workerName = document.getElementById('campaign-worker-filter')?.value || '';
       const tableContainer = document.getElementById('merchants-table-container');
+      const isAllInstances = workerName === '__all__' || workerName === '';
       
       if (!apiToken) return;
       
@@ -2619,12 +2624,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tableContainer.style.display = 'none';
       
       try {
-        // If workerName is empty, load all merchants; otherwise load worker-specific merchants
+        // When "全部实例" is selected, use merchants-by-worker API to get all merchant-worker combinations
+        // When a specific worker is selected, use the worker-specific API
         let url;
-        if (workerName) {
-          url = '/api/campaign/workers/' + encodeURIComponent(workerName) + '/merchants';
+        if (isAllInstances) {
+          url = '/api/campaign/merchants-by-worker';
         } else {
-          url = '/api/campaign/merchants';
+          url = '/api/campaign/workers/' + encodeURIComponent(workerName) + '/merchants';
         }
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
@@ -2638,9 +2644,32 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
+    // Worker tag colors for visual distinction
+    const workerTagColors = [
+      { bg: '#e3f2fd', text: '#1565c0', border: '#90caf9' },
+      { bg: '#f3e5f5', text: '#7b1fa2', border: '#ce93d8' },
+      { bg: '#e8f5e9', text: '#2e7d32', border: '#a5d6a7' },
+      { bg: '#fff3e0', text: '#e65100', border: '#ffcc80' },
+      { bg: '#fce4ec', text: '#c2185b', border: '#f48fb1' },
+      { bg: '#e0f7fa', text: '#00838f', border: '#80deea' },
+      { bg: '#f1f8e9', text: '#558b2f', border: '#c5e1a5' },
+      { bg: '#ede7f6', text: '#512da8', border: '#b39ddb' },
+    ];
+    
+    function getWorkerTagColor(workerName) {
+      // Generate consistent color based on worker name hash
+      let hash = 0;
+      for (let i = 0; i < workerName.length; i++) {
+        hash = ((hash << 5) - hash) + workerName.charCodeAt(i);
+        hash = hash & hash;
+      }
+      return workerTagColors[Math.abs(hash) % workerTagColors.length];
+    }
+
     function renderMerchantList() {
       const tbody = document.getElementById('merchants-table');
       const tableContainer = document.getElementById('merchants-table-container');
+      const workerColumnHeader = document.getElementById('worker-column-header');
       
       if (workerMerchantsData.length === 0) {
         showMerchantEmptyState('empty-data');
@@ -2650,6 +2679,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       showMerchantEmptyState('hidden');
       tableContainer.style.display = 'table';
+      
+      // Check if "全部实例" is selected
+      const workerFilter = document.getElementById('campaign-worker-filter')?.value || '';
+      const isAllInstances = workerFilter === '__all__' || workerFilter === '';
+      
+      // Show/hide Worker column header based on filter
+      if (workerColumnHeader) {
+        workerColumnHeader.style.display = isAllInstances ? '' : 'none';
+      }
       
       // Sort merchants
       const sortField = document.getElementById('merchant-sort-field')?.value || 'emails';
@@ -2663,21 +2701,35 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Check which merchants have projects
       const merchantsWithProjects = new Set(projectsData.map(p => p.merchantId));
       
-      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
-      
       tbody.innerHTML = sortedMerchants.map(m => {
         const hasProject = merchantsWithProjects.has(m.id);
         const projectIndicator = hasProject ? '<span class="project-indicator" title="已有项目"></span>' : '';
         
+        // Get worker name from merchant data (for merchants-by-worker API) or from filter
+        const merchantWorkerName = m.workerName || workerFilter;
+        const hasWorkerName = merchantWorkerName && merchantWorkerName !== '__all__';
+        
+        // Worker tag column (only shown when "全部实例" is selected)
+        let workerTagCell = '';
+        if (isAllInstances) {
+          if (m.workerName) {
+            const tagColor = getWorkerTagColor(m.workerName);
+            workerTagCell = '<td><span style="background:' + tagColor.bg + ';color:' + tagColor.text + ';border:1px solid ' + tagColor.border + ';padding:2px 8px;border-radius:4px;font-size:11px;white-space:nowrap;">' + escapeHtml(m.workerName) + '</span></td>';
+          } else {
+            workerTagCell = '<td>-</td>';
+          }
+        }
+        
         return '<tr>' +
           '<td><strong>' + escapeHtml(m.domain) + '</strong></td>' +
+          workerTagCell +
           '<td>' + m.totalCampaigns + '</td>' +
           '<td>' + m.totalEmails + '</td>' +
           '<td>' + projectIndicator + (hasProject ? '是' : '-') + '</td>' +
           '<td class="actions">' +
-            '<button class="btn btn-sm btn-primary" onclick="showMerchantPreview(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalCampaigns + ', ' + m.totalEmails + ')" style="margin-right:5px;">预览</button>' +
-            '<button class="btn btn-sm btn-success" onclick="showCreateProjectModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\')">创建项目</button>' +
-            (workerName ? '<button class="btn btn-sm btn-danger" onclick="showDeleteMerchantModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalEmails + ', ' + m.totalCampaigns + ')" style="margin-left:5px;">删除数据</button>' : '') +
+            '<button class="btn btn-sm btn-primary" onclick="showMerchantPreview(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalCampaigns + ', ' + m.totalEmails + (hasWorkerName ? ', \\'' + escapeHtml(merchantWorkerName) + '\\'' : '') + ')" style="margin-right:5px;">预览</button>' +
+            '<button class="btn btn-sm btn-success" onclick="showCreateProjectModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\'' + (hasWorkerName ? ', \\'' + escapeHtml(merchantWorkerName) + '\\'' : '') + ')">创建项目</button>' +
+            (hasWorkerName ? '<button class="btn btn-sm btn-danger" onclick="showDeleteMerchantModal(\\'' + m.id + '\\', \\'' + escapeHtml(m.domain) + '\\', ' + m.totalEmails + ', ' + m.totalCampaigns + ', \\'' + escapeHtml(merchantWorkerName) + '\\')" style="margin-left:5px;">删除数据</button>' : '') +
           '</td></tr>';
       }).join('');
     }
@@ -2689,8 +2741,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     // Store available workers for the modal
     let availableWorkers = [];
 
-    function showCreateProjectModal(merchantId, merchantDomain) {
-      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+    function showCreateProjectModal(merchantId, merchantDomain, merchantWorkerName) {
+      // Use passed workerName if available, otherwise fall back to filter value
+      const filterValue = document.getElementById('campaign-worker-filter')?.value || '';
+      const workerName = merchantWorkerName || (filterValue !== '__all__' ? filterValue : '');
       
       // Set modal values
       document.getElementById('create-project-merchant-id').value = merchantId;
@@ -2709,7 +2763,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       multiWorkerDiv.innerHTML = '';
       
       Array.from(mainFilter.options).forEach(opt => {
-        if (opt.value) {
+        // Skip the "__all__" option when populating worker selection
+        if (opt.value && opt.value !== '__all__') {
           availableWorkers.push({ value: opt.value, text: opt.text });
           workerSelect.innerHTML += '<option value="' + opt.value + '">' + opt.text + '</option>';
           multiWorkerDiv.innerHTML += '<label style="display:block;padding:4px 0;cursor:pointer;">' +
@@ -2718,7 +2773,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       });
       
-      // Set default mode based on current filter
+      // Set default mode based on current filter or passed workerName
       if (workerName) {
         // Pre-select the current worker
         document.querySelector('input[name="worker-mode"][value="single"]').checked = true;
@@ -2808,15 +2863,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           requestBody.workerNames = selectedWorkers.workerNames;
         }
         
+        console.log('Creating project with request body:', requestBody);
+        
         const res = await fetch('/api/campaign/projects', {
           method: 'POST',
           headers: getHeaders(),
           body: JSON.stringify(requestBody)
         });
+        
+        const data = await res.json();
+        console.log('Project creation response:', res.status, data);
+        
         if (res.ok) {
           hideModal('create-project-modal');
           showAlert('项目创建成功');
-          const data = await res.json();
           await loadProjects();
           await loadMerchantList();
           // Auto-select the newly created project
@@ -2825,11 +2885,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             openProject(data.id);
           }
         } else {
-          const err = await res.json();
-          showAlert('创建失败: ' + (err.message || '未知错误'), 'error');
+          const errorMsg = data.message || data.error || '未知错误';
+          console.error('Project creation failed:', errorMsg);
+          showAlert('创建失败: ' + errorMsg, 'error');
         }
       } catch (e) {
-        showAlert('创建失败', 'error');
+        console.error('Project creation error:', e);
+        showAlert('创建失败: ' + (e.message || '网络错误'), 'error');
       }
     });
 
@@ -2896,7 +2958,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     // Show merchant preview modal with campaigns list
-    async function showMerchantPreview(merchantId, merchantDomain, totalCampaigns, totalEmails) {
+    async function showMerchantPreview(merchantId, merchantDomain, totalCampaigns, totalEmails, merchantWorkerName) {
       // Set header info
       document.getElementById('preview-merchant-domain').textContent = merchantDomain;
       document.getElementById('preview-total-campaigns').textContent = totalCampaigns;
@@ -2910,7 +2972,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       showModal('merchant-preview-modal');
       
       try {
-        const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+        // Use passed workerName if available, otherwise fall back to filter value
+        const filterValue = document.getElementById('campaign-worker-filter')?.value || '';
+        const workerName = merchantWorkerName || (filterValue !== '__all__' ? filterValue : '');
         let url = '/api/campaign/campaigns?merchantId=' + encodeURIComponent(merchantId) + '&sortBy=totalEmails&sortOrder=desc&limit=50';
         if (workerName) {
           url += '&workerName=' + encodeURIComponent(workerName);
@@ -2950,15 +3014,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     // Show delete merchant data confirmation modal
-    function showDeleteMerchantModal(merchantId, merchantDomain, emailCount, campaignCount) {
-      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+    function showDeleteMerchantModal(merchantId, merchantDomain, emailCount, campaignCount, merchantWorkerName) {
+      // Use passed workerName if available, otherwise fall back to filter value
+      const filterValue = document.getElementById('campaign-worker-filter')?.value || '';
+      const workerName = merchantWorkerName || (filterValue !== '__all__' ? filterValue : '');
+      
       if (!workerName) {
         showAlert('请先选择实例', 'error');
         return;
       }
       
-      // Set modal values
+      // Store the workerName in a hidden field for use in confirmDeleteMerchantData
       document.getElementById('delete-merchant-id').value = merchantId;
+      document.getElementById('delete-merchant-id').dataset.workerName = workerName;
       document.getElementById('delete-merchant-domain').textContent = merchantDomain;
       document.getElementById('delete-merchant-worker').textContent = workerName;
       document.getElementById('delete-merchant-emails').textContent = emailCount;
@@ -2969,8 +3037,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     // Confirm and execute merchant data deletion
     async function confirmDeleteMerchantData() {
-      const merchantId = document.getElementById('delete-merchant-id').value;
-      const workerName = document.getElementById('campaign-worker-filter')?.value || '';
+      const merchantIdElement = document.getElementById('delete-merchant-id');
+      const merchantId = merchantIdElement.value;
+      // Use stored workerName from dataset, fall back to filter value
+      const filterValue = document.getElementById('campaign-worker-filter')?.value || '';
+      const workerName = merchantIdElement.dataset.workerName || (filterValue !== '__all__' ? filterValue : '');
       
       if (!merchantId || !workerName) {
         showAlert('参数错误', 'error');

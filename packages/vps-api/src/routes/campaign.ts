@@ -314,6 +314,39 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   /**
+   * GET /api/campaign/merchants-by-worker
+   * Get all merchants grouped by Worker instance
+   * Returns separate entries for each merchant-worker combination
+   * 
+   * Query params:
+   * - workerName (optional): Filter by specific worker instance
+   * 
+   * Requirements: 1.1, 1.2, 1.3, 3.2, 3.3
+   */
+  fastify.get('/merchants-by-worker', async (
+    request: FastifyRequest<{ Querystring: { workerName?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+
+      const { workerName } = request.query;
+      const merchants = service.getMerchantsByWorker(workerName);
+
+      return reply.send({
+        merchants,
+        pagination: {
+          total: merchants.length,
+        },
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching merchants by worker');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
    * GET /api/campaign/merchants/:id
    * Get a single merchant by ID
    * 
@@ -1415,6 +1448,8 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * POST /api/campaign/projects
    * Create a new analysis project
+   * 
+   * Requirements: 5.2, 5.3, 5.4
    */
   fastify.post('/projects', async (
     request: FastifyRequest,
@@ -1422,14 +1457,20 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   ) => {
     const body = request.body as Record<string, unknown>;
 
+    // Log incoming request for debugging
+    request.log.info({ body }, 'Creating analysis project - request received');
+
     // Validate required fields
     if (!body?.name || typeof body.name !== 'string' || body.name.trim() === '') {
+      request.log.warn({ body }, 'Project creation failed: name is required');
       return reply.status(400).send({ error: 'Invalid request', message: 'name is required' });
     }
     if (!body?.merchantId || typeof body.merchantId !== 'string') {
+      request.log.warn({ body }, 'Project creation failed: merchantId is required');
       return reply.status(400).send({ error: 'Invalid request', message: 'merchantId is required' });
     }
     if (!body?.workerName || typeof body.workerName !== 'string') {
+      request.log.warn({ body }, 'Project creation failed: workerName is required');
       return reply.status(400).send({ error: 'Invalid request', message: 'workerName is required' });
     }
 
@@ -1437,6 +1478,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
     let workerNames: string[] | undefined;
     if (body.workerNames !== undefined) {
       if (!Array.isArray(body.workerNames) || !body.workerNames.every((w: unknown) => typeof w === 'string')) {
+        request.log.warn({ workerNames: body.workerNames }, 'Project creation failed: workerNames must be an array of strings');
         return reply.status(400).send({ error: 'Invalid request', message: 'workerNames must be an array of strings' });
       }
       workerNames = body.workerNames as string[];
@@ -1454,15 +1496,18 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
         note: typeof body.note === 'string' ? body.note : undefined,
       };
 
+      request.log.info({ data }, 'Creating analysis project with data');
       const project = service.createAnalysisProject(data);
+      request.log.info({ projectId: project.id }, 'Analysis project created successfully');
 
       return reply.status(201).send(project);
     } catch (error: any) {
       if (error.message === 'Merchant not found') {
-        return reply.status(404).send({ error: 'Merchant not found' });
+        request.log.warn({ merchantId: body.merchantId }, 'Project creation failed: Merchant not found');
+        return reply.status(404).send({ error: 'Merchant not found', message: `Merchant with ID ${body.merchantId} not found` });
       }
-      request.log.error(error, 'Error creating analysis project');
-      return reply.status(500).send({ error: 'Internal error' });
+      request.log.error({ error: error.message, stack: error.stack }, 'Error creating analysis project');
+      return reply.status(500).send({ error: 'Internal error', message: error.message || 'Unknown error occurred' });
     }
   });
 

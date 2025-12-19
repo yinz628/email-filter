@@ -3641,4 +3641,172 @@ export class CampaignAnalyticsService {
       merchantDeleted,
     };
   }
+
+  /**
+   * Get list of worker names that exist in campaign_emails but may be orphaned
+   * Returns all unique worker names from the database
+   */
+  getOrphanedWorkers(): Array<{ workerName: string; emailCount: number; merchantCount: number }> {
+    const stmt = this.db.prepare(`
+      SELECT 
+        ce.worker_name,
+        COUNT(ce.id) as email_count,
+        COUNT(DISTINCT c.merchant_id) as merchant_count
+      FROM campaign_emails ce
+      JOIN campaigns c ON ce.campaign_id = c.id
+      GROUP BY ce.worker_name
+      ORDER BY email_count DESC
+    `);
+
+    const rows = stmt.all() as Array<{
+      worker_name: string;
+      email_count: number;
+      merchant_count: number;
+    }>;
+
+    return rows.map(row => ({
+      workerName: row.worker_name,
+      emailCount: row.email_count,
+      merchantCount: row.merchant_count,
+    }));
+  }
+
+  /**
+   * Delete all data for a specific worker (used for cleaning up orphaned worker data)
+   * This is a more aggressive delete that removes all emails for a worker across all merchants
+   */
+  deleteOrphanedWorkerData(workerName: string): {
+    emailsDeleted: number;
+    pathsDeleted: number;
+    merchantsAffected: number;
+    merchantsDeleted: number;
+  } {
+    let emailsDeleted = 0;
+    let pathsDeleted = 0;
+    let merchantsAffected = 0;
+    let merchantsDeleted = 0;
+
+    const transaction = this.db.transaction(() => {
+      // Step 1: Get all merchants that have data from this worker
+      const affectedMerchants = this.db.prepare(`
+        SELECT DISTINCT c.merchant_id
+        FROM campaigns c
+        JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE ce.worker_name = ?
+      `).all(workerName) as Array<{ merchant_id: string }>;
+
+      merchantsAffected = affectedMerchants.length;
+
+      // Step 2: For each merchant, get recipients that only have emails from this worker
+      for (const { merchant_id: merchantId } of affectedMerchants) {
+        const campaignIds = this.db.prepare(`
+          SELECT id FROM campaigns WHERE merchant_id = ?
+        `).all(merchantId) as Array<{ id: string }>;
+
+        const campaignIdList = campaignIds.map(c => c.id);
+
+        if (campaignIdList.length > 0) {
+          // Get recipients that had emails from this worker
+          const recipientsWithWorkerEmails = this.db.prepare(`
+            SELECT DISTINCT recipient FROM campaign_emails 
+            WHERE campaign_id IN (${campaignIdList.map(() => '?').join(',')}) 
+            AND worker_name = ?
+          `).all(...campaignIdList, workerName) as Array<{ recipient: string }>;
+
+          // Delete emails for this worker
+          const deleteResult = this.db.prepare(`
+            DELETE FROM campaign_emails 
+            WHERE campaign_id IN (${campaignIdList.map(() => '?').join(',')}) 
+            AND worker_name = ?
+          `).run(...campaignIdList, workerName);
+          emailsDeleted += deleteResult.changes;
+
+          // For each recipient, check if they still have emails from other workers
+          for (const { recipient } of recipientsWithWorkerEmails) {
+            const remainingEmails = this.db.prepare(`
+              SELECT COUNT(*) as count FROM campaign_emails 
+              WHERE campaign_id IN (${campaignIdList.map(() => '?').join(',')}) 
+              AND recipient = ?
+            `).get(...campaignIdList, recipient) as { count: number };
+
+            if (remainingEmails.count === 0) {
+              const pathDeleteResult = this.db.prepare(`
+                DELETE FROM recipient_paths 
+                WHERE merchant_id = ? AND recipient = ?
+              `).run(merchantId, recipient);
+              pathsDeleted += pathDeleteResult.changes;
+            }
+          }
+
+          // Update campaign statistics
+          for (const campaignId of campaignIdList) {
+            const emailCount = this.db.prepare(`
+              SELECT COUNT(*) as count FROM campaign_emails WHERE campaign_id = ?
+            `).get(campaignId) as { count: number };
+
+            const recipientCount = this.db.prepare(`
+              SELECT COUNT(DISTINCT recipient) as count FROM campaign_emails WHERE campaign_id = ?
+            `).get(campaignId) as { count: number };
+
+            this.db.prepare(`
+              UPDATE campaigns 
+              SET total_emails = ?, unique_recipients = ?, updated_at = ?
+              WHERE id = ?
+            `).run(emailCount.count, recipientCount.count, new Date().toISOString(), campaignId);
+          }
+        }
+
+        // Check if merchant has any remaining emails
+        const remainingEmails = this.db.prepare(`
+          SELECT COUNT(*) as count FROM campaign_emails 
+          WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)
+        `).get(merchantId) as { count: number };
+
+        if (remainingEmails.count === 0) {
+          // Delete merchant and all related data
+          this.db.prepare(`DELETE FROM campaigns WHERE merchant_id = ?`).run(merchantId);
+          this.db.prepare(`DELETE FROM recipient_paths WHERE merchant_id = ?`).run(merchantId);
+          
+          const workerStatusTableExists = this.db.prepare(`
+            SELECT name FROM sqlite_master WHERE type='table' AND name='merchant_worker_status'
+          `).get();
+          if (workerStatusTableExists) {
+            this.db.prepare(`DELETE FROM merchant_worker_status WHERE merchant_id = ?`).run(merchantId);
+          }
+          
+          this.db.prepare(`DELETE FROM merchants WHERE id = ?`).run(merchantId);
+          merchantsDeleted++;
+        } else {
+          // Update merchant statistics
+          const now = new Date().toISOString();
+          const totalEmails = this.db.prepare(`
+            SELECT COUNT(*) as count FROM campaign_emails 
+            WHERE campaign_id IN (SELECT id FROM campaigns WHERE merchant_id = ?)
+          `).get(merchantId) as { count: number };
+
+          const totalCampaigns = this.db.prepare(`
+            SELECT COUNT(DISTINCT c.id) as count 
+            FROM campaigns c
+            JOIN campaign_emails ce ON c.id = ce.campaign_id
+            WHERE c.merchant_id = ?
+          `).get(merchantId) as { count: number };
+
+          this.db.prepare(`
+            UPDATE merchants 
+            SET total_emails = ?, total_campaigns = ?, updated_at = ?
+            WHERE id = ?
+          `).run(totalEmails.count, totalCampaigns.count, now, merchantId);
+        }
+      }
+    });
+
+    transaction();
+
+    return {
+      emailsDeleted,
+      pathsDeleted,
+      merchantsAffected,
+      merchantsDeleted,
+    };
+  }
 }

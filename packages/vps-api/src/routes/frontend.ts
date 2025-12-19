@@ -438,6 +438,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="asc">升序</option>
             </select>
             <button class="btn btn-secondary" onclick="refreshCampaignData()">🔄 刷新</button>
+            <button class="btn btn-warning" onclick="showOrphanedWorkersModal()" title="清理已删除实例的数据">🧹 清理过期数据</button>
           </div>
         </div>
         <p style="color:#666;margin-bottom:15px">商户数据按 Worker 实例分组显示。选择"全部实例"查看所有数据，或选择特定实例筛选。</p>
@@ -1498,6 +1499,28 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div id="batch-delete-buttons" style="display:flex;gap:10px;justify-content:flex-end;">
           <button class="btn btn-secondary" onclick="hideModal('batch-delete-modal')">取消</button>
           <button class="btn btn-danger" onclick="confirmBatchDelete()">确认删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Orphaned Workers Modal -->
+  <div id="orphaned-workers-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:600px;">
+      <div class="modal-header">
+        <h3>🧹 清理过期实例数据</h3>
+        <button class="modal-close" onclick="hideModal('orphaned-workers-modal')">&times;</button>
+      </div>
+      <div style="padding:15px 0;">
+        <p style="color:#666;margin-bottom:15px;">以下是数据库中存在但可能已被删除的 Worker 实例。您可以选择清理这些过期数据。</p>
+        <div id="orphaned-workers-loading" style="text-align:center;padding:20px;color:#999;">加载中...</div>
+        <div id="orphaned-workers-empty" style="display:none;text-align:center;padding:20px;color:#28a745;">✅ 没有发现过期实例数据</div>
+        <div id="orphaned-workers-list" style="display:none;max-height:400px;overflow-y:auto;"></div>
+        <div id="orphaned-delete-progress" style="display:none;margin-top:15px;">
+          <div style="background:#e9ecef;border-radius:4px;height:20px;overflow:hidden;">
+            <div id="orphaned-delete-progress-bar" style="background:#ffc107;height:100%;width:0%;transition:width 0.3s;"></div>
+          </div>
+          <p id="orphaned-delete-status" style="margin-top:5px;font-size:13px;color:#666;">正在删除...</p>
         </div>
       </div>
     </div>
@@ -3259,6 +3282,126 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Refresh data
       await loadMerchantList();
       await loadProjects();
+    }
+
+    // Orphaned workers cleanup functions
+    async function showOrphanedWorkersModal() {
+      showModal('orphaned-workers-modal');
+      
+      document.getElementById('orphaned-workers-loading').style.display = 'block';
+      document.getElementById('orphaned-workers-empty').style.display = 'none';
+      document.getElementById('orphaned-workers-list').style.display = 'none';
+      document.getElementById('orphaned-delete-progress').style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/campaign/orphaned-workers', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed to fetch');
+        const data = await res.json();
+        const orphanedWorkers = data.orphanedWorkers || [];
+        
+        document.getElementById('orphaned-workers-loading').style.display = 'none';
+        
+        // Get current active worker names
+        const activeWorkerNames = new Set(workers.map(w => w.name));
+        
+        // Filter to only show workers that are not in the active list
+        const realOrphaned = orphanedWorkers.filter(w => !activeWorkerNames.has(w.workerName));
+        
+        if (realOrphaned.length === 0) {
+          document.getElementById('orphaned-workers-empty').style.display = 'block';
+          return;
+        }
+        
+        // Build list HTML
+        const listHtml = realOrphaned.map(w => 
+          '<div style="padding:12px;border:1px solid #ddd;border-radius:6px;margin-bottom:10px;background:#fff;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+              '<div>' +
+                '<strong style="color:#dc3545;">' + escapeHtml(w.workerName) + '</strong>' +
+                '<span style="color:#999;margin-left:10px;font-size:13px;">(已删除的实例)</span>' +
+              '</div>' +
+              '<button class="btn btn-sm btn-danger" onclick="deleteOrphanedWorkerData(\\'' + escapeHtml(w.workerName) + '\\')">删除数据</button>' +
+            '</div>' +
+            '<div style="margin-top:8px;font-size:13px;color:#666;">' +
+              '📧 ' + w.emailCount + ' 封邮件 | 🏪 ' + w.merchantCount + ' 个商户' +
+            '</div>' +
+          '</div>'
+        ).join('');
+        
+        // Also show active workers for reference
+        const activeWorkersHtml = orphanedWorkers
+          .filter(w => activeWorkerNames.has(w.workerName))
+          .map(w => 
+            '<div style="padding:12px;border:1px solid #28a745;border-radius:6px;margin-bottom:10px;background:#f8fff8;">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<div>' +
+                  '<strong style="color:#28a745;">' + escapeHtml(w.workerName) + '</strong>' +
+                  '<span style="color:#28a745;margin-left:10px;font-size:13px;">✓ 活跃实例</span>' +
+                '</div>' +
+              '</div>' +
+              '<div style="margin-top:8px;font-size:13px;color:#666;">' +
+                '📧 ' + w.emailCount + ' 封邮件 | 🏪 ' + w.merchantCount + ' 个商户' +
+              '</div>' +
+            '</div>'
+          ).join('');
+        
+        document.getElementById('orphaned-workers-list').innerHTML = 
+          (realOrphaned.length > 0 ? '<h4 style="margin:0 0 10px 0;color:#dc3545;">⚠️ 过期实例 (' + realOrphaned.length + ')</h4>' + listHtml : '') +
+          (activeWorkersHtml ? '<h4 style="margin:15px 0 10px 0;color:#28a745;">✓ 活跃实例</h4>' + activeWorkersHtml : '');
+        document.getElementById('orphaned-workers-list').style.display = 'block';
+        
+      } catch (e) {
+        console.error('Error fetching orphaned workers:', e);
+        document.getElementById('orphaned-workers-loading').style.display = 'none';
+        document.getElementById('orphaned-workers-list').innerHTML = '<p style="color:#dc3545;">加载失败，请重试</p>';
+        document.getElementById('orphaned-workers-list').style.display = 'block';
+      }
+    }
+
+    async function deleteOrphanedWorkerData(workerName) {
+      if (!confirm('确定要删除实例 "' + workerName + '" 的所有数据吗？此操作不可恢复！')) {
+        return;
+      }
+      
+      document.getElementById('orphaned-delete-progress').style.display = 'block';
+      document.getElementById('orphaned-delete-progress-bar').style.width = '50%';
+      document.getElementById('orphaned-delete-status').textContent = '正在删除 ' + workerName + ' 的数据...';
+      
+      try {
+        const res = await fetch('/api/campaign/orphaned-worker-data?workerName=' + encodeURIComponent(workerName), {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        
+        document.getElementById('orphaned-delete-progress-bar').style.width = '100%';
+        
+        if (res.ok) {
+          const data = await res.json();
+          const result = data.result;
+          
+          let message = '删除成功！\\n';
+          message += '- 删除邮件数: ' + result.emailsDeleted + '\\n';
+          message += '- 删除路径数: ' + result.pathsDeleted + '\\n';
+          message += '- 影响商户数: ' + result.merchantsAffected + '\\n';
+          message += '- 删除商户数: ' + result.merchantsDeleted;
+          
+          showAlert(message, 'success');
+          
+          // Refresh the modal
+          setTimeout(() => showOrphanedWorkersModal(), 500);
+          
+          // Refresh merchant list
+          await loadMerchantList();
+        } else {
+          const err = await res.json();
+          showAlert('删除失败: ' + (err.message || err.error || '未知错误'), 'error');
+          document.getElementById('orphaned-delete-progress').style.display = 'none';
+        }
+      } catch (e) {
+        console.error('Error deleting orphaned worker data:', e);
+        showAlert('删除失败', 'error');
+        document.getElementById('orphaned-delete-progress').style.display = 'none';
+      }
     }
 
     async function openProject(projectId) {

@@ -1275,6 +1275,58 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   /**
+   * GET /api/campaign/orphaned-workers
+   * Get list of worker names that exist in data but not in current worker list
+   */
+  fastify.get('/orphaned-workers', async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+      const orphanedWorkers = service.getOrphanedWorkers();
+      return reply.send({ orphanedWorkers });
+    } catch (error) {
+      request.log.error(error, 'Error fetching orphaned workers');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * DELETE /api/campaign/orphaned-worker-data
+   * Delete all data for a specific orphaned worker
+   * Query params: workerName (required) - the orphaned worker name to delete
+   */
+  fastify.delete('/orphaned-worker-data', async (
+    request: FastifyRequest<{ Querystring: { workerName?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const { workerName } = request.query;
+
+      if (!workerName || typeof workerName !== 'string' || workerName.trim() === '') {
+        return reply.status(400).send({
+          error: 'Invalid request',
+          message: 'workerName query parameter is required',
+        });
+      }
+
+      const db = getDatabase();
+      const service = new CampaignAnalyticsService(db);
+      const result = service.deleteOrphanedWorkerData(workerName.trim());
+
+      return reply.send({
+        success: true,
+        result,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error deleting orphaned worker data');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
    * GET /api/campaign/data-stats
    * Get data statistics for all merchants
    * Query params: workerName (optional) - filter by worker instance (Requirements: 4.5)

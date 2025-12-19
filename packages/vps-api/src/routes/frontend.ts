@@ -1547,10 +1547,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     function showTab(name) {
+      // Pause auto-refresh for the old tab before switching
+      pauseTabRefresh(currentActiveTab);
+      
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
       document.getElementById(name + '-tab').classList.remove('hidden');
       event.target.classList.add('active');
+      
+      // Update current active tab
+      currentActiveTab = name;
+      
+      // Resume auto-refresh for the new tab (if enabled)
+      resumeTabRefresh(name);
       
       if (name === 'workers') loadWorkers();
       if (name === 'rules') loadRules();
@@ -2183,7 +2192,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const to = d.to || '-';
         const rule = d.matchedRule || '-';
         return '<tr>' +
-          '<td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="' + log.id + '" onchange="updateBatchDeleteBtn()"></td>' +
+          '<td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="' + log.id + '" onchange="updateLogBatchDeleteBtn()"></td>' +
           '<td style="font-size:12px;color:#666;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + time + '</td>' +
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + workerDisplay + '</td>' +
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + cat + '</td>' +
@@ -2198,10 +2207,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function toggleSelectAllLogs() {
       const selectAll = document.getElementById('log-select-all').checked;
       document.querySelectorAll('.log-checkbox').forEach(cb => cb.checked = selectAll);
-      updateBatchDeleteBtn();
+      updateLogBatchDeleteBtn();
     }
     
-    function updateBatchDeleteBtn() {
+    function updateLogBatchDeleteBtn() {
       const selected = document.querySelectorAll('.log-checkbox:checked').length;
       const btn = document.getElementById('batch-delete-btn');
       if (selected > 0) {
@@ -2987,20 +2996,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         showAlert('创建失败: ' + (e.message || '网络错误'), 'error');
       }
     });
-
-    // Legacy function for backward compatibility
-    async function loadWorkerMerchants() {
-      await loadMerchantList();
-    }
-
-    function renderWorkerMerchants(workerName) {
-      renderMerchantList();
-    }
-
-    async function createProject(merchantId, merchantDomain) {
-      // This function is now deprecated, use showCreateProjectModal instead
-      showCreateProjectModal(merchantId, merchantDomain);
-    }
 
     async function editProject(projectId) {
       const project = projectsData.find(p => p.id === projectId);
@@ -4529,11 +4524,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
-    // Legacy function for backward compatibility
-    async function toggleValuable(campaignId, valuable) {
-      await setCampaignTag(campaignId, valuable ? 1 : 0);
-    }
-
     async function showMerchantFlow(merchantId, domain) {
       document.getElementById('flow-title').textContent = '活动路径分析 - ' + domain;
       document.getElementById('campaign-flow-section').style.display = 'block';
@@ -5081,7 +5071,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       status: null,
       funnel: null,
       heartbeat: null,
-      merchants: null
+      merchants: null,
+      dataStats: null,
+      logs: null,
+      stats: null
     };
 
     // Auto-refresh functions
@@ -5090,12 +5083,29 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       status: () => loadMonitoringStatus(),
       funnel: () => { loadRatioMonitors(); checkRatioMonitors(); },
       heartbeat: () => triggerHeartbeat(),
-      campaign: () => { loadMerchants(); updateCampaignStats(); },
       merchants: () => { loadMerchantList(); loadProjects(); },
       dataStats: () => loadDataStats(),
       logs: () => loadLogs(),
       stats: () => { loadStats(); loadTrendingRules(); }
     };
+
+    // Tab visibility controller - tracks which tab is currently active
+    let currentActiveTab = 'workers';
+
+    // Mapping of tabs to their associated refresh types
+    const tabRefreshTypes = {
+      'workers': [],
+      'rules': [],
+      'dynamic': [],
+      'logs': ['logs'],
+      'stats': ['stats'],
+      'campaign': ['merchants', 'dataStats'],
+      'monitoring': ['alerts', 'status', 'funnel', 'heartbeat'],
+      'settings': []
+    };
+
+    // Track paused state for each timer type (paused when tab is not active)
+    const pausedRefreshState = {};
 
     function toggleAutoRefresh(type) {
       const checkbox = document.getElementById(type + '-auto-refresh');
@@ -5137,6 +5147,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const settings = JSON.parse(localStorage.getItem('autoRefreshSettings') || '{}');
         Object.keys(settings).forEach(type => {
+          // Skip restoration for types not in autoRefreshTimers
+          if (!autoRefreshTimers.hasOwnProperty(type)) {
+            console.log('[AutoRefresh] Skipping restoration for unknown type: ' + type);
+            return;
+          }
+          
           const { enabled, interval } = settings[type];
           const checkbox = document.getElementById(type + '-auto-refresh');
           const intervalSelect = document.getElementById(type + '-refresh-interval');
@@ -5159,14 +5175,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function startAutoRefresh(type, interval) {
       stopAutoRefresh(type);
       const fn = autoRefreshFunctions[type];
-      if (fn) {
+      if (fn && autoRefreshTimers.hasOwnProperty(type)) {
         autoRefreshTimers[type] = setInterval(fn, interval);
         console.log('[AutoRefresh] Started ' + type + ' with interval ' + (interval/1000) + 's');
       }
     }
 
     function stopAutoRefresh(type) {
-      if (autoRefreshTimers[type]) {
+      if (autoRefreshTimers.hasOwnProperty(type) && autoRefreshTimers[type]) {
         clearInterval(autoRefreshTimers[type]);
         autoRefreshTimers[type] = null;
         console.log('[AutoRefresh] Stopped ' + type);
@@ -5175,6 +5191,42 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     function stopAllAutoRefresh() {
       Object.keys(autoRefreshTimers).forEach(type => stopAutoRefresh(type));
+    }
+
+    // Pause auto-refresh for a specific tab (stores state for later resume)
+    function pauseTabRefresh(tabName) {
+      const refreshTypes = tabRefreshTypes[tabName] || [];
+      refreshTypes.forEach(type => {
+        if (autoRefreshTimers[type]) {
+          // Store the current interval before stopping
+          const checkbox = document.getElementById(type + '-auto-refresh');
+          const intervalSelect = document.getElementById(type + '-refresh-interval');
+          if (checkbox && checkbox.checked) {
+            pausedRefreshState[type] = {
+              interval: parseInt(intervalSelect?.value || '60', 10) * 1000
+            };
+          }
+          stopAutoRefresh(type);
+          console.log('[AutoRefresh] Paused ' + type + ' (tab: ' + tabName + ')');
+        }
+      });
+    }
+
+    // Resume auto-refresh for a specific tab (if it was previously enabled)
+    function resumeTabRefresh(tabName) {
+      const refreshTypes = tabRefreshTypes[tabName] || [];
+      refreshTypes.forEach(type => {
+        const checkbox = document.getElementById(type + '-auto-refresh');
+        if (checkbox && checkbox.checked) {
+          // Use stored interval if available, otherwise get from UI
+          const intervalSelect = document.getElementById(type + '-refresh-interval');
+          const interval = pausedRefreshState[type]?.interval || parseInt(intervalSelect?.value || '60', 10) * 1000;
+          startAutoRefresh(type, interval);
+          console.log('[AutoRefresh] Resumed ' + type + ' (tab: ' + tabName + ')');
+          // Clear paused state after resuming
+          delete pausedRefreshState[type];
+        }
+      });
     }
 
     // Stop auto-refresh when leaving the page
@@ -5473,7 +5525,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           nameCol = escapeHtml(a.rule?.name || a.message || a.ruleId);
         }
         
-        const checkbox = '<input type="checkbox" class="alert-checkbox" data-id="' + a.id + '" data-source="' + a.source + '" onchange="updateBatchDeleteBtn()">';
+        const checkbox = '<input type="checkbox" class="alert-checkbox" data-id="' + a.id + '" data-source="' + a.source + '" onchange="updateAlertBatchDeleteBtn()">';
         const deleteBtn = '<button class="btn btn-sm btn-danger" onclick="deleteAlert(\\'' + a.id + '\\', \\'' + a.source + '\\')">删除</button>';
         
         return '<tr>' +
@@ -5500,10 +5552,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function toggleSelectAllAlerts() {
       const selectAll = document.getElementById('select-all-alerts').checked;
       document.querySelectorAll('.alert-checkbox').forEach(cb => cb.checked = selectAll);
-      updateBatchDeleteBtn();
+      updateAlertBatchDeleteBtn();
     }
     
-    function updateBatchDeleteBtn() {
+    function updateAlertBatchDeleteBtn() {
       const checkedCount = document.querySelectorAll('.alert-checkbox:checked').length;
       const btn = document.getElementById('batch-delete-alerts-btn');
       if (checkedCount > 0) {

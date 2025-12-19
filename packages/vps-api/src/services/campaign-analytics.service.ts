@@ -3498,8 +3498,15 @@ export class CampaignAnalyticsService {
       const campaignIdList = campaignIds.map(c => c.id);
 
       if (campaignIdList.length > 0) {
-        // Step 2: Delete campaign_emails for this worker
-        // Count emails to be deleted first
+        // Step 2: Get recipients that had emails from this worker for this merchant BEFORE deleting
+        // We need to delete paths for recipients whose emails were all from this worker
+        const recipientsWithWorkerEmails = this.db.prepare(`
+          SELECT DISTINCT recipient FROM campaign_emails 
+          WHERE campaign_id IN (${campaignIdList.map(() => '?').join(',')}) 
+          AND worker_name = ?
+        `).all(...campaignIdList, workerName) as Array<{ recipient: string }>;
+
+        // Step 3: Count and delete campaign_emails for this worker
         const emailCountResult = this.db.prepare(`
           SELECT COUNT(*) as count FROM campaign_emails 
           WHERE campaign_id IN (${campaignIdList.map(() => '?').join(',')}) 
@@ -3515,14 +3522,6 @@ export class CampaignAnalyticsService {
             AND worker_name = ?
           `).run(...campaignIdList, workerName);
         }
-
-        // Step 3: Get recipients that had emails from this worker for this merchant
-        // We need to delete paths for recipients whose emails were all from this worker
-        const recipientsWithWorkerEmails = this.db.prepare(`
-          SELECT DISTINCT recipient FROM campaign_emails 
-          WHERE campaign_id IN (${campaignIdList.map(() => '?').join(',')}) 
-          AND worker_name = ?
-        `).all(...campaignIdList, workerName) as Array<{ recipient: string }>;
 
         // For each recipient, check if they still have emails from other workers
         // If not, delete their paths for this merchant
@@ -3544,16 +3543,10 @@ export class CampaignAnalyticsService {
           }
         }
 
-        // Step 4: Count affected campaigns (campaigns that had emails from this worker)
-        const affectedCampaignsResult = this.db.prepare(`
-          SELECT COUNT(DISTINCT c.id) as count 
-          FROM campaigns c
-          WHERE c.merchant_id = ?
-          AND c.id IN (
-            SELECT DISTINCT campaign_id FROM campaign_emails WHERE worker_name = ?
-          )
-        `).get(merchantId, workerName) as { count: number };
-        campaignsAffected = affectedCampaignsResult.count;
+        // Step 4: Count affected campaigns (based on emails we already counted before deletion)
+        // Since we deleted emails, we count campaigns that had emails from this worker
+        // by checking which campaigns had recipients in our recipientsWithWorkerEmails list
+        campaignsAffected = emailsDeleted > 0 ? campaignIdList.length : 0;
 
         // Step 5: Update campaign statistics (total_emails, unique_recipients)
         for (const campaignId of campaignIdList) {

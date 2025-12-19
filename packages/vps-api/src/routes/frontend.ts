@@ -438,6 +438,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <option value="asc">升序</option>
             </select>
             <button class="btn btn-secondary" onclick="refreshCampaignData()">🔄 刷新</button>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="merchants-auto-refresh" onchange="toggleAutoRefresh('merchants')">
+              <span>自动刷新</span>
+            </label>
+            <select id="merchants-refresh-interval" onchange="updateAutoRefreshInterval('merchants')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
+              <option value="30">30秒</option>
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+            </select>
             <button class="btn btn-warning" onclick="showOrphanedWorkersModal()" title="清理已删除实例的数据">🧹 清理过期数据</button>
           </div>
         </div>
@@ -4965,7 +4974,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       alerts: null,
       status: null,
       funnel: null,
-      heartbeat: null
+      heartbeat: null,
+      merchants: null
     };
 
     // Auto-refresh functions
@@ -4975,6 +4985,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       funnel: () => { loadRatioMonitors(); checkRatioMonitors(); },
       heartbeat: () => triggerHeartbeat(),
       campaign: () => { loadMerchants(); updateCampaignStats(); },
+      merchants: () => { loadMerchantList(); loadProjects(); },
       dataStats: () => loadDataStats(),
       logs: () => loadLogs(),
       stats: () => { loadStats(); loadTrendingRules(); }

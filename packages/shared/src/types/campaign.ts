@@ -403,7 +403,7 @@ export interface TrackEmailDTO {
   subject: string;
   recipient: string;
   receivedAt?: string;
-  workerName?: string; // Worker instance name for data separation
+  workerName: string; // Worker instance name for data separation (required)
 }
 
 /**

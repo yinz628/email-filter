@@ -948,10 +948,14 @@ export class CampaignAnalyticsService {
       throw new Error('Invalid sender email address');
     }
 
+    if (!data.workerName || data.workerName.trim() === '') {
+      throw new Error('workerName is required');
+    }
+
     const receivedAt = data.receivedAt ? new Date(data.receivedAt) : new Date();
     const receivedAtStr = receivedAt.toISOString();
     const now = new Date().toISOString();
-    const workerName = data.workerName || 'global';
+    const workerName = data.workerName.trim();
 
     // Get or create merchant
     const { merchant, isNew: isNewMerchant } = this.getOrCreateMerchant(domain);

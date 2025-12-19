@@ -152,13 +152,11 @@ export function validateTrackEmail(body: unknown): { valid: boolean; error?: str
     result.receivedAt = data.receivedAt;
   }
 
-  // Optional workerName for worker instance data separation (Requirements: 7.2)
-  if (data.workerName !== undefined) {
-    if (typeof data.workerName !== 'string') {
-      return { valid: false, error: 'workerName must be a string' };
-    }
-    result.workerName = data.workerName.trim() || 'global';
+  // Required workerName for worker instance data separation (Requirements: 7.2)
+  if (typeof data.workerName !== 'string' || data.workerName.trim() === '') {
+    return { valid: false, error: 'workerName is required and must be a non-empty string' };
   }
+  result.workerName = data.workerName.trim();
 
   return { valid: true, data: result };
 }

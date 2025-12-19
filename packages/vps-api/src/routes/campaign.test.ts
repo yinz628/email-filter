@@ -91,12 +91,14 @@ class TestCampaignService {
     return this.rowToCampaign(columns, row);
   }
 
-  trackEmail(data: { campaignId: string; recipient: string; receivedAt: string; workerName?: string }): void {
-    const workerName = data.workerName || 'global';
+  trackEmail(data: { campaignId: string; recipient: string; receivedAt: string; workerName: string }): void {
+    if (!data.workerName || data.workerName.trim() === '') {
+      throw new Error('workerName is required');
+    }
     this.db.run(
       `INSERT INTO campaign_emails (campaign_id, recipient, received_at, worker_name)
        VALUES (?, ?, ?, ?)`,
-      [data.campaignId, data.recipient, data.receivedAt, workerName]
+      [data.campaignId, data.recipient, data.receivedAt, data.workerName]
     );
   }
 
@@ -417,11 +419,13 @@ describe('Campaign Routes Integration Tests', () => {
           campaignId: campaign1.id,
           recipient: 'user@example.com',
           receivedAt: baseTime.toISOString(),
+          workerName: 'test-worker',
         });
         service.trackEmail({
           campaignId: campaign2.id,
           recipient: 'user@example.com',
           receivedAt: new Date(baseTime.getTime() + 3600000).toISOString(),
+          workerName: 'test-worker',
         });
 
 
@@ -503,6 +507,7 @@ describe('Campaign Routes Integration Tests', () => {
           campaignId: campaign1.id,
           recipient: 'new@example.com',
           receivedAt: new Date().toISOString(),
+          workerName: 'test-worker',
         });
 
         // Rebuild paths
@@ -538,6 +543,7 @@ describe('Campaign Routes Integration Tests', () => {
           campaignId: rootCampaign.id,
           recipient: 'newuser@example.com',
           receivedAt: baseTime.toISOString(),
+          workerName: 'test-worker',
         });
 
         // Old user: first email from non-root campaign
@@ -545,6 +551,7 @@ describe('Campaign Routes Integration Tests', () => {
           campaignId: promoCampaign.id,
           recipient: 'olduser@example.com',
           receivedAt: baseTime.toISOString(),
+          workerName: 'test-worker',
         });
 
         // Rebuild paths
@@ -591,11 +598,13 @@ describe('Campaign Routes Integration Tests', () => {
           campaignId: rootCampaign.id,
           recipient: 'newuser@example.com',
           receivedAt: new Date().toISOString(),
+          workerName: 'test-worker',
         });
         service.trackEmail({
           campaignId: promoCampaign.id,
           recipient: 'olduser@example.com',
           receivedAt: new Date().toISOString(),
+          workerName: 'test-worker',
         });
 
         // Cleanup old customers
@@ -631,6 +640,7 @@ describe('Campaign Routes Integration Tests', () => {
           campaignId: promoCampaign.id,
           recipient: 'olduser@example.com',
           receivedAt: new Date().toISOString(),
+          workerName: 'test-worker',
         });
 
         // Verify email exists before cleanup

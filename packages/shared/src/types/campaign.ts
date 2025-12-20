@@ -103,6 +103,8 @@ export interface Campaign {
   tagNote?: string; // Note for the tag
   isValuable: boolean; // Computed: tag === 1 || tag === 2
   valuableNote?: string; // Deprecated: use tagNote instead
+  isRootCandidate: boolean; // 是否为系统候选Root活动
+  rootCandidateReason?: string; // 候选原因
   totalEmails: number;
   uniqueRecipients: number;
   firstSeenAt: Date;
@@ -686,6 +688,8 @@ export function toCampaign(row: CampaignRow): Campaign {
     tagNote: row.tag_note ?? undefined,
     isValuable: tag === 1 || tag === 2, // High value or important
     valuableNote: row.valuable_note ?? row.tag_note ?? undefined, // Backward compatibility
+    isRootCandidate: row.is_root_candidate === 1,
+    rootCandidateReason: row.root_candidate_reason ?? undefined,
     totalEmails: row.total_emails,
     uniqueRecipients: row.unique_recipients,
     firstSeenAt: new Date(row.first_seen_at),

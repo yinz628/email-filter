@@ -17,6 +17,7 @@ import type {
 } from '@email-filter/shared';
 import { DEFAULT_DYNAMIC_CONFIG } from '@email-filter/shared';
 import { RuleRepository } from '../db/rule-repository.js';
+import { getRuleCache } from './rule-cache.instance.js';
 
 /**
  * Subject tracker entry from database
@@ -236,6 +237,11 @@ export class DynamicRuleService {
       };
 
       const newRule = this.ruleRepository.create(ruleDto);
+      
+      // Invalidate rule cache so the new rule takes effect immediately
+      // This is critical for dynamic rules to work in real-time
+      const ruleCache = getRuleCache();
+      ruleCache.invalidateAll();
       
       // Clean up old tracking records for this subject
       this.cleanupSubjectTracker(subjectHash, windowStart);

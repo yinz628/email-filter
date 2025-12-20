@@ -96,6 +96,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .project-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #27ae60; margin-right: 6px; }
     .root-badge { background: #4a90d9; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .candidate-badge { background: #ff9800; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; cursor: help; }
     .value-tag-0 { background: #e9ecef; color: #666; }
     .value-tag-1 { background: #d4edda; color: #155724; }
     .value-tag-2 { background: #fff3cd; color: #856404; }
@@ -3611,15 +3612,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             subject: c.subject,
             totalEmails: c.totalEmails,
             isConfirmed: rootInfo?.isConfirmed || false,
-            isCandidate: false, // Project-level doesn't have candidates yet
-            candidateReason: null,
+            isCandidate: c.isRootCandidate || false, // Get candidate info from campaigns API
+            candidateReason: c.rootCandidateReason || null,
             newUserCount: rootInfo?.newUserCount || 0
           };
         });
         
-        // Sort: confirmed first, then by email count
+        // Sort: confirmed first, then candidates, then by email count
         mergedCampaigns.sort((a, b) => {
           if (a.isConfirmed !== b.isConfirmed) return a.isConfirmed ? -1 : 1;
+          if (a.isCandidate !== b.isCandidate) return a.isCandidate ? -1 : 1;
           return b.totalEmails - a.totalEmails;
         });
         
@@ -3646,17 +3648,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const tbody = document.getElementById('root-campaigns-table');
         tbody.innerHTML = mergedCampaigns.map(c => {
           const isRoot = c.isConfirmed;
-          const statusBadge = isRoot 
-            ? '<span class="root-badge">当前 Root</span>' 
-            : '<span style="color:#999;font-size:11px;">-</span>';
+          const isCandidate = c.isCandidate;
+          let statusBadge = '';
+          if (isRoot) {
+            statusBadge = '<span class="root-badge">当前 Root</span>';
+          } else if (isCandidate) {
+            statusBadge = '<span class="candidate-badge" title="' + escapeHtml(c.candidateReason || '自动检测') + '">候选</span>';
+          } else {
+            statusBadge = '<span style="color:#999;font-size:11px;">-</span>';
+          }
           const actionBtn = isRoot 
             ? '<button class="btn btn-sm btn-danger" onclick="unsetRoot(\\'' + c.campaignId + '\\')">取消选择</button>'
             : '<button class="btn btn-sm btn-primary" onclick="setAsRoot(\\'' + c.campaignId + '\\')">设为 Root</button>';
           
-          return '<tr style="' + (isRoot ? 'background:#e8f5e9;' : '') + '">' +
+          const rowStyle = isRoot ? 'background:#e8f5e9;' : (isCandidate ? 'background:#fff3e0;' : '');
+          return '<tr style="' + rowStyle + '">' +
             '<td>' + escapeHtml(c.subject || '未知主题') + '</td>' +
             '<td>' + (c.totalEmails || 0) + '</td>' +
-            '<td>' + (c.isConfirmed ? '已确认' : '-') + '</td>' +
+            '<td>' + (c.isConfirmed ? '已确认' : (c.isCandidate ? '候选' : '-')) + '</td>' +
             '<td>' + statusBadge + '</td>' +
             '<td class="actions">' + actionBtn + '</td></tr>';
         }).join('');

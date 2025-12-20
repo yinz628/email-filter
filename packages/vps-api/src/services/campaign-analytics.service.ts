@@ -687,7 +687,8 @@ export class CampaignAnalyticsService {
       // Use subquery to calculate worker-specific counts
       const stmt = this.db.prepare(`
         SELECT 
-          c.id, c.merchant_id, c.subject, c.tag, c.is_valuable,
+          c.id, c.merchant_id, c.subject, c.tag, c.tag_note, c.is_valuable, c.valuable_note,
+          c.is_root, c.is_root_candidate, c.root_candidate_reason,
           c.first_seen_at, c.last_seen_at, c.created_at, c.updated_at,
           COUNT(ce.id) as total_emails,
           COUNT(DISTINCT ce.recipient) as unique_recipients
@@ -720,7 +721,8 @@ export class CampaignAnalyticsService {
       // Use subquery to calculate worker-specific counts
       const stmt = this.db.prepare(`
         SELECT 
-          c.id, c.merchant_id, c.subject, c.tag, c.is_valuable,
+          c.id, c.merchant_id, c.subject, c.tag, c.tag_note, c.is_valuable, c.valuable_note,
+          c.is_root, c.is_root_candidate, c.root_candidate_reason,
           c.first_seen_at, c.last_seen_at, c.created_at, c.updated_at,
           COUNT(ce.id) as total_emails,
           COUNT(DISTINCT ce.recipient) as unique_recipients

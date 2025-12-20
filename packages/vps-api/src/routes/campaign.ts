@@ -204,16 +204,20 @@ interface CampaignLevelStat {
   subject: string;
   level: number;
   userCount: number;
+  coverage: number;
+  isRoot: boolean;
 }
 
 function buildLevelStats(
   rootCampaigns: ProjectRootCampaign[],
-  pathEdges: ProjectPathEdge[]
+  pathEdges: ProjectPathEdge[],
+  totalNewUsers: number
 ): CampaignLevelStat[] {
   const levelStats: CampaignLevelStat[] = [];
   const campaignLevels = new Map<string, number>();
   const campaignSubjects = new Map<string, string>();
   const campaignUserCounts = new Map<string, number>();
+  const rootCampaignIds = new Set<string>();
 
   // Root campaigns are level 1
   for (const root of rootCampaigns) {
@@ -221,11 +225,15 @@ function buildLevelStats(
       campaignLevels.set(root.campaignId, 1);
       campaignSubjects.set(root.campaignId, root.subject);
       campaignUserCounts.set(root.campaignId, 0);
+      rootCampaignIds.add(root.campaignId);
     }
   }
 
   // Build adjacency list from path edges
   const adjacency = new Map<string, { toCampaignId: string; toSubject: string; userCount: number }[]>();
+  // Also track incoming edges for each campaign
+  const incomingUserCounts = new Map<string, number>();
+  
   for (const edge of pathEdges) {
     if (!adjacency.has(edge.fromCampaignId)) {
       adjacency.set(edge.fromCampaignId, []);
@@ -237,6 +245,10 @@ function buildLevelStats(
     });
     campaignSubjects.set(edge.fromCampaignId, edge.fromSubject);
     campaignSubjects.set(edge.toCampaignId, edge.toSubject);
+    
+    // Track incoming user counts for each campaign
+    const currentIncoming = incomingUserCounts.get(edge.toCampaignId) || 0;
+    incomingUserCounts.set(edge.toCampaignId, currentIncoming + edge.userCount);
   }
 
   // BFS to assign levels
@@ -249,13 +261,14 @@ function buildLevelStats(
     for (const edge of edges) {
       if (!campaignLevels.has(edge.toCampaignId)) {
         campaignLevels.set(edge.toCampaignId, currentLevel + 1);
-        campaignUserCounts.set(edge.toCampaignId, edge.userCount);
         queue.push(edge.toCampaignId);
       }
     }
   }
 
-  // Calculate user counts for root campaigns from incoming edges
+  // Calculate user counts for each campaign
+  // For Root campaigns: sum of all outgoing edges (users who received Root and then other campaigns)
+  // For non-Root campaigns: sum of all incoming edges
   for (const edge of pathEdges) {
     const fromLevel = campaignLevels.get(edge.fromCampaignId);
     if (fromLevel === 1) {
@@ -264,14 +277,35 @@ function buildLevelStats(
       campaignUserCounts.set(edge.fromCampaignId, currentCount + edge.userCount);
     }
   }
+  
+  // For non-root campaigns, use incoming user counts
+  for (const [campaignId, incomingCount] of incomingUserCounts) {
+    if (!rootCampaignIds.has(campaignId)) {
+      campaignUserCounts.set(campaignId, incomingCount);
+    }
+  }
+  
+  // For root campaigns with no outgoing edges, use totalNewUsers as estimate
+  for (const rootId of rootCampaignIds) {
+    if ((campaignUserCounts.get(rootId) || 0) === 0) {
+      // If root has no outgoing edges, it means all new users started from this root
+      // but didn't receive any subsequent campaigns yet
+      campaignUserCounts.set(rootId, totalNewUsers);
+    }
+  }
 
-  // Build level stats array
+  // Build level stats array with coverage calculation
   for (const [campaignId, level] of campaignLevels) {
+    const userCount = campaignUserCounts.get(campaignId) || 0;
+    const coverage = totalNewUsers > 0 ? (userCount / totalNewUsers) * 100 : 0;
+    
     levelStats.push({
       campaignId,
       subject: campaignSubjects.get(campaignId) || '',
       level,
-      userCount: campaignUserCounts.get(campaignId) || 0,
+      userCount,
+      coverage,
+      isRoot: rootCampaignIds.has(campaignId),
     });
   }
 
@@ -1973,7 +2007,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       }));
 
       // Build level stats from root campaigns and path edges
-      const levelStats = buildLevelStats(rootCampaigns, pathEdges);
+      const levelStats = buildLevelStats(rootCampaigns, pathEdges, userStats.totalNewUsers);
 
       return reply.send({
         projectId: request.params.id,

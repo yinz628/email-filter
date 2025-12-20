@@ -4190,13 +4190,25 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           return nodeHtml;
         }
         
+        // Calculate total users for each root (sum of all outgoing edges)
+        const rootUserCounts = {};
+        rootNodes.forEach(rootId => {
+          const rootNode = transitionMap[rootId];
+          if (rootNode && rootNode.children) {
+            rootUserCounts[rootId] = rootNode.children.reduce((sum, child) => sum + (child.userCount || 0), 0);
+          }
+        });
+        
         // Render from each root
         rootNodes.forEach(rootId => {
           const rootNode = transitionMap[rootId];
           if (rootNode) {
             const rootTagMarker = getTreeTagMarker(rootNode.tag, rootNode.isValuable);
+            const rootUserCount = rootUserCounts[rootId] || totalNewUsers || 0;
             html += '<div style="margin-bottom:10px;padding:10px;background:#fff;border-radius:6px;border:1px solid #c8e6c9;">';
-            html += '<div style="font-weight:bold;font-size:12px;color:#1b5e20;margin-bottom:6px;">🎯 ' + escapeHtml(rootNode.subject.substring(0, 40)) + rootTagMarker + '</div>';
+            html += '<div style="font-weight:bold;font-size:12px;color:#1b5e20;margin-bottom:6px;">🎯 ' + escapeHtml(rootNode.subject.substring(0, 40)) + rootTagMarker;
+            html += ' <span style="color:#2e7d32;font-weight:bold;margin-left:8px;">' + rootUserCount + '人</span>';
+            html += '</div>';
             visited.clear(); // Clear visited for each root tree
             html += renderTreeNode(rootId, 0);
             html += '</div>';

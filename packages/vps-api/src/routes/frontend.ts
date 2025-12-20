@@ -3571,16 +3571,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       tableContainer.style.display = 'none';
       
       try {
-        // Use project's workerNames for multi-worker filtering
-        const workerNames = currentProjectWorkerNames && currentProjectWorkerNames.length > 0 
-          ? currentProjectWorkerNames 
-          : (currentProjectWorkerName ? [currentProjectWorkerName] : []);
-        
-        // Fetch all campaigns for this merchant (not just root candidates)
+        // Fetch all campaigns for this merchant (not filtered by worker)
+        // This ensures we can see all root candidates across all workers
         let campaignsUrl = '/api/campaign/campaigns?merchantId=' + currentMerchantId + '&limit=500';
-        if (workerNames.length === 1) {
-          campaignsUrl += '&workerName=' + encodeURIComponent(workerNames[0]);
-        }
         
         // Use project-level API for root campaigns (Requirements 2.2, 2.5)
         const rootUrl = '/api/campaign/projects/' + currentProjectId + '/root-campaigns';

@@ -22,6 +22,8 @@ import type {
   UpdateAnalysisProjectDTO,
 } from '@email-filter/shared';
 import { CampaignAnalyticsService } from '../services/campaign-analytics.service.js';
+import { ProjectPathAnalysisService, type ProjectRootCampaign, type ProjectPathEdge, type AnalysisProgress } from '../services/project-path-analysis.service.js';
+import { analysisQueue } from '../services/analysis-queue.service.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -191,6 +193,95 @@ function validateTrackEmailBatch(body: unknown): { valid: boolean; error?: strin
   }
 
   return { valid: true, data: { emails: validatedEmails } };
+}
+
+/**
+ * Build level stats from root campaigns and path edges
+ * Used for project-level path analysis
+ */
+interface CampaignLevelStat {
+  campaignId: string;
+  subject: string;
+  level: number;
+  userCount: number;
+}
+
+function buildLevelStats(
+  rootCampaigns: ProjectRootCampaign[],
+  pathEdges: ProjectPathEdge[]
+): CampaignLevelStat[] {
+  const levelStats: CampaignLevelStat[] = [];
+  const campaignLevels = new Map<string, number>();
+  const campaignSubjects = new Map<string, string>();
+  const campaignUserCounts = new Map<string, number>();
+
+  // Root campaigns are level 1
+  for (const root of rootCampaigns) {
+    if (root.isConfirmed) {
+      campaignLevels.set(root.campaignId, 1);
+      campaignSubjects.set(root.campaignId, root.subject);
+      campaignUserCounts.set(root.campaignId, 0);
+    }
+  }
+
+  // Build adjacency list from path edges
+  const adjacency = new Map<string, { toCampaignId: string; toSubject: string; userCount: number }[]>();
+  for (const edge of pathEdges) {
+    if (!adjacency.has(edge.fromCampaignId)) {
+      adjacency.set(edge.fromCampaignId, []);
+    }
+    adjacency.get(edge.fromCampaignId)!.push({
+      toCampaignId: edge.toCampaignId,
+      toSubject: edge.toSubject,
+      userCount: edge.userCount,
+    });
+    campaignSubjects.set(edge.fromCampaignId, edge.fromSubject);
+    campaignSubjects.set(edge.toCampaignId, edge.toSubject);
+  }
+
+  // BFS to assign levels
+  const queue = [...campaignLevels.keys()];
+  while (queue.length > 0) {
+    const campaignId = queue.shift()!;
+    const currentLevel = campaignLevels.get(campaignId)!;
+    const edges = adjacency.get(campaignId) || [];
+
+    for (const edge of edges) {
+      if (!campaignLevels.has(edge.toCampaignId)) {
+        campaignLevels.set(edge.toCampaignId, currentLevel + 1);
+        campaignUserCounts.set(edge.toCampaignId, edge.userCount);
+        queue.push(edge.toCampaignId);
+      }
+    }
+  }
+
+  // Calculate user counts for root campaigns from incoming edges
+  for (const edge of pathEdges) {
+    const fromLevel = campaignLevels.get(edge.fromCampaignId);
+    if (fromLevel === 1) {
+      // This is a root campaign, count users from it
+      const currentCount = campaignUserCounts.get(edge.fromCampaignId) || 0;
+      campaignUserCounts.set(edge.fromCampaignId, currentCount + edge.userCount);
+    }
+  }
+
+  // Build level stats array
+  for (const [campaignId, level] of campaignLevels) {
+    levelStats.push({
+      campaignId,
+      subject: campaignSubjects.get(campaignId) || '',
+      level,
+      userCount: campaignUserCounts.get(campaignId) || 0,
+    });
+  }
+
+  // Sort by level, then by user count descending
+  levelStats.sort((a, b) => {
+    if (a.level !== b.level) return a.level - b.level;
+    return b.userCount - a.userCount;
+  });
+
+  return levelStats;
 }
 
 
@@ -1658,6 +1749,280 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send({ merchants });
     } catch (error) {
       request.log.error(error, 'Error fetching merchants for worker');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  // ============================================
+  // Project Path Analysis Routes (项目级路径分析)
+  // Requirements: 2.1, 2.2, 2.4, 2.5, 6.1, 7.1, 9.1-9.5
+  // ============================================
+
+  /**
+   * GET /api/campaign/projects/:id/root-campaigns
+   * Get Root campaigns for a project
+   * 
+   * Requirements: 2.2, 2.5
+   */
+  fastify.get('/projects/:id/root-campaigns', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      const rootCampaigns = pathService.getProjectRootCampaigns(request.params.id);
+
+      return reply.send({
+        projectId: request.params.id,
+        rootCampaigns,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching project root campaigns');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/projects/:id/root-campaigns
+   * Set a Root campaign for a project
+   * 
+   * Requirements: 2.1, 2.4
+   */
+  fastify.post('/projects/:id/root-campaigns', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    const body = request.body as Record<string, unknown>;
+
+    // Validate required fields
+    if (!body?.campaignId || typeof body.campaignId !== 'string') {
+      return reply.status(400).send({ error: 'Invalid request', message: 'campaignId is required' });
+    }
+
+    const isConfirmed = body.isConfirmed === true;
+
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      // Check if campaign exists
+      const campaign = analyticsService.getCampaignById(body.campaignId);
+      if (!campaign) {
+        return reply.status(404).send({ error: 'Campaign not found' });
+      }
+
+      pathService.setProjectRootCampaign(request.params.id, body.campaignId, isConfirmed);
+
+      const rootCampaigns = pathService.getProjectRootCampaigns(request.params.id);
+
+      return reply.status(201).send({
+        projectId: request.params.id,
+        rootCampaigns,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error setting project root campaign');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * DELETE /api/campaign/projects/:id/root-campaigns/:campaignId
+   * Remove a Root campaign from a project
+   * 
+   * Requirements: 2.4
+   */
+  fastify.delete('/projects/:id/root-campaigns/:campaignId', async (
+    request: FastifyRequest<{ Params: { id: string; campaignId: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      pathService.removeProjectRootCampaign(request.params.id, request.params.campaignId);
+
+      return reply.send({ message: 'Root campaign removed' });
+    } catch (error) {
+      request.log.error(error, 'Error removing project root campaign');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/projects/:id/analyze
+   * Trigger path analysis for a project (SSE for progress)
+   * 
+   * Requirements: 6.1, 7.1, 9.1, 9.2, 9.3, 9.4
+   */
+  fastify.post('/projects/:id/analyze', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      // Check if analysis is already running for this project
+      if (analysisQueue.isProjectInQueue(request.params.id)) {
+        return reply.status(409).send({ 
+          error: 'Conflict', 
+          message: 'Analysis is already in progress or queued for this project' 
+        });
+      }
+
+      // Set up SSE response
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no', // Disable nginx buffering
+      });
+
+      // Set up the analyze function for the queue
+      analysisQueue.setAnalyzeFunction(async (projectId, onProgress) => {
+        return pathService.analyzeProject(projectId, onProgress);
+      });
+
+      // Send progress updates via SSE
+      const sendProgress = (progress: AnalysisProgress) => {
+        reply.raw.write(`event: progress\ndata: ${JSON.stringify(progress)}\n\n`);
+      };
+
+      try {
+        // Enqueue the analysis
+        const result = await analysisQueue.enqueue(request.params.id, sendProgress);
+
+        // Send completion event
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(result)}\n\n`);
+      } catch (error: any) {
+        // Send error event
+        reply.raw.write(`event: error\ndata: ${JSON.stringify({ error: error.message })}\n\n`);
+      }
+
+      reply.raw.end();
+    } catch (error) {
+      request.log.error(error, 'Error starting project analysis');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/projects/:id/path-analysis
+   * Get path analysis results for a project
+   * 
+   * Requirements: 4.3, 5.2, 5.3
+   */
+  fastify.get('/projects/:id/path-analysis', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      // Get analysis data
+      const userStats = pathService.getProjectUserStats(request.params.id);
+      const pathEdges = pathService.getProjectPathEdges(request.params.id);
+      const rootCampaigns = pathService.getProjectRootCampaigns(request.params.id);
+      const lastAnalysisTime = pathService.getLastAnalysisTime(request.params.id);
+
+      // Build transitions from path edges (similar to merchant-level analysis)
+      const transitions = pathEdges.map(edge => ({
+        fromCampaignId: edge.fromCampaignId,
+        fromSubject: edge.fromSubject,
+        toCampaignId: edge.toCampaignId,
+        toSubject: edge.toSubject,
+        userCount: edge.userCount,
+      }));
+
+      // Build level stats from root campaigns and path edges
+      const levelStats = buildLevelStats(rootCampaigns, pathEdges);
+
+      return reply.send({
+        projectId: request.params.id,
+        userStats,
+        levelStats,
+        transitions,
+        rootCampaigns,
+        lastAnalysisTime: lastAnalysisTime?.toISOString() || null,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching project path analysis');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/campaign/projects/:id/analysis-status
+   * Get analysis queue status for a project
+   * 
+   * Requirements: 8.4
+   */
+  fastify.get('/projects/:id/analysis-status', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      const queueStatus = analysisQueue.getStatus();
+      const lastAnalysisTime = pathService.getLastAnalysisTime(request.params.id);
+
+      return reply.send({
+        projectId: request.params.id,
+        isAnalyzing: queueStatus.currentProjectId === request.params.id,
+        isQueued: queueStatus.queuedProjectIds.includes(request.params.id),
+        queuePosition: queueStatus.queuedProjectIds.indexOf(request.params.id) + 1,
+        lastAnalysisTime: lastAnalysisTime?.toISOString() || null,
+        globalQueueStatus: queueStatus,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching analysis status');
       return reply.status(500).send({ error: 'Internal error' });
     }
   });

@@ -317,5 +317,130 @@ try {
   console.log('worker_names column migration skipped (may already exist).');
 }
 
+// Migration: Add last_analysis_time column to analysis_projects table
+try {
+  const columns = db.prepare("PRAGMA table_info(analysis_projects)").all() as Array<{ name: string }>;
+  const hasLastAnalysisTimeColumn = columns.some(col => col.name === 'last_analysis_time');
+  
+  if (!hasLastAnalysisTimeColumn) {
+    console.log('Adding last_analysis_time column to analysis_projects table...');
+    db.exec(`
+      ALTER TABLE analysis_projects ADD COLUMN last_analysis_time TEXT;
+    `);
+    console.log('last_analysis_time column added to analysis_projects.');
+  } else {
+    console.log('last_analysis_time column already exists in analysis_projects.');
+  }
+} catch (e) {
+  console.log('last_analysis_time column migration skipped (may already exist).');
+}
+
+// Migration: Create project_root_campaigns table for project-level Root campaign settings
+const projectRootCampaignsTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='project_root_campaigns'
+`).get();
+
+if (!projectRootCampaignsTableExists) {
+  console.log('Creating project_root_campaigns table...');
+  db.exec(`
+    CREATE TABLE project_root_campaigns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      campaign_id TEXT NOT NULL,
+      is_confirmed INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+      UNIQUE(project_id, campaign_id)
+    );
+    CREATE INDEX idx_project_root_campaigns_project ON project_root_campaigns(project_id);
+  `);
+  console.log('project_root_campaigns table created.');
+} else {
+  console.log('project_root_campaigns table already exists.');
+}
+
+// Migration: Create project_new_users table for project-level new user tracking
+const projectNewUsersTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='project_new_users'
+`).get();
+
+if (!projectNewUsersTableExists) {
+  console.log('Creating project_new_users table...');
+  db.exec(`
+    CREATE TABLE project_new_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      first_root_campaign_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (first_root_campaign_id) REFERENCES campaigns(id),
+      UNIQUE(project_id, recipient)
+    );
+    CREATE INDEX idx_project_new_users_project ON project_new_users(project_id);
+    CREATE INDEX idx_project_new_users_recipient ON project_new_users(recipient);
+  `);
+  console.log('project_new_users table created.');
+} else {
+  console.log('project_new_users table already exists.');
+}
+
+// Migration: Create project_user_events table for project-level user event stream
+const projectUserEventsTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='project_user_events'
+`).get();
+
+if (!projectUserEventsTableExists) {
+  console.log('Creating project_user_events table...');
+  db.exec(`
+    CREATE TABLE project_user_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      campaign_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      received_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+      UNIQUE(project_id, recipient, campaign_id)
+    );
+    CREATE INDEX idx_project_user_events_project ON project_user_events(project_id);
+    CREATE INDEX idx_project_user_events_recipient ON project_user_events(project_id, recipient);
+    CREATE INDEX idx_project_user_events_seq ON project_user_events(project_id, recipient, seq);
+  `);
+  console.log('project_user_events table created.');
+} else {
+  console.log('project_user_events table already exists.');
+}
+
+// Migration: Create project_path_edges table for project-level path edge tracking
+const projectPathEdgesTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='project_path_edges'
+`).get();
+
+if (!projectPathEdgesTableExists) {
+  console.log('Creating project_path_edges table...');
+  db.exec(`
+    CREATE TABLE project_path_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      from_campaign_id TEXT NOT NULL,
+      to_campaign_id TEXT NOT NULL,
+      user_count INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (from_campaign_id) REFERENCES campaigns(id),
+      FOREIGN KEY (to_campaign_id) REFERENCES campaigns(id),
+      UNIQUE(project_id, from_campaign_id, to_campaign_id)
+    );
+    CREATE INDEX idx_project_path_edges_project ON project_path_edges(project_id);
+    CREATE INDEX idx_project_path_edges_from ON project_path_edges(project_id, from_campaign_id);
+  `);
+  console.log('project_path_edges table created.');
+} else {
+  console.log('project_path_edges table already exists.');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

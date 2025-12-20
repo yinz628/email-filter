@@ -606,11 +606,44 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div id="path-analysis-container" style="display:none;">
             <div style="margin-bottom:15px;display:flex;justify-content:space-between;align-items:center;">
               <p style="color:#666;margin:0;">基于 Root 的收件人路径流向分析。显示从 Root 开始的营销活动推送路径。</p>
-              <div style="display:flex;gap:8px;">
-                <button class="btn btn-primary btn-sm" onclick="recalculatePathsForProject()">🔄 重新分析路径</button>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span id="path-last-analysis-time" style="font-size:12px;color:#666;"></span>
+                <button class="btn btn-success btn-sm" id="start-analysis-btn" onclick="startProjectAnalysis()">▶️ 开始分析</button>
                 <button class="btn btn-warning btn-sm" onclick="cleanupOldCustomersForProject()">🧹 清理老客户数据</button>
               </div>
             </div>
+            
+            <!-- 分析进度显示区域 (Requirements 9.1, 9.2, 9.3, 9.4, 9.5) -->
+            <div id="analysis-progress-container" style="display:none;margin-bottom:15px;padding:15px;background:#f8f9fa;border:1px solid #ddd;border-radius:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <span id="analysis-phase-text" style="font-weight:500;color:#333;">准备中...</span>
+                <span id="analysis-progress-percent" style="font-weight:bold;color:#4a90d9;">0%</span>
+              </div>
+              <div style="background:#e0e0e0;border-radius:4px;height:8px;overflow:hidden;">
+                <div id="analysis-progress-bar" style="background:linear-gradient(90deg, #4a90d9, #27ae60);height:100%;width:0%;transition:width 0.3s ease;"></div>
+              </div>
+              <div id="analysis-progress-details" style="margin-top:8px;font-size:12px;color:#666;"></div>
+            </div>
+            
+            <!-- 分析完成统计 (Requirements 9.4) -->
+            <div id="analysis-complete-stats" style="display:none;margin-bottom:15px;padding:15px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span style="font-size:20px;">✅</span>
+                <span style="font-weight:500;color:#2e7d32;">分析完成</span>
+              </div>
+              <div id="analysis-complete-details" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px;"></div>
+            </div>
+            
+            <!-- 分析错误显示 (Requirements 9.5) -->
+            <div id="analysis-error-container" style="display:none;margin-bottom:15px;padding:15px;background:#ffebee;border:1px solid #ef9a9a;border-radius:8px;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span style="font-size:20px;">❌</span>
+                <span style="font-weight:500;color:#c62828;">分析失败</span>
+              </div>
+              <div id="analysis-error-message" style="font-size:12px;color:#c62828;"></div>
+              <button class="btn btn-sm btn-primary" onclick="startProjectAnalysis()" style="margin-top:10px;">🔄 重试</button>
+            </div>
+            
             <div id="path-flow-container" style="min-height:300px;border:1px solid #eee;border-radius:6px;padding:16px;">
               加载中...
             </div>
@@ -3518,7 +3551,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function loadRootCampaigns() {
-      if (!currentMerchantId) {
+      // Requirements 2.1, 2.2, 2.3, 2.4: Use project-level API for Root campaign management
+      if (!currentProjectId) {
         const emptyDiv = document.getElementById('root-campaigns-empty');
         if (emptyDiv) {
           emptyDiv.style.display = 'block';
@@ -3547,11 +3581,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           campaignsUrl += '&workerName=' + encodeURIComponent(workerNames[0]);
         }
         
-        // Also fetch root campaigns info to get candidate status
-        let rootUrl = '/api/campaign/merchants/' + currentMerchantId + '/root-campaigns';
-        if (workerNames.length === 1) {
-          rootUrl += '?workerName=' + encodeURIComponent(workerNames[0]);
-        }
+        // Use project-level API for root campaigns (Requirements 2.2, 2.5)
+        const rootUrl = '/api/campaign/projects/' + currentProjectId + '/root-campaigns';
         
         const [campaignsRes, rootRes] = await Promise.all([
           fetch(campaignsUrl, { headers: getHeaders() }),
@@ -3564,15 +3595,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const rootData = await rootRes.json();
         
         const allCampaigns = campaignsData.campaigns || [];
-        const rootCampaignsInfo = rootData.rootCampaigns || [];
+        const projectRootCampaigns = rootData.rootCampaigns || [];
         
-        // Create a map of root campaign info
+        // Create a map of project root campaign info
         const rootInfoMap = new Map();
-        rootCampaignsInfo.forEach(r => {
+        projectRootCampaigns.forEach(r => {
           rootInfoMap.set(r.campaignId, r);
         });
         
-        // Merge campaign data with root info
+        // Merge campaign data with project root info
         const mergedCampaigns = allCampaigns.map(c => {
           const rootInfo = rootInfoMap.get(c.id);
           return {
@@ -3580,16 +3611,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             subject: c.subject,
             totalEmails: c.totalEmails,
             isConfirmed: rootInfo?.isConfirmed || false,
-            isCandidate: rootInfo?.isCandidate || false,
-            candidateReason: rootInfo?.candidateReason,
+            isCandidate: false, // Project-level doesn't have candidates yet
+            candidateReason: null,
             newUserCount: rootInfo?.newUserCount || 0
           };
         });
         
-        // Sort: confirmed first, then candidates, then by email count
+        // Sort: confirmed first, then by email count
         mergedCampaigns.sort((a, b) => {
           if (a.isConfirmed !== b.isConfirmed) return a.isConfirmed ? -1 : 1;
-          if (a.isCandidate !== b.isCandidate) return a.isCandidate ? -1 : 1;
           return b.totalEmails - a.totalEmails;
         });
         
@@ -3618,15 +3648,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           const isRoot = c.isConfirmed;
           const statusBadge = isRoot 
             ? '<span class="root-badge">当前 Root</span>' 
-            : (c.isCandidate ? '<span style="color:#666;font-size:11px;">候选: ' + escapeHtml(c.candidateReason || '系统推荐') + '</span>' : '<span style="color:#999;font-size:11px;">-</span>');
+            : '<span style="color:#999;font-size:11px;">-</span>';
           const actionBtn = isRoot 
             ? '<button class="btn btn-sm btn-danger" onclick="unsetRoot(\\'' + c.campaignId + '\\')">取消选择</button>'
             : '<button class="btn btn-sm btn-primary" onclick="setAsRoot(\\'' + c.campaignId + '\\')">设为 Root</button>';
           
-          return '<tr style="' + (isRoot ? 'background:#e8f5e9;' : (c.isCandidate ? 'background:#fff8e1;' : '')) + '">' +
+          return '<tr style="' + (isRoot ? 'background:#e8f5e9;' : '') + '">' +
             '<td>' + escapeHtml(c.subject || '未知主题') + '</td>' +
             '<td>' + (c.totalEmails || 0) + '</td>' +
-            '<td>' + (c.isConfirmed ? '已确认' : (c.isCandidate ? '候选' : '-')) + '</td>' +
+            '<td>' + (c.isConfirmed ? '已确认' : '-') + '</td>' +
             '<td>' + statusBadge + '</td>' +
             '<td class="actions">' + actionBtn + '</td></tr>';
         }).join('');
@@ -3662,18 +3692,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function setAsRoot(campaignId) {
-      if (!currentMerchantId) {
+      // Requirements 2.1, 2.4: Use project-level API for setting Root campaign
+      if (!currentProjectId) {
         showAlert('请先选择一个项目', 'error');
         return;
       }
       
       try {
-        // First, unset any existing root for this merchant
-        // Then set the new root
-        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/root', {
+        // Use project-level API to set root campaign
+        const res = await fetch('/api/campaign/projects/' + currentProjectId + '/root-campaigns', {
           method: 'POST',
           headers: getHeaders(),
-          body: JSON.stringify({ isRoot: true })
+          body: JSON.stringify({ campaignId: campaignId, isConfirmed: true })
         });
         
         if (res.ok) {
@@ -3691,7 +3721,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function unsetRoot(campaignId) {
-      if (!currentMerchantId) {
+      // Requirements 2.4: Use project-level API for removing Root campaign
+      if (!currentProjectId) {
         showAlert('请先选择一个项目', 'error');
         return;
       }
@@ -3699,10 +3730,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!confirm('确定要取消此活动的 Root 状态吗？')) return;
       
       try {
-        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/root', {
-          method: 'POST',
-          headers: getHeaders(),
-          body: JSON.stringify({ isRoot: false })
+        // Use project-level API to remove root campaign
+        const res = await fetch('/api/campaign/projects/' + currentProjectId + '/root-campaigns/' + campaignId, {
+          method: 'DELETE',
+          headers: getHeaders()
         });
         
         if (res.ok) {
@@ -3897,11 +3928,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     async function loadPathAnalysis() {
+      // Requirements 4.3, 5.2, 5.3: Use project-level API for path analysis
       const noRootDiv = document.getElementById('path-no-root');
       const analysisContainer = document.getElementById('path-analysis-container');
       const flowContainer = document.getElementById('path-flow-container');
+      const lastAnalysisTimeSpan = document.getElementById('path-last-analysis-time');
       
-      if (!currentProjectRootId) {
+      // Check if project has any root campaigns set
+      if (!currentProjectId) {
         noRootDiv.style.display = 'block';
         analysisContainer.style.display = 'none';
         return;
@@ -3912,14 +3946,28 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       flowContainer.innerHTML = '加载中...';
       
       try {
-        // Use project's workerNames for multi-worker filtering (Requirements: 4.1, 4.2, 4.3, 4.4, 4.5)
-        let url = '/api/campaign/merchants/' + currentMerchantId + '/path-analysis';
-        if (currentProjectWorkerNames && currentProjectWorkerNames.length > 0) {
-          url += '?workerNames=' + encodeURIComponent(currentProjectWorkerNames.join(','));
-        }
+        // Use project-level API for path analysis (Requirements: 4.3, 5.2, 5.3)
+        const url = '/api/campaign/projects/' + currentProjectId + '/path-analysis';
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
+        
+        // Update last analysis time display (Requirements 6.1, 7.1)
+        if (lastAnalysisTimeSpan) {
+          if (data.lastAnalysisTime) {
+            lastAnalysisTimeSpan.textContent = '上次分析: ' + new Date(data.lastAnalysisTime).toLocaleString('zh-CN');
+          } else {
+            lastAnalysisTimeSpan.textContent = '尚未分析';
+          }
+        }
+        
+        // Check if there are root campaigns, if not show the no-root message
+        if (!data.rootCampaigns || data.rootCampaigns.length === 0) {
+          noRootDiv.style.display = 'block';
+          analysisContainer.style.display = 'none';
+          return;
+        }
+        
         renderProjectPathAnalysis(data);
       } catch (e) {
         console.error('Error loading path analysis:', e);
@@ -3928,11 +3976,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     function renderProjectPathAnalysis(data) {
+      // Requirements 4.3, 5.2, 5.3: Render project-level path analysis data
       const flowContainer = document.getElementById('path-flow-container');
       
       // Check if data is valid
       if (!data || !data.userStats) {
-        flowContainer.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">暂无路径数据。</div>';
+        flowContainer.innerHTML = '<div style="text-align:center;color:#999;padding:40px;">暂无路径数据。请先运行分析。</div>';
         return;
       }
       
@@ -3960,15 +4009,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       let html = '';
       
-      // User Stats Section
+      // User Stats Section - Handle both project-level and merchant-level formats
+      const totalNewUsers = data.userStats.totalNewUsers || data.userStats.newUsers || 0;
+      const totalEvents = data.userStats.totalEvents || 0;
+      
       html += '<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:15px;margin-bottom:15px;">';
-      html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#1565c0;">📊 用户统计</h4>';
-      html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">';
-      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#1565c0;">' + (data.userStats.totalRecipients || 0) + '</div><div style="font-size:11px;color:#666;">总收件人</div></div>';
-      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#28a745;">' + (data.userStats.newUsers || 0) + '</div><div style="font-size:11px;color:#666;">新用户</div></div>';
-      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#ff9800;">' + (data.userStats.oldUsers || 0) + '</div><div style="font-size:11px;color:#666;">老用户</div></div>';
-      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#9c27b0;">' + (data.userStats.newUserPercentage || 0).toFixed(1) + '%</div><div style="font-size:11px;color:#666;">新用户比例</div></div>';
+      html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#1565c0;">📊 项目用户统计</h4>';
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#28a745;">' + totalNewUsers + '</div><div style="font-size:11px;color:#666;">新用户数</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#1565c0;">' + totalEvents + '</div><div style="font-size:11px;color:#666;">事件总数</div></div>';
+      html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#9c27b0;">' + (data.lastAnalysisTime ? new Date(data.lastAnalysisTime).toLocaleString('zh-CN') : '未分析') + '</div><div style="font-size:11px;color:#666;">上次分析</div></div>';
       html += '</div></div>';
+      
+      // Root Campaigns Section
+      if (data.rootCampaigns && data.rootCampaigns.length > 0) {
+        html += '<div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:8px;padding:15px;margin-bottom:15px;">';
+        html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#e65100;">🎯 项目 Root 活动</h4>';
+        html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+        data.rootCampaigns.forEach(rc => {
+          const badge = rc.isConfirmed ? '<span style="background:#28a745;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:5px;">已确认</span>' : '';
+          html += '<div style="background:#fff;border:1px solid #ffcc80;border-radius:4px;padding:8px 12px;font-size:12px;">';
+          html += escapeHtml(rc.subject.substring(0, 40)) + badge;
+          html += '</div>';
+        });
+        html += '</div></div>';
+      }
       
       // Level Stats Section - Path Nodes (no level limit - show all levels)
       html += '<div style="background:#f3e5f5;border:1px solid #ce93d8;border-radius:8px;padding:15px;margin-bottom:15px;">';
@@ -4007,7 +4072,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           html += '</div>';
         });
       } else {
-        html += '<div style="text-align:center;color:#999;padding:20px;">暂无层级数据</div>';
+        html += '<div style="text-align:center;color:#999;padding:20px;">暂无层级数据。请先运行分析。</div>';
       }
       html += '</div>';
       
@@ -4035,7 +4100,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             isValuable: t.toIsValuable,
             tag: t.toTag,
             userCount: t.userCount,
-            ratio: t.transitionRatio
+            ratio: t.transitionRatio || 0
           });
           allTargets.add(t.toCampaignId);
         });
@@ -4064,14 +4129,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           node.children.sort((a, b) => b.userCount - a.userCount).forEach((child, idx, arr) => {
             const isLast = idx === arr.length - 1;
             const prefix = depth > 0 ? '│'.repeat(depth - 1) + (isLast ? '└' : '├') : '';
-            const bgColor = child.ratio >= 50 ? '#c8e6c9' : (child.ratio >= 20 ? '#fff9c4' : 'transparent');
+            const ratio = child.ratio || 0;
+            const bgColor = ratio >= 50 ? '#c8e6c9' : (ratio >= 20 ? '#fff9c4' : 'transparent');
             const tagMarker = getTreeTagMarker(child.tag, child.isValuable);
             
             nodeHtml += '<div style="padding:3px 0;font-size:12px;font-family:monospace;background:' + bgColor + ';border-radius:3px;margin:2px 0;">';
             nodeHtml += '<span style="color:#999;">' + prefix + '→ </span>';
             nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>' + tagMarker;
             nodeHtml += '<span style="color:#2e7d32;font-weight:bold;margin-left:8px;">' + child.userCount + '人</span>';
-            nodeHtml += '<span style="color:#666;margin-left:5px;">(' + child.ratio.toFixed(1) + '%)</span>';
+            if (ratio > 0) {
+              nodeHtml += '<span style="color:#666;margin-left:5px;">(' + ratio.toFixed(1) + '%)</span>';
+            }
             nodeHtml += '</div>';
             
             // Recursively render children - no depth limit
@@ -4096,11 +4164,244 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         
         html += '<p style="color:#888;font-size:10px;margin-top:8px;margin-bottom:0;">💡 绿色背景=主路径(≥50%) | 黄色背景=次级路径(≥20%) | <span style="color:#27ae60;">★</span>=有价值 | <span style="color:#ffc107;">★★</span>=高价值</p>';
       } else {
-        html += '<div style="text-align:center;color:#999;padding:20px;">暂无转移数据</div>';
+        html += '<div style="text-align:center;color:#999;padding:20px;">暂无转移数据。请先运行分析。</div>';
       }
       html += '</div>';
       
       flowContainer.innerHTML = html;
+    }
+
+    // ============================================
+    // Project Analysis Progress Functions (Requirements 9.1-9.5)
+    // ============================================
+    
+    let analysisEventSource = null;
+    let isAnalyzing = false;
+    
+    /**
+     * Start project path analysis with SSE progress updates
+     * Requirements: 6.1, 7.1, 9.1, 9.2, 9.3, 9.4
+     */
+    async function startProjectAnalysis() {
+      if (!currentProjectId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      if (isAnalyzing) {
+        showAlert('分析正在进行中', 'error');
+        return;
+      }
+      
+      // Reset UI state
+      isAnalyzing = true;
+      updateAnalysisButton(true);
+      hideAnalysisContainers();
+      showAnalysisProgress();
+      
+      try {
+        // Use SSE to receive progress updates
+        const url = '/api/campaign/projects/' + currentProjectId + '/analyze';
+        
+        // Create EventSource for SSE
+        analysisEventSource = new EventSource(url + '?token=' + encodeURIComponent(apiToken));
+        
+        // For POST request with SSE, we need to use fetch with streaming
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || errorData.error || 'Analysis failed');
+        }
+        
+        // Read the SSE stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete SSE events
+          const lines = buffer.split('\\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+          
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              const eventType = line.substring(7).trim();
+              continue;
+            }
+            if (line.startsWith('data: ')) {
+              const dataStr = line.substring(6);
+              try {
+                const data = JSON.parse(dataStr);
+                handleAnalysisEvent(data);
+              } catch (e) {
+                console.error('Error parsing SSE data:', e);
+              }
+            }
+          }
+        }
+        
+      } catch (e) {
+        console.error('Error starting analysis:', e);
+        showAnalysisError(e.message || '分析失败');
+      } finally {
+        isAnalyzing = false;
+        updateAnalysisButton(false);
+        if (analysisEventSource) {
+          analysisEventSource.close();
+          analysisEventSource = null;
+        }
+      }
+    }
+    
+    /**
+     * Handle SSE events from analysis
+     */
+    function handleAnalysisEvent(data) {
+      if (data.phase === 'complete' || data.newUsersAdded !== undefined) {
+        // Analysis complete
+        showAnalysisComplete(data);
+        loadPathAnalysis(); // Reload the path analysis data
+      } else if (data.error) {
+        // Error occurred
+        showAnalysisError(data.error);
+      } else if (data.phase) {
+        // Progress update
+        updateAnalysisProgress(data);
+      }
+    }
+    
+    /**
+     * Update analysis button state
+     */
+    function updateAnalysisButton(analyzing) {
+      const btn = document.getElementById('start-analysis-btn');
+      if (btn) {
+        if (analyzing) {
+          btn.disabled = true;
+          btn.innerHTML = '⏳ 分析中...';
+          btn.classList.remove('btn-success');
+          btn.classList.add('btn-secondary');
+        } else {
+          btn.disabled = false;
+          btn.innerHTML = '▶️ 开始分析';
+          btn.classList.remove('btn-secondary');
+          btn.classList.add('btn-success');
+        }
+      }
+    }
+    
+    /**
+     * Hide all analysis status containers
+     */
+    function hideAnalysisContainers() {
+      const progressContainer = document.getElementById('analysis-progress-container');
+      const completeStats = document.getElementById('analysis-complete-stats');
+      const errorContainer = document.getElementById('analysis-error-container');
+      
+      if (progressContainer) progressContainer.style.display = 'none';
+      if (completeStats) completeStats.style.display = 'none';
+      if (errorContainer) errorContainer.style.display = 'none';
+    }
+    
+    /**
+     * Show analysis progress container
+     * Requirements: 9.1
+     */
+    function showAnalysisProgress() {
+      const container = document.getElementById('analysis-progress-container');
+      if (container) {
+        container.style.display = 'block';
+        updateAnalysisProgress({ phase: 'initializing', progress: 0, message: '准备中...' });
+      }
+    }
+    
+    /**
+     * Update analysis progress display
+     * Requirements: 9.2, 9.3
+     */
+    function updateAnalysisProgress(data) {
+      const phaseText = document.getElementById('analysis-phase-text');
+      const progressPercent = document.getElementById('analysis-progress-percent');
+      const progressBar = document.getElementById('analysis-progress-bar');
+      const progressDetails = document.getElementById('analysis-progress-details');
+      
+      // Phase labels
+      const phaseLabels = {
+        'initializing': '🔄 初始化中...',
+        'processing_root_emails': '📧 处理 Root 邮件...',
+        'building_events': '📝 构建用户事件...',
+        'building_paths': '🔀 构建路径边...',
+        'complete': '✅ 分析完成'
+      };
+      
+      if (phaseText) {
+        phaseText.textContent = data.message || phaseLabels[data.phase] || data.phase;
+      }
+      
+      if (progressPercent) {
+        progressPercent.textContent = (data.progress || 0) + '%';
+      }
+      
+      if (progressBar) {
+        progressBar.style.width = (data.progress || 0) + '%';
+      }
+      
+      if (progressDetails && data.details) {
+        progressDetails.textContent = '已处理: ' + data.details.processed + ' / ' + data.details.total;
+      }
+    }
+    
+    /**
+     * Show analysis complete stats
+     * Requirements: 9.4
+     */
+    function showAnalysisComplete(data) {
+      hideAnalysisContainers();
+      
+      const container = document.getElementById('analysis-complete-stats');
+      const details = document.getElementById('analysis-complete-details');
+      
+      if (container && details) {
+        container.style.display = 'block';
+        
+        const isIncremental = data.isIncremental ? '增量分析' : '全量分析';
+        const duration = data.duration ? (data.duration / 1000).toFixed(1) + '秒' : '-';
+        
+        details.innerHTML = 
+          '<div style="text-align:center;"><div style="font-size:16px;font-weight:bold;color:#2e7d32;">' + (data.newUsersAdded || 0) + '</div><div style="color:#666;">新增用户</div></div>' +
+          '<div style="text-align:center;"><div style="font-size:16px;font-weight:bold;color:#1565c0;">' + (data.eventsCreated || 0) + '</div><div style="color:#666;">新增事件</div></div>' +
+          '<div style="text-align:center;"><div style="font-size:16px;font-weight:bold;color:#7b1fa2;">' + (data.edgesUpdated || 0) + '</div><div style="color:#666;">更新路径</div></div>' +
+          '<div style="text-align:center;"><div style="font-size:16px;font-weight:bold;color:#e65100;">' + duration + '</div><div style="color:#666;">' + isIncremental + '</div></div>';
+        
+        showAlert('分析完成！新增 ' + (data.newUsersAdded || 0) + ' 个用户，' + (data.eventsCreated || 0) + ' 个事件', 'success');
+      }
+    }
+    
+    /**
+     * Show analysis error
+     * Requirements: 9.5
+     */
+    function showAnalysisError(message) {
+      hideAnalysisContainers();
+      
+      const container = document.getElementById('analysis-error-container');
+      const errorMessage = document.getElementById('analysis-error-message');
+      
+      if (container && errorMessage) {
+        container.style.display = 'block';
+        errorMessage.textContent = message || '未知错误';
+      }
+      
+      showAlert('分析失败: ' + (message || '未知错误'), 'error');
     }
 
     async function recalculatePathsForProject() {

@@ -742,3 +742,161 @@ export function toAnalysisProject(row: AnalysisProjectRow): AnalysisProject {
     updatedAt: new Date(row.updated_at),
   };
 }
+
+// ============================================
+// Project-Level Path Analysis Types (项目级路径分析)
+// ============================================
+
+/**
+ * Project Root Campaign - 项目级Root活动设置
+ * 每个项目独立存储Root活动配置
+ * 
+ * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
+ */
+export interface ProjectRootCampaign {
+  campaignId: string;
+  subject: string;
+  isConfirmed: boolean;
+  createdAt: Date;
+}
+
+/**
+ * Project New User - 项目级新用户
+ * 基于项目的Root活动判定的新用户
+ * 
+ * Requirements: 3.1, 3.2, 3.3, 3.4
+ */
+export interface ProjectNewUser {
+  recipient: string;
+  firstRootCampaignId: string;
+  createdAt: Date;
+}
+
+/**
+ * Project User Event - 项目级用户事件
+ * 用户在项目中接收活动的时间序列
+ * 
+ * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
+ */
+export interface ProjectUserEvent {
+  recipient: string;
+  campaignId: string;
+  seq: number;
+  receivedAt: Date;
+}
+
+/**
+ * Project Path Edge - 项目级路径边
+ * 记录从活动A到活动B的用户转移数
+ * 
+ * Requirements: 5.1, 5.2, 5.3, 5.4
+ */
+export interface ProjectPathEdge {
+  fromCampaignId: string;
+  fromSubject: string;
+  toCampaignId: string;
+  toSubject: string;
+  userCount: number;
+}
+
+/**
+ * Project User Stats - 项目级用户统计
+ * 
+ * Requirements: 3.2, 3.3
+ */
+export interface ProjectUserStats {
+  totalNewUsers: number;
+  totalEvents: number;
+}
+
+/**
+ * Analysis Progress Phase - 分析进度阶段
+ * 
+ * Requirements: 9.1, 9.2, 9.3
+ */
+export type AnalysisProgressPhase = 
+  | 'initializing' 
+  | 'processing_root_emails' 
+  | 'building_events' 
+  | 'building_paths' 
+  | 'complete';
+
+/**
+ * Analysis Progress - 分析进度
+ * 用于实时显示分析进度
+ * 
+ * Requirements: 9.1, 9.2, 9.3, 9.4, 9.5
+ */
+export interface AnalysisProgress {
+  phase: AnalysisProgressPhase;
+  progress: number; // 0-100
+  message: string;
+  details?: {
+    processed: number;
+    total: number;
+  };
+}
+
+/**
+ * Analysis Result - 分析结果
+ * 分析完成后返回的统计信息
+ * 
+ * Requirements: 6.7, 7.6
+ */
+export interface AnalysisResult {
+  isIncremental: boolean;
+  newUsersAdded: number;
+  eventsCreated: number;
+  edgesUpdated: number;
+  duration: number; // milliseconds
+}
+
+/**
+ * Project Path Analysis Result - 项目路径分析结果
+ * 完整的项目级路径分析数据
+ * 
+ * Requirements: 所有
+ */
+export interface ProjectPathAnalysisResult {
+  projectId: string;
+  userStats: ProjectUserStats;
+  levelStats: CampaignLevelStats[];
+  transitions: CampaignTransition[];
+  lastAnalysisTime: Date | null;
+}
+
+/**
+ * DTO for setting project Root campaign
+ * 
+ * Requirements: 2.1, 2.4
+ */
+export interface SetProjectRootCampaignDTO {
+  campaignId: string;
+  isConfirmed: boolean;
+}
+
+/**
+ * Project Root Campaigns Response
+ * API响应格式
+ * 
+ * Requirements: 2.2
+ */
+export interface ProjectRootCampaignsResponse {
+  projectId: string;
+  rootCampaigns: ProjectRootCampaign[];
+}
+
+/**
+ * Project Path Analysis Response
+ * API响应格式
+ * 
+ * Requirements: 所有
+ */
+export interface ProjectPathAnalysisResponse {
+  projectId: string;
+  userStats: ProjectUserStats;
+  levelStats: CampaignLevelStats[];
+  transitions: CampaignTransition[];
+  lastAnalysisTime: string | null;
+}
+

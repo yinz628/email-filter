@@ -1,7 +1,7 @@
 # Cloudflare Email Worker Configuration for geymail.com
 # Deploy with: npx wrangler deploy --config wrangler.geymail.toml
 
-name = "email-filter-forwarder-dinglingling321"
+name = "email-filter-forwarder-evoamazon991"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
@@ -9,9 +9,9 @@ compatibility_date = "2024-01-01"
 [vars]
 VPS_API_URL = "https://hkg2-aki.feimails.com/api/webhook/email"
 VPS_API_TOKEN = "nature123"
-DEFAULT_FORWARD_TO = "dinglingling321@gmail.com"
+DEFAULT_FORWARD_TO = "evoamazon991@gmail.com"
 # Unique worker name - must match the name registered in VPS API
-WORKER_NAME = "emailmacys.com_worker"
+WORKER_NAME = "emailmacys.space_worker"
 # Enable debug logging (true/false) - set to false in production
 DEBUG_LOGGING = "true"
 

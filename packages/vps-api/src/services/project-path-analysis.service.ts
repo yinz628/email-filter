@@ -6,7 +6,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { BatchProcessor, type BatchProgress } from '../utils/batch-processor';
+import { BatchProcessor, type BatchProgress } from '../utils/batch-processor.js';
 
 // ============================================
 // Type Definitions

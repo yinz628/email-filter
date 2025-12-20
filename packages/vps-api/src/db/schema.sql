@@ -185,3 +185,102 @@ CREATE TABLE IF NOT EXISTS recipient_paths (
 
 CREATE INDEX IF NOT EXISTS idx_recipient_paths_merchant_recipient ON recipient_paths(merchant_id, recipient);
 CREATE INDEX IF NOT EXISTS idx_recipient_paths_campaign ON recipient_paths(campaign_id);
+
+-- 分析项目表
+CREATE TABLE IF NOT EXISTS analysis_projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  merchant_id TEXT NOT NULL,
+  worker_name TEXT NOT NULL,
+  worker_names TEXT,                      -- 多Worker支持（JSON数组）
+  status TEXT DEFAULT 'active',
+  note TEXT,
+  last_analysis_time TEXT,                -- 上次分析时间
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (merchant_id) REFERENCES merchants(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_projects_merchant ON analysis_projects(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_projects_worker ON analysis_projects(worker_name);
+CREATE INDEX IF NOT EXISTS idx_analysis_projects_status ON analysis_projects(status);
+
+-- 项目级Root活动表
+CREATE TABLE IF NOT EXISTS project_root_campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  is_confirmed INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+  UNIQUE(project_id, campaign_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_root_campaigns_project ON project_root_campaigns(project_id);
+
+-- 项目级新用户表
+CREATE TABLE IF NOT EXISTS project_new_users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  first_root_campaign_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (first_root_campaign_id) REFERENCES campaigns(id),
+  UNIQUE(project_id, recipient)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_new_users_project ON project_new_users(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_new_users_recipient ON project_new_users(recipient);
+
+-- 项目级用户事件流表
+CREATE TABLE IF NOT EXISTS project_user_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,                   -- 序列号，从1开始递增
+  received_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+  UNIQUE(project_id, recipient, campaign_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_user_events_project ON project_user_events(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_user_events_recipient ON project_user_events(project_id, recipient);
+CREATE INDEX IF NOT EXISTS idx_project_user_events_seq ON project_user_events(project_id, recipient, seq);
+
+-- 项目级路径边表
+CREATE TABLE IF NOT EXISTS project_path_edges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  from_campaign_id TEXT NOT NULL,
+  to_campaign_id TEXT NOT NULL,
+  user_count INTEGER DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (from_campaign_id) REFERENCES campaigns(id),
+  FOREIGN KEY (to_campaign_id) REFERENCES campaigns(id),
+  UNIQUE(project_id, from_campaign_id, to_campaign_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_path_edges_project ON project_path_edges(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_path_edges_from ON project_path_edges(project_id, from_campaign_id);
+
+-- 项目级活动标记表 (用于项目隔离的价值标记)
+CREATE TABLE IF NOT EXISTS project_campaign_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  tag INTEGER DEFAULT 0,                  -- 0=未标记, 1=高价值, 2=重要营销, 3=一般营销, 4=可忽略
+  tag_note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+  UNIQUE(project_id, campaign_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_campaign_tags_project ON project_campaign_tags(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_campaign_tags_campaign ON project_campaign_tags(campaign_id);

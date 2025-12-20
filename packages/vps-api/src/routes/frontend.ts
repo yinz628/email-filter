@@ -4216,7 +4216,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         // For POST request with SSE, we need to use fetch with streaming
         const response = await fetch(url, {
           method: 'POST',
-          headers: getHeaders()
+          headers: getHeaders(),
+          body: JSON.stringify({})
         });
         
         if (!response.ok) {

@@ -3490,6 +3490,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const statusLabels = { active: '进行中', completed: '已完成', archived: '已归档' };
       document.getElementById('project-info-status').textContent = statusLabels[project.status] || project.status;
       
+      // Clear all tab content to prevent showing stale data from previous project
+      clearAllTabContent();
+      
       // Show project detail section
       document.getElementById('campaign-project-detail-section').style.display = 'block';
       
@@ -3498,6 +3501,37 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       // Switch to default tab (root) and load data
       switchProjectTab('root');
+    }
+    
+    // Clear all tab content when switching projects
+    function clearAllTabContent() {
+      // Clear Root tab
+      const rootEmpty = document.getElementById('root-campaigns-empty');
+      if (rootEmpty) {
+        rootEmpty.style.display = 'block';
+        rootEmpty.textContent = '加载中...';
+      }
+      const rootCurrent = document.getElementById('root-current');
+      if (rootCurrent) rootCurrent.style.display = 'none';
+      
+      // Clear Campaigns tab
+      const campaignsTable = document.getElementById('project-campaigns-table');
+      if (campaignsTable) campaignsTable.innerHTML = '';
+      const campaignsEmpty = document.getElementById('project-campaigns-empty');
+      if (campaignsEmpty) {
+        campaignsEmpty.style.display = 'block';
+        campaignsEmpty.textContent = '加载中...';
+      }
+      
+      // Clear Path Analysis tab - IMPORTANT for project isolation
+      const pathNoRoot = document.getElementById('path-no-root');
+      if (pathNoRoot) pathNoRoot.style.display = 'none';
+      const pathContainer = document.getElementById('path-analysis-container');
+      if (pathContainer) pathContainer.style.display = 'none';
+      const flowContainer = document.getElementById('path-flow-container');
+      if (flowContainer) flowContainer.innerHTML = '加载中...';
+      const lastAnalysisTime = document.getElementById('path-last-analysis-time');
+      if (lastAnalysisTime) lastAnalysisTime.textContent = '';
     }
 
     function closeProjectDetail() {

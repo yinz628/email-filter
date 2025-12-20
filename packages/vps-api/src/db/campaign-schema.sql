@@ -145,3 +145,21 @@ CREATE TABLE IF NOT EXISTS project_path_edges (
 
 CREATE INDEX IF NOT EXISTS idx_project_path_edges_project ON project_path_edges(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_path_edges_from ON project_path_edges(project_id, from_campaign_id);
+
+
+-- 项目级活动标记表 (用于项目隔离的价值标记)
+CREATE TABLE IF NOT EXISTS project_campaign_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL,
+  tag INTEGER DEFAULT 0,                  -- 0=未标记, 1=高价值, 2=重要营销, 3=一般营销, 4=可忽略
+  tag_note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES analysis_projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+  UNIQUE(project_id, campaign_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_campaign_tags_project ON project_campaign_tags(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_campaign_tags_campaign ON project_campaign_tags(campaign_id);

@@ -2026,4 +2026,123 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  // ============================================
+  // Project Campaign Tag Routes (项目级活动标记)
+  // ============================================
+
+  /**
+   * GET /api/campaign/projects/:id/campaigns
+   * Get campaigns for a project with project-level tags merged
+   * 
+   * This endpoint returns campaigns with project-specific tag overrides,
+   * ensuring data isolation between projects.
+   */
+  fastify.get('/projects/:id/campaigns', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      // Get campaigns with project-level tags
+      const campaigns = pathService.getProjectCampaignsWithTags(
+        request.params.id,
+        project.merchantId,
+        project.workerNames
+      );
+
+      return reply.send({
+        projectId: request.params.id,
+        campaigns,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching project campaigns');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * POST /api/campaign/projects/:id/campaigns/:campaignId/tag
+   * Set campaign tag for a project (project-level isolation)
+   * 
+   * This creates a project-specific tag override, ensuring that
+   * tagging a campaign in one project doesn't affect other projects.
+   */
+  fastify.post('/projects/:id/campaigns/:campaignId/tag', async (
+    request: FastifyRequest<{ Params: { id: string; campaignId: string } }>,
+    reply: FastifyReply
+  ) => {
+    const body = request.body as Record<string, unknown>;
+    
+    if (typeof body?.tag !== 'number' || body.tag < 0 || body.tag > 4) {
+      return reply.status(400).send({ 
+        error: 'Invalid request', 
+        message: 'tag must be a number between 0 and 4' 
+      });
+    }
+
+    try {
+      const db = getDatabase();
+      const pathService = new ProjectPathAnalysisService(db);
+
+      const result = pathService.setProjectCampaignTag(
+        request.params.id,
+        request.params.campaignId,
+        body.tag,
+        typeof body.note === 'string' ? body.note : undefined
+      );
+
+      if (!result) {
+        return reply.status(404).send({ error: 'Project or campaign not found' });
+      }
+
+      return reply.send(result);
+    } catch (error: any) {
+      if (error.message?.includes('Invalid tag')) {
+        return reply.status(400).send({ error: 'Invalid request', message: error.message });
+      }
+      request.log.error(error, 'Error setting project campaign tag');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * DELETE /api/campaign/projects/:id/campaigns/:campaignId/tag
+   * Remove campaign tag for a project
+   * 
+   * This removes the project-specific tag override, reverting to
+   * the campaign's default tag (or no tag).
+   */
+  fastify.delete('/projects/:id/campaigns/:campaignId/tag', async (
+    request: FastifyRequest<{ Params: { id: string; campaignId: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const pathService = new ProjectPathAnalysisService(db);
+
+      const deleted = pathService.removeProjectCampaignTag(
+        request.params.id,
+        request.params.campaignId
+      );
+
+      if (!deleted) {
+        return reply.status(404).send({ error: 'Project campaign tag not found' });
+      }
+
+      return reply.send({ success: true });
+    } catch (error) {
+      request.log.error(error, 'Error removing project campaign tag');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

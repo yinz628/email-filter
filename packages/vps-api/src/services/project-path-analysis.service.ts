@@ -1168,4 +1168,273 @@ export class ProjectPathAnalysisService {
       stmt.run(projectId);
     }
   }
+
+  // ============================================
+  // Project Campaign Tag Methods (项目级活动标记)
+  // ============================================
+
+  /**
+   * Set campaign tag for a project
+   * This creates project-level isolation for campaign tags
+   * 
+   * @param projectId - Project ID
+   * @param campaignId - Campaign ID
+   * @param tag - Tag value (0-4)
+   * @param note - Optional note
+   * @returns Updated tag info or null if project/campaign not found
+   */
+  setProjectCampaignTag(
+    projectId: string,
+    campaignId: string,
+    tag: number,
+    note?: string
+  ): ProjectCampaignTag | null {
+    // Validate project exists
+    const projectStmt = this.db.prepare('SELECT id FROM analysis_projects WHERE id = ?');
+    const project = projectStmt.get(projectId);
+    if (!project) {
+      return null;
+    }
+
+    // Validate campaign exists
+    const campaignStmt = this.db.prepare('SELECT id, subject FROM campaigns WHERE id = ?');
+    const campaign = campaignStmt.get(campaignId) as { id: string; subject: string } | undefined;
+    if (!campaign) {
+      return null;
+    }
+
+    // Validate tag value
+    if (tag < 0 || tag > 4) {
+      throw new Error('Invalid tag value. Must be 0-4.');
+    }
+
+    const now = new Date().toISOString();
+
+    // Upsert project campaign tag
+    const upsertStmt = this.db.prepare(`
+      INSERT INTO project_campaign_tags (project_id, campaign_id, tag, tag_note, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, campaign_id) DO UPDATE SET
+        tag = excluded.tag,
+        tag_note = excluded.tag_note,
+        updated_at = excluded.updated_at
+    `);
+
+    upsertStmt.run(projectId, campaignId, tag, note ?? null, now, now);
+
+    return {
+      projectId,
+      campaignId,
+      subject: campaign.subject,
+      tag,
+      tagNote: note,
+      isValuable: tag === 1 || tag === 2,
+      updatedAt: new Date(now),
+    };
+  }
+
+  /**
+   * Get campaign tag for a project
+   * Returns project-level tag if exists, otherwise returns null
+   * 
+   * @param projectId - Project ID
+   * @param campaignId - Campaign ID
+   * @returns Project campaign tag or null
+   */
+  getProjectCampaignTag(projectId: string, campaignId: string): ProjectCampaignTag | null {
+    const stmt = this.db.prepare(`
+      SELECT pct.*, c.subject
+      FROM project_campaign_tags pct
+      JOIN campaigns c ON pct.campaign_id = c.id
+      WHERE pct.project_id = ? AND pct.campaign_id = ?
+    `);
+
+    const row = stmt.get(projectId, campaignId) as ProjectCampaignTagRow | undefined;
+    if (!row) {
+      return null;
+    }
+
+    return {
+      projectId: row.project_id,
+      campaignId: row.campaign_id,
+      subject: row.subject,
+      tag: row.tag,
+      tagNote: row.tag_note ?? undefined,
+      isValuable: row.tag === 1 || row.tag === 2,
+      updatedAt: new Date(row.updated_at),
+    };
+  }
+
+  /**
+   * Get all campaign tags for a project
+   * 
+   * @param projectId - Project ID
+   * @returns Array of project campaign tags
+   */
+  getProjectCampaignTags(projectId: string): ProjectCampaignTag[] {
+    const stmt = this.db.prepare(`
+      SELECT pct.*, c.subject
+      FROM project_campaign_tags pct
+      JOIN campaigns c ON pct.campaign_id = c.id
+      WHERE pct.project_id = ?
+      ORDER BY pct.updated_at DESC
+    `);
+
+    const rows = stmt.all(projectId) as ProjectCampaignTagRow[];
+    return rows.map(row => ({
+      projectId: row.project_id,
+      campaignId: row.campaign_id,
+      subject: row.subject,
+      tag: row.tag,
+      tagNote: row.tag_note ?? undefined,
+      isValuable: row.tag === 1 || row.tag === 2,
+      updatedAt: new Date(row.updated_at),
+    }));
+  }
+
+  /**
+   * Remove campaign tag for a project
+   * 
+   * @param projectId - Project ID
+   * @param campaignId - Campaign ID
+   * @returns true if deleted, false if not found
+   */
+  removeProjectCampaignTag(projectId: string, campaignId: string): boolean {
+    const stmt = this.db.prepare(`
+      DELETE FROM project_campaign_tags
+      WHERE project_id = ? AND campaign_id = ?
+    `);
+
+    const result = stmt.run(projectId, campaignId);
+    return result.changes > 0;
+  }
+
+  /**
+   * Get campaigns with project-level tags merged
+   * Returns campaigns with project-specific tag overrides
+   * 
+   * @param projectId - Project ID
+   * @param merchantId - Merchant ID
+   * @param workerNames - Optional worker names filter
+   * @returns Array of campaigns with project tags
+   */
+  getProjectCampaignsWithTags(
+    projectId: string,
+    merchantId: string,
+    workerNames?: string[]
+  ): ProjectCampaignWithTag[] {
+    // Get all project campaign tags
+    const tagsMap = new Map<string, ProjectCampaignTag>();
+    const tags = this.getProjectCampaignTags(projectId);
+    for (const tag of tags) {
+      tagsMap.set(tag.campaignId, tag);
+    }
+
+    // Build query for campaigns
+    let query: string;
+    const params: (string | number)[] = [merchantId];
+
+    if (workerNames && workerNames.length > 0) {
+      const placeholders = workerNames.map(() => '?').join(', ');
+      query = `
+        SELECT 
+          c.id, c.merchant_id, c.subject, c.tag, c.tag_note,
+          c.first_seen_at, c.last_seen_at, c.created_at, c.updated_at,
+          COUNT(ce.id) as total_emails,
+          COUNT(DISTINCT ce.recipient) as unique_recipients
+        FROM campaigns c
+        INNER JOIN campaign_emails ce ON c.id = ce.campaign_id
+        WHERE c.merchant_id = ? AND ce.worker_name IN (${placeholders})
+        GROUP BY c.id
+        ORDER BY total_emails DESC
+      `;
+      params.push(...workerNames);
+    } else {
+      query = `
+        SELECT * FROM campaigns
+        WHERE merchant_id = ?
+        ORDER BY total_emails DESC
+      `;
+    }
+
+    const stmt = this.db.prepare(query);
+    const rows = stmt.all(...params) as CampaignRow[];
+
+    return rows.map(row => {
+      const projectTag = tagsMap.get(row.id);
+      
+      // Use project-level tag if exists, otherwise use campaign-level tag
+      const effectiveTag = projectTag ? projectTag.tag : (row.tag ?? 0);
+      const effectiveTagNote = projectTag ? projectTag.tagNote : (row.tag_note ?? undefined);
+      
+      return {
+        id: row.id,
+        merchantId: row.merchant_id,
+        subject: row.subject,
+        tag: effectiveTag,
+        tagNote: effectiveTagNote,
+        isValuable: effectiveTag === 1 || effectiveTag === 2,
+        totalEmails: row.total_emails,
+        uniqueRecipients: row.unique_recipients,
+        firstSeenAt: new Date(row.first_seen_at),
+        lastSeenAt: new Date(row.last_seen_at),
+        hasProjectTag: !!projectTag,
+      };
+    });
+  }
+}
+
+/**
+ * Project Campaign Tag - 项目级活动标记
+ */
+export interface ProjectCampaignTag {
+  projectId: string;
+  campaignId: string;
+  subject: string;
+  tag: number;
+  tagNote?: string;
+  isValuable: boolean;
+  updatedAt: Date;
+}
+
+/**
+ * Project Campaign With Tag - 带项目标记的活动
+ */
+export interface ProjectCampaignWithTag {
+  id: string;
+  merchantId: string;
+  subject: string;
+  tag: number;
+  tagNote?: string;
+  isValuable: boolean;
+  totalEmails: number;
+  uniqueRecipients: number;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  hasProjectTag: boolean;
+}
+
+interface ProjectCampaignTagRow {
+  id: number;
+  project_id: string;
+  campaign_id: string;
+  tag: number;
+  tag_note: string | null;
+  created_at: string;
+  updated_at: string;
+  subject: string;
+}
+
+interface CampaignRow {
+  id: string;
+  merchant_id: string;
+  subject: string;
+  tag: number | null;
+  tag_note: string | null;
+  total_emails: number;
+  unique_recipients: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
 }

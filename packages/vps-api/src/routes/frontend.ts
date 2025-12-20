@@ -3764,18 +3764,21 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       try {
         const valueFilter = document.getElementById('campaign-valuable-filter')?.value || '';
-        // Use project's workerNames for multi-worker support
-        const workerNames = currentProjectWorkerNames && currentProjectWorkerNames.length > 0 
-          ? currentProjectWorkerNames 
-          : (currentProjectWorkerName ? [currentProjectWorkerName] : []);
-        let url = '/api/campaign/campaigns?merchantId=' + currentMerchantId;
-        if (valueFilter) url += '&tag=' + valueFilter;
-        if (workerNames.length > 0) url += '&workerNames=' + encodeURIComponent(workerNames.join(','));
+        
+        // Use project-level API for campaigns with project-specific tags
+        // This ensures data isolation between projects
+        let url = '/api/campaign/projects/' + currentProjectId + '/campaigns';
         
         const res = await fetch(url, { headers: getHeaders() });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         campaignsData = data.campaigns || [];
+        
+        // Apply value filter client-side (since project API returns all campaigns)
+        if (valueFilter) {
+          const filterTag = parseInt(valueFilter, 10);
+          campaignsData = campaignsData.filter(c => c.tag === filterTag);
+        }
         
         if (campaignsData.length === 0) {
           emptyDiv.textContent = '该商户暂无营销活动数据。';
@@ -3892,7 +3895,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function tagCampaignFromDetail(campaignId, tagValue) {
       try {
-        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/tag', {
+        // Use project-level API for tag isolation
+        const res = await fetch('/api/campaign/projects/' + currentProjectId + '/campaigns/' + campaignId + '/tag', {
           method: 'POST',
           headers: getHeaders(),
           body: JSON.stringify({ tag: tagValue })
@@ -3912,7 +3916,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function tagCampaign(campaignId, tagValue) {
       try {
-        const res = await fetch('/api/campaign/campaigns/' + campaignId + '/tag', {
+        // Use project-level API for tag isolation
+        const res = await fetch('/api/campaign/projects/' + currentProjectId + '/campaigns/' + campaignId + '/tag', {
           method: 'POST',
           headers: getHeaders(),
           body: JSON.stringify({ tag: tagValue })

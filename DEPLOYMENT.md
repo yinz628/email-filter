@@ -260,8 +260,10 @@ sudo chown -R $USER:$USER /opt/email-filter
 ```bash
 cd /opt/email-filter
 
-# 上传项目文件（从本地）
-# scp -r ./* user@your-vps:/opt/email-filter/
+# 使用 Git 克隆项目
+git clone https://github.com/your-repo/email-filter.git .
+# 或切换到特定分支
+git checkout feature/database-consolidation
 
 # 安装编译工具（用于编译原生模块）
 sudo apt-get install -y build-essential python3
@@ -281,10 +283,15 @@ pnpm build
 cd ../vps-api
 pnpm build
 
+# 重要：复制 schema.sql 到 dist 目录（TypeScript 编译不会复制 SQL 文件）
+cp src/db/schema.sql dist/db/
+
 # 构建 vps-admin（可选）
 cd ../vps-admin
 pnpm build
 ```
+
+**注意**：每次重新构建 vps-api 后，都需要重新复制 `schema.sql` 文件到 `dist/db/` 目录。
 
 #### 5. 配置环境变量
 
@@ -943,13 +950,36 @@ sudo systemctl restart email-filter-api
 
 **解决方案**:
 ```bash
-# 检查目录权限
+# 1. 创建数据目录（如果不存在）
+sudo mkdir -p /opt/email-filter/data
+
+# 2. 检查目录权限
 ls -la /opt/email-filter/data/
 
-# 修复权限
+# 3. 修复权限
 sudo chown -R www-data:www-data /opt/email-filter/data/
-sudo chmod 750 /opt/email-filter/data/
+sudo chmod 755 /opt/email-filter/data/
+
+# 4. 重启服务
+sudo systemctl restart email-filter-api
 ```
+
+### 6. Schema 文件缺失问题
+
+**症状**: `ENOENT: no such file or directory, open '.../dist/db/schema.sql'`
+
+**原因**: TypeScript 编译时不会复制 `.sql` 文件到 `dist` 目录
+
+**解决方案**:
+```bash
+# 复制 schema.sql 到 dist 目录
+cp /opt/email-filter/packages/vps-api/src/db/schema.sql /opt/email-filter/packages/vps-api/dist/db/
+
+# 重启服务
+sudo systemctl restart email-filter-api
+```
+
+**预防措施**: 每次重新构建项目后，记得执行上述复制命令。
 
 ### 数据库常见问题
 
@@ -1113,6 +1143,55 @@ sudo certbot --nginx -d your-vps-domain.com --force-renewal
 1. 确保 Cloudflare 代理已启用（橙色云朵）
 2. 在 Cloudflare DNS 中添加 AAAA 记录
 3. Worker 通过 Cloudflare 代理访问，会自动处理 IPv4/IPv6 转换
+
+### 7. Systemd 服务启动失败排查
+
+**症状**: 服务状态显示 `activating (auto-restart)` 或 `exit-code`
+
+**排查步骤**:
+```bash
+# 1. 查看详细日志
+sudo journalctl -u email-filter-api -n 50 --no-pager
+
+# 2. 常见错误及解决方案：
+
+# 错误：status=200/CHDIR
+# 原因：WorkingDirectory 路径错误
+# 解决：确认路径为 /opt/email-filter/packages/vps-api
+
+# 错误：SQLITE_CANTOPEN
+# 原因：数据目录不存在或权限不足
+# 解决：创建目录并设置权限（见上方"数据库权限问题"）
+
+# 错误：ENOENT schema.sql
+# 原因：schema.sql 未复制到 dist 目录
+# 解决：复制 SQL 文件（见上方"Schema 文件缺失问题"）
+
+# 错误：better_sqlite3.node 找不到
+# 原因：原生模块未编译
+# 解决：运行 npm rebuild better-sqlite3
+```
+
+### 8. 完整部署检查清单
+
+部署完成后，按以下顺序检查：
+
+```bash
+# 1. 检查数据目录
+ls -la /opt/email-filter/data/
+
+# 2. 检查 schema.sql 是否存在
+ls -la /opt/email-filter/packages/vps-api/dist/db/schema.sql
+
+# 3. 检查服务状态
+sudo systemctl status email-filter-api
+
+# 4. 检查日志
+sudo journalctl -u email-filter-api -n 20 --no-pager
+
+# 5. 测试健康检查
+curl http://localhost:3000/health
+```
 
 ---
 

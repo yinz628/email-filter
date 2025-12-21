@@ -28,15 +28,13 @@ COPY packages/vps-api/package.json ./packages/vps-api/
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Force rebuild better-sqlite3 from source in pnpm store
-RUN SQLITE_DIR=$(find /app/node_modules/.pnpm -type d -name "better-sqlite3" | grep "node_modules/better-sqlite3$" | head -1) && \
-    echo "Found better-sqlite3 at: $SQLITE_DIR" && \
-    cd "$SQLITE_DIR" && \
-    npm run build-release && \
-    ls -la build/Release/
-
-# Verify better-sqlite3 is working (use pnpm exec to resolve module)
-RUN cd /app/packages/vps-api && pnpm exec node -e "require('better-sqlite3'); console.log('✓ better-sqlite3 compiled successfully')"
+# Try to use prebuilt better-sqlite3, rebuild only if needed
+RUN cd /app/packages/vps-api && \
+    (pnpm exec node -e "require('better-sqlite3'); console.log('✓ better-sqlite3 prebuilt works')" 2>/dev/null) || \
+    (echo "Prebuilt failed, rebuilding from source..." && \
+     SQLITE_DIR=$(find /app/node_modules/.pnpm -type d -name "better-sqlite3" | grep "node_modules/better-sqlite3$" | head -1) && \
+     cd "$SQLITE_DIR" && npm run build-release && \
+     cd /app/packages/vps-api && pnpm exec node -e "require('better-sqlite3'); console.log('✓ better-sqlite3 compiled successfully')")
 
 # Copy source files
 COPY tsconfig.json ./

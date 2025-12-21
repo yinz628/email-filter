@@ -52,6 +52,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .status { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
     .status-enabled { background: #d4edda; color: #155724; }
     .status-disabled { background: #f8d7da; color: #721c24; }
+    .status-warning { background: #fff3cd; color: #856404; }
     .category { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
     .category-whitelist { background: #d4edda; color: #155724; }
     .category-blacklist { background: #f8d7da; color: #721c24; }
@@ -1938,6 +1939,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       // Worker online, check VPS connection
       if (data.vpsConnection) {
         if (data.vpsConnection.success) {
+          // Check if connected to this VPS
+          if (data.connectedToMe === false) {
+            const workerVps = data.workerVpsUrl ? data.workerVpsUrl.replace('/api/webhook/email', '').replace('https://', '') : '其他VPS';
+            return '<span class="status status-warning" title="Worker连接到: ' + escapeHtml(workerVps) + '">🟡 连接到其他VPS</span>';
+          }
           return '<span class="status status-enabled">🟢 正常 (' + data.vpsConnection.latency + 'ms)</span>';
         } else {
           return '<span class="status status-disabled" title="' + escapeHtml(data.vpsConnection.error || '') + '">🟡 Worker在线，VPS连接失败</span>';

@@ -50,10 +50,9 @@ RUN pnpm --filter @email-filter/shared build && \
 # Copy schema.sql to dist
 RUN cp packages/vps-api/src/db/schema.sql packages/vps-api/dist/db/
 
-# Create data directory
-RUN mkdir -p /app/data && chown -R node:node /app/data
+# Create data directory with correct permissions
+RUN mkdir -p /app/data && chown -R node:node /app/data && chmod 755 /app/data
 
-USER node
 WORKDIR /app/packages/vps-api
 
 ENV NODE_ENV=production
@@ -63,4 +62,6 @@ ENV DB_PATH=/app/data/filter.db
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+# Use root to ensure we can write to mounted volume, then switch to node
+USER root
+CMD ["sh", "-c", "chown -R node:node /app/data && chmod 755 /app/data && su node -c 'node dist/index.js'"]

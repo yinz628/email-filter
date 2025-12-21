@@ -465,6 +465,13 @@ CREATE TABLE IF NOT EXISTS ratio_states (
   FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
 );
 
+-- 清理配置表
+CREATE TABLE IF NOT EXISTS cleanup_config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- 比例告警表
 CREATE TABLE IF NOT EXISTS ratio_alerts (
   id TEXT PRIMARY KEY,

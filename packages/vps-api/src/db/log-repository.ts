@@ -219,6 +219,16 @@ export class LogRepository {
   }
 
   /**
+   * Delete logs older than specified date
+   * Used for cleanup service
+   */
+  deleteOlderThan(date: Date): number {
+    const stmt = this.db.prepare('DELETE FROM system_logs WHERE created_at < ?');
+    const result = stmt.run(date.toISOString());
+    return result.changes;
+  }
+
+  /**
    * Get top blocked rules by count in recent time period
    * @param hours - Time period in hours (default: 24)
    * @param limit - Max number of results (default: 5)

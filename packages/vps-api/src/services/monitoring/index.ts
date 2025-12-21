@@ -52,3 +52,7 @@ export type { CleanupResult, FullCleanupResult } from './cleanup.service.js';
 // Scheduler Service
 export { SchedulerService, DEFAULT_SCHEDULER_CONFIG } from './scheduler.service.js';
 export type { SchedulerConfig } from './scheduler.service.js';
+
+// Cleanup Stats Service
+export { CleanupStatsService } from '../cleanup-stats.service.js';
+export type { TableStats, CleanupStats } from '../cleanup-stats.service.js';

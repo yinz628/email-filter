@@ -1018,6 +1018,112 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <div id="telegram-status" style="margin-top:10px;"></div>
       </div>
+      <div class="card" id="cleanup-settings-card">
+        <h2>🗑️ 数据清理设置</h2>
+        <p style="color:#666;margin-bottom:15px">配置各类数据的自动清理策略和保留时间。</p>
+        
+        <!-- Storage Statistics -->
+        <div id="cleanup-stats-section" style="margin-bottom:20px;padding:15px;background:#f8f9fa;border-radius:6px;">
+          <h3 style="font-size:14px;margin-bottom:12px;color:#333;">📊 存储统计</h3>
+          <div id="cleanup-stats-loading" style="color:#666;font-size:13px;">加载中...</div>
+          <div id="cleanup-stats-content" style="display:none;">
+            <table style="font-size:13px;">
+              <thead>
+                <tr>
+                  <th style="padding:6px 10px;">数据表</th>
+                  <th style="padding:6px 10px;">记录数</th>
+                  <th style="padding:6px 10px;">最早记录</th>
+                </tr>
+              </thead>
+              <tbody id="cleanup-stats-table"></tbody>
+            </table>
+            <div style="margin-top:10px;font-size:12px;color:#666;">
+              <span>总记录数: <strong id="cleanup-total-records">-</strong></span>
+              <span style="margin-left:15px;">上次清理: <strong id="cleanup-last-time">-</strong></span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Retention Settings -->
+        <div style="margin-bottom:20px;">
+          <h3 style="font-size:14px;margin-bottom:12px;color:#333;">⏱️ 保留时间设置</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>系统日志保留天数 (1-365)</label>
+              <input type="number" id="cleanup-system-logs-days" min="1" max="365" placeholder="30">
+            </div>
+            <div class="form-group">
+              <label>命中日志保留小时数 (24-168)</label>
+              <input type="number" id="cleanup-hit-logs-hours" min="24" max="168" placeholder="72">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>告警保留天数 (7-365)</label>
+              <input type="number" id="cleanup-alerts-days" min="7" max="365" placeholder="90">
+            </div>
+            <div class="form-group">
+              <label>心跳日志保留天数 (1-90)</label>
+              <input type="number" id="cleanup-heartbeat-days" min="1" max="90" placeholder="30">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>主题追踪保留小时数 (1-72)</label>
+              <input type="number" id="cleanup-subject-tracker-hours" min="1" max="72" placeholder="24">
+            </div>
+            <div class="form-group">
+              <label>清理执行时间 (0-23时)</label>
+              <select id="cleanup-hour">
+                <option value="0">0:00</option>
+                <option value="1">1:00</option>
+                <option value="2">2:00</option>
+                <option value="3">3:00</option>
+                <option value="4">4:00</option>
+                <option value="5">5:00</option>
+                <option value="6">6:00</option>
+                <option value="7">7:00</option>
+                <option value="8">8:00</option>
+                <option value="9">9:00</option>
+                <option value="10">10:00</option>
+                <option value="11">11:00</option>
+                <option value="12">12:00</option>
+                <option value="13">13:00</option>
+                <option value="14">14:00</option>
+                <option value="15">15:00</option>
+                <option value="16">16:00</option>
+                <option value="17">17:00</option>
+                <option value="18">18:00</option>
+                <option value="19">19:00</option>
+                <option value="20">20:00</option>
+                <option value="21">21:00</option>
+                <option value="22">22:00</option>
+                <option value="23">23:00</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>自动清理</label>
+            <select id="cleanup-auto-enabled">
+              <option value="true">启用</option>
+              <option value="false">禁用</option>
+            </select>
+          </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn btn-primary" onclick="saveCleanupConfig()">保存设置</button>
+          <button class="btn btn-warning" onclick="runManualCleanup()" id="cleanup-run-btn">立即清理</button>
+          <span id="cleanup-status" style="font-size:13px;"></span>
+        </div>
+        
+        <!-- Cleanup Result -->
+        <div id="cleanup-result" style="display:none;margin-top:15px;padding:15px;background:#d4edda;border-radius:6px;">
+          <h4 style="font-size:14px;margin-bottom:10px;color:#155724;">✅ 清理完成</h4>
+          <div id="cleanup-result-content" style="font-size:13px;color:#155724;"></div>
+        </div>
+      </div>
       <div class="card" id="legacy-settings-card" style="display:none;">
         <h2>🔑 API Token 设置（旧版兼容）</h2>
         <p style="color:#666;margin-bottom:15px">如果您需要使用 API Token 认证，可以在这里配置。</p>
@@ -2716,6 +2822,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function loadSettings() {
       document.getElementById('api-token').value = apiToken;
       loadTelegramConfig();
+      loadCleanupConfig();
       // Update settings tab with account info and user settings
       updateSettingsTab();
     }
@@ -2802,6 +2909,210 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       } catch (e) {
         statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 发送失败</span>';
+      }
+    }
+
+    // ============================================
+    // Data Cleanup Settings
+    // Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 5.1, 5.2, 5.3, 6.1, 6.2, 6.3
+    // ============================================
+    
+    const TABLE_NAME_MAP = {
+      'system_logs': '系统日志',
+      'hit_logs': '命中日志',
+      'alerts': '告警记录',
+      'heartbeat_logs': '心跳日志',
+      'email_subject_tracker': '主题追踪'
+    };
+    
+    /**
+     * Load cleanup configuration and statistics
+     * Requirements: 1.1, 1.2, 6.1, 6.2
+     */
+    async function loadCleanupConfig() {
+      if (!apiToken) return;
+      try {
+        // Load configuration
+        const configRes = await fetch('/api/admin/cleanup/config', { headers: getHeaders() });
+        if (configRes.ok) {
+          const data = await configRes.json();
+          if (data.success && data.config) {
+            const config = data.config;
+            document.getElementById('cleanup-system-logs-days').value = config.systemLogsRetentionDays;
+            document.getElementById('cleanup-hit-logs-hours').value = config.hitLogsRetentionHours;
+            document.getElementById('cleanup-alerts-days').value = config.alertsRetentionDays;
+            document.getElementById('cleanup-heartbeat-days').value = config.heartbeatLogsRetentionDays;
+            document.getElementById('cleanup-subject-tracker-hours').value = config.subjectTrackerRetentionHours;
+            document.getElementById('cleanup-hour').value = config.cleanupHour;
+            document.getElementById('cleanup-auto-enabled').value = config.autoCleanupEnabled ? 'true' : 'false';
+          }
+        }
+        
+        // Load statistics
+        await loadCleanupStats();
+      } catch (e) {
+        console.error('Failed to load cleanup config', e);
+      }
+    }
+    
+    /**
+     * Load cleanup statistics
+     * Requirements: 6.1, 6.2
+     */
+    async function loadCleanupStats() {
+      if (!apiToken) return;
+      const loadingEl = document.getElementById('cleanup-stats-loading');
+      const contentEl = document.getElementById('cleanup-stats-content');
+      
+      try {
+        const res = await fetch('/api/admin/cleanup/stats', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.stats) {
+            renderCleanupStats(data.stats);
+            loadingEl.style.display = 'none';
+            contentEl.style.display = 'block';
+          }
+        }
+      } catch (e) {
+        loadingEl.textContent = '加载失败';
+        console.error('Failed to load cleanup stats', e);
+      }
+    }
+    
+    /**
+     * Render cleanup statistics table
+     * Requirements: 6.1, 6.2
+     */
+    function renderCleanupStats(stats) {
+      const tbody = document.getElementById('cleanup-stats-table');
+      tbody.innerHTML = stats.tables.map(table => {
+        const displayName = TABLE_NAME_MAP[table.tableName] || table.tableName;
+        const oldestDate = table.oldestRecordDate 
+          ? new Date(table.oldestRecordDate).toLocaleDateString('zh-CN') 
+          : '-';
+        return '<tr>' +
+          '<td style="padding:6px 10px;">' + escapeHtml(displayName) + '</td>' +
+          '<td style="padding:6px 10px;">' + table.recordCount.toLocaleString() + '</td>' +
+          '<td style="padding:6px 10px;">' + oldestDate + '</td>' +
+        '</tr>';
+      }).join('');
+      
+      document.getElementById('cleanup-total-records').textContent = stats.totalRecords.toLocaleString();
+      document.getElementById('cleanup-last-time').textContent = stats.lastCleanupAt 
+        ? new Date(stats.lastCleanupAt).toLocaleString('zh-CN')
+        : '从未';
+    }
+    
+    /**
+     * Save cleanup configuration
+     * Requirements: 1.3, 1.4, 1.5
+     */
+    async function saveCleanupConfig() {
+      if (!apiToken) return;
+      
+      const config = {
+        systemLogsRetentionDays: parseInt(document.getElementById('cleanup-system-logs-days').value, 10),
+        hitLogsRetentionHours: parseInt(document.getElementById('cleanup-hit-logs-hours').value, 10),
+        alertsRetentionDays: parseInt(document.getElementById('cleanup-alerts-days').value, 10),
+        heartbeatLogsRetentionDays: parseInt(document.getElementById('cleanup-heartbeat-days').value, 10),
+        subjectTrackerRetentionHours: parseInt(document.getElementById('cleanup-subject-tracker-hours').value, 10),
+        cleanupHour: parseInt(document.getElementById('cleanup-hour').value, 10),
+        autoCleanupEnabled: document.getElementById('cleanup-auto-enabled').value === 'true'
+      };
+      
+      // Client-side validation
+      const errors = [];
+      if (config.systemLogsRetentionDays < 1 || config.systemLogsRetentionDays > 365) {
+        errors.push('系统日志保留天数必须在 1-365 之间');
+      }
+      if (config.hitLogsRetentionHours < 24 || config.hitLogsRetentionHours > 168) {
+        errors.push('命中日志保留小时数必须在 24-168 之间');
+      }
+      if (config.alertsRetentionDays < 7 || config.alertsRetentionDays > 365) {
+        errors.push('告警保留天数必须在 7-365 之间');
+      }
+      if (config.heartbeatLogsRetentionDays < 1 || config.heartbeatLogsRetentionDays > 90) {
+        errors.push('心跳日志保留天数必须在 1-90 之间');
+      }
+      if (config.subjectTrackerRetentionHours < 1 || config.subjectTrackerRetentionHours > 72) {
+        errors.push('主题追踪保留小时数必须在 1-72 之间');
+      }
+      
+      if (errors.length > 0) {
+        showAlert(errors.join('；'), 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/admin/cleanup/config', {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify(config)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert('清理设置已保存');
+          // Refresh statistics after save
+          await loadCleanupStats();
+        } else {
+          showAlert(data.error || '保存失败', 'error');
+        }
+      } catch (e) {
+        showAlert('保存失败', 'error');
+      }
+    }
+    
+    /**
+     * Run manual cleanup
+     * Requirements: 5.1, 5.2, 5.3
+     */
+    async function runManualCleanup() {
+      if (!apiToken) return;
+      
+      if (!confirm('确定要立即执行数据清理吗？此操作将删除超过保留期限的数据。')) {
+        return;
+      }
+      
+      const statusEl = document.getElementById('cleanup-status');
+      const runBtn = document.getElementById('cleanup-run-btn');
+      const resultEl = document.getElementById('cleanup-result');
+      const resultContentEl = document.getElementById('cleanup-result-content');
+      
+      // Show progress indicator
+      statusEl.innerHTML = '<span style="color:#666;">⏳ 清理中...</span>';
+      runBtn.disabled = true;
+      resultEl.style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/admin/cleanup/run', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        const data = await res.json();
+        
+        if (data.success && data.result) {
+          const result = data.result;
+          // Display cleanup results summary
+          resultContentEl.innerHTML = 
+            '<div>系统日志: 删除 ' + result.systemLogs.deletedCount + ' 条</div>' +
+            '<div>命中日志: 删除 ' + result.hitLogs.deletedCount + ' 条</div>' +
+            '<div>告警记录: 删除 ' + result.alerts.deletedCount + ' 条</div>' +
+            '<div>心跳日志: 删除 ' + result.heartbeatLogs.deletedCount + ' 条</div>' +
+            '<div>主题追踪: 删除 ' + result.subjectTracker.deletedCount + ' 条</div>' +
+            '<div style="margin-top:8px;font-weight:600;">总计删除 ' + result.totalDeleted + ' 条记录，耗时 ' + result.durationMs + 'ms</div>';
+          resultEl.style.display = 'block';
+          statusEl.innerHTML = '<span style="color:#27ae60;">✅ 清理完成</span>';
+          
+          // Refresh statistics after cleanup
+          await loadCleanupStats();
+        } else {
+          statusEl.innerHTML = '<span style="color:#e74c3c;">❌ ' + escapeHtml(data.error || '清理失败') + '</span>';
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 清理失败</span>';
+      } finally {
+        runBtn.disabled = false;
       }
     }
 

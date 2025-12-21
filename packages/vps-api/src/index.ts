@@ -20,12 +20,23 @@ import {
   authRoutes,
   userSettingsRoutes,
   usersRoutes,
+  cleanupSettingsRoutes,
 } from './routes/index.js';
 import { SchedulerService } from './services/monitoring/index.js';
 import { UserService } from './services/user.service.js';
 
 // Scheduler instance
 let scheduler: SchedulerService | null = null;
+
+/**
+ * Get the scheduler instance
+ * Used by routes to trigger configuration reload
+ * 
+ * Requirement: 4.2 (data-cleanup-settings)
+ */
+export function getScheduler(): SchedulerService | null {
+  return scheduler;
+}
 
 // Start server
 async function start() {
@@ -103,6 +114,7 @@ async function start() {
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(userSettingsRoutes, { prefix: '/api/user' });
     await fastify.register(usersRoutes, { prefix: '/api/admin/users' });
+    await fastify.register(cleanupSettingsRoutes, { prefix: '/api/admin/cleanup' });
 
     // Initialize and start scheduler for monitoring tasks
     // - Heartbeat checks every 5 minutes (Requirement 4.1)

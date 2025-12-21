@@ -47,6 +47,8 @@ services:
       - ADMIN_DB_PATH=/app/data/admin.db
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - SESSION_SECRET=${SESSION_SECRET}
+      - VPS_API_URL=http://api:3000
+      - API_TOKEN=${API_TOKEN}
     restart: unless-stopped
     networks:
       - email-filter-network

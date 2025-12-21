@@ -82,7 +82,7 @@ sudo mkdir -p /opt/email-filter
 cd /opt/email-filter
 
 # 克隆项目
-git clone -b feature/database-consolidation https://github.com/yinz628/email-filter.git
+git clone -b feature/backup-restore https://github.com/yinz628/email-filter.git
 ```
 
 #### 步骤 3：配置环境变量
@@ -129,6 +129,12 @@ docker compose up -d
 # 查看启动日志
 docker compose logs -f
 ```
+# 清理后重新构建
+docker system prune -af
+
+
+docker compose down
+
 
 #### 步骤 5：验证部署
 

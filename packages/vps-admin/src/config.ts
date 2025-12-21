@@ -15,6 +15,8 @@ export interface Config {
   adminPassword: string;
   sessionSecret: string;
   nodeEnv: string;
+  vpsApiUrl: string;
+  apiToken: string;
 }
 
 export const config: Config = {
@@ -24,4 +26,6 @@ export const config: Config = {
   adminPassword: process.env.ADMIN_PASSWORD || 'admin',
   sessionSecret: process.env.SESSION_SECRET || 'dev-session-secret',
   nodeEnv: process.env.NODE_ENV || 'development',
+  vpsApiUrl: process.env.VPS_API_URL || 'http://localhost:3000',
+  apiToken: process.env.API_TOKEN || '',
 };

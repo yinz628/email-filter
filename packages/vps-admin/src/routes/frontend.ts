@@ -44,6 +44,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .alert { padding: 12px; border-radius: 4px; margin-bottom: 15px; }
     .alert-success { background: #d4edda; color: #155724; }
     .alert-error { background: #f8d7da; color: #721c24; }
+    .stats-row { display: flex; gap: 20px; margin-bottom: 15px; }
+    .stat-item { background: #f8f9fa; padding: 15px; border-radius: 8px; flex: 1; text-align: center; }
+    .stat-value { font-size: 24px; font-weight: bold; color: #333; }
+    .stat-label { font-size: 12px; color: #666; margin-top: 5px; }
+    .btn-warning { background: #f39c12; color: white; }
+    .btn-sm { padding: 4px 8px; font-size: 12px; }
+    .file-input-wrapper { position: relative; overflow: hidden; display: inline-block; }
+    .file-input-wrapper input[type=file] { position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .warning-text { color: #e74c3c; font-size: 14px; margin: 10px 0; }
   </style>
 </head>
 <body>
@@ -84,6 +93,37 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <tbody id="workers-table"></tbody>
         </table>
       </div>
+
+      <div class="card">
+        <h2>💾 数据库备份管理</h2>
+        <div id="backup-alert-container"></div>
+        <div class="stats-row">
+          <div class="stat-item">
+            <div class="stat-value" id="backup-count">0</div>
+            <div class="stat-label">备份数量</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="backup-total-size">0 B</div>
+            <div class="stat-label">总大小</div>
+          </div>
+        </div>
+        <div style="margin-bottom:15px; display:flex; gap:10px;">
+          <button class="btn btn-success" onclick="createBackup()" id="create-backup-btn">+ 创建备份</button>
+          <button class="btn btn-warning" onclick="showRestoreModal()">📥 恢复数据库</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>文件名</th>
+              <th>大小</th>
+              <th>创建时间</th>
+              <th>类型</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="backups-table"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -111,6 +151,23 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <div id="restore-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📥 恢复数据库</h3>
+        <button class="modal-close" onclick="hideModal('restore-modal')">&times;</button>
+      </div>
+      <div class="warning-text">⚠️ 警告：恢复操作将覆盖当前数据库，此操作不可逆！系统会自动创建恢复前备份。</div>
+      <form id="restore-form">
+        <div class="form-group">
+          <label>选择备份文件 (.db.gz)</label>
+          <input type="file" id="restore-file" accept=".gz" required>
+        </div>
+        <button type="submit" class="btn btn-danger" id="restore-btn">确认恢复</button>
+      </form>
+    </div>
+  </div>
+
   <script>
     const API_BASE = '/api';
     let isLoggedIn = false;
@@ -123,6 +180,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         if (data.authenticated) {
           showAdminPage();
           loadWorkers();
+          loadBackups();
         }
       } catch (e) {}
     }
@@ -141,6 +199,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         if (res.ok) {
           showAdminPage();
           loadWorkers();
+          loadBackups();
         } else {
           showError('login-error', '密码错误');
         }
@@ -275,6 +334,157 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         showAlert('删除失败', 'error');
       }
     }
+
+    // Format file size
+    function formatSize(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Show backup alert
+    function showBackupAlert(msg, type = 'success') {
+      const container = document.getElementById('backup-alert-container');
+      container.innerHTML = '<div class="alert alert-' + type + '">' + msg + '</div>';
+      setTimeout(() => container.innerHTML = '', 3000);
+    }
+
+    // Load backups
+    async function loadBackups() {
+      try {
+        const res = await fetch(API_BASE + '/backup/list', { credentials: 'include' });
+        const data = await res.json();
+        if (data.success) {
+          renderBackups(data.backups || []);
+          document.getElementById('backup-count').textContent = data.totalCount || 0;
+          document.getElementById('backup-total-size').textContent = formatSize(data.totalSize || 0);
+        } else {
+          showBackupAlert(data.error || '加载备份列表失败', 'error');
+        }
+      } catch (e) {
+        showBackupAlert('加载备份列表失败', 'error');
+      }
+    }
+
+    function renderBackups(backups) {
+      const tbody = document.getElementById('backups-table');
+      if (backups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999">暂无备份</td></tr>';
+        return;
+      }
+      tbody.innerHTML = backups.map(b => {
+        const date = new Date(b.createdAt).toLocaleString('zh-CN');
+        const typeLabel = b.isPreRestore ? '<span class="status status-inactive">恢复前</span>' : '<span class="status status-active">手动</span>';
+        return '<tr>' +
+          '<td>' + escapeHtml(b.filename) + '</td>' +
+          '<td>' + formatSize(b.size) + '</td>' +
+          '<td>' + date + '</td>' +
+          '<td>' + typeLabel + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-primary btn-sm" onclick="downloadBackup(\\'' + escapeHtml(b.filename) + '\\')">下载</button>' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteBackup(\\'' + escapeHtml(b.filename) + '\\')">删除</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    // Create backup
+    async function createBackup() {
+      const btn = document.getElementById('create-backup-btn');
+      btn.disabled = true;
+      btn.textContent = '创建中...';
+      try {
+        const res = await fetch(API_BASE + '/backup/create', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (data.success) {
+          showBackupAlert('备份创建成功: ' + data.backup.filename);
+          loadBackups();
+        } else {
+          showBackupAlert(data.error || '创建备份失败', 'error');
+        }
+      } catch (e) {
+        showBackupAlert('创建备份失败', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '+ 创建备份';
+      }
+    }
+
+    // Download backup
+    function downloadBackup(filename) {
+      window.location.href = API_BASE + '/backup/download/' + encodeURIComponent(filename);
+    }
+
+    // Delete backup
+    async function deleteBackup(filename) {
+      if (!confirm('确定要删除备份 ' + filename + ' 吗？')) return;
+      try {
+        const res = await fetch(API_BASE + '/backup/' + encodeURIComponent(filename), {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (data.success) {
+          showBackupAlert('备份删除成功');
+          loadBackups();
+        } else {
+          showBackupAlert(data.error || '删除备份失败', 'error');
+        }
+      } catch (e) {
+        showBackupAlert('删除备份失败', 'error');
+      }
+    }
+
+    // Show restore modal
+    function showRestoreModal() {
+      document.getElementById('restore-modal').classList.remove('hidden');
+    }
+
+    // Restore form submit
+    document.getElementById('restore-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fileInput = document.getElementById('restore-file');
+      const file = fileInput.files[0];
+      if (!file) {
+        showBackupAlert('请选择备份文件', 'error');
+        return;
+      }
+      if (!confirm('确定要恢复数据库吗？当前数据将被覆盖！')) return;
+      
+      const btn = document.getElementById('restore-btn');
+      btn.disabled = true;
+      btn.textContent = '恢复中...';
+      
+      try {
+        const buffer = await file.arrayBuffer();
+        const res = await fetch(API_BASE + '/backup/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: buffer,
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (data.success) {
+          hideModal('restore-modal');
+          fileInput.value = '';
+          showBackupAlert('数据库恢复成功！恢复前备份: ' + data.preRestoreBackup);
+          loadBackups();
+          loadWorkers();
+        } else {
+          showBackupAlert(data.error || '恢复失败', 'error');
+        }
+      } catch (e) {
+        showBackupAlert('恢复失败', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '确认恢复';
+      }
+    });
 
     // Init
     checkAuth();

@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import { config } from './config.js';
 import { initializeDatabase, closeDatabase } from './db/index.js';
-import { authRoutes, instanceRoutes, statsRoutes, frontendRoutes } from './routes/index.js';
+import { authRoutes, instanceRoutes, statsRoutes, frontendRoutes, backupProxyRoutes } from './routes/index.js';
 import { authMiddleware } from './middleware/auth.js';
 
 const app = Fastify({
@@ -37,6 +37,7 @@ app.register(async (protectedApp) => {
   
   protectedApp.register(instanceRoutes, { prefix: '/instances' });
   protectedApp.register(statsRoutes, { prefix: '/stats' });
+  protectedApp.register(backupProxyRoutes, { prefix: '/backup' });
 }, { prefix: '/api' });
 
 // Graceful shutdown

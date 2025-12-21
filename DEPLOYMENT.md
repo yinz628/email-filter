@@ -463,19 +463,29 @@ sqlite3 /opt/email-filter/data/filter.db < src/db/schema.sql
 
 当系统升级需要修改数据库结构时，需要运行迁移脚本。迁移脚本是幂等的，可以安全地多次运行。
 
-#### 运行迁移
+#### 安装 sqlite3 工具（可选但推荐）
 
 ```bash
-# Docker 部署
-docker compose exec api npx tsx src/db/migrate.ts
+sudo apt-get install -y sqlite3
+```
 
-# Systemd 部署
+#### 运行迁移
+
+**重要**：迁移脚本需要知道数据库文件位置，必须通过环境变量 `DB_PATH` 指定：
+
+```bash
+# Systemd 部署 - 必须指定 DB_PATH
 cd /opt/email-filter/packages/vps-api
-npx tsx src/db/migrate.ts
+DB_PATH=/opt/email-filter/data/filter.db npx tsx src/db/migrate.ts
 
 # 或者使用 node（需要先构建）
-node dist/db/migrate.js
+DB_PATH=/opt/email-filter/data/filter.db node dist/db/migrate.js
+
+# Docker 部署
+docker compose exec api npx tsx src/db/migrate.ts
 ```
+
+**注意**：如果不指定 `DB_PATH`，迁移脚本会报错 "Database file not found"。
 
 #### 迁移输出示例
 

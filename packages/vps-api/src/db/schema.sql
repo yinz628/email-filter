@@ -389,3 +389,83 @@ CREATE TABLE IF NOT EXISTS token_blacklist (
 
 CREATE INDEX IF NOT EXISTS idx_token_blacklist_hash ON token_blacklist(token_hash);
 CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);
+
+-- ============================================
+-- Email Realtime Monitoring Schema
+-- ============================================
+
+-- 信号状态表
+CREATE TABLE IF NOT EXISTS signal_states (
+  rule_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'DEAD',
+  last_seen_at TEXT,
+  count_1h INTEGER NOT NULL DEFAULT 0,
+  count_12h INTEGER NOT NULL DEFAULT 0,
+  count_24h INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
+);
+
+-- 告警渠道配置表
+CREATE TABLE IF NOT EXISTS alert_channels (
+  id TEXT PRIMARY KEY,
+  channel_type TEXT NOT NULL,
+  config TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- ============================================
+-- Ratio Monitoring Tables
+-- ============================================
+
+-- 比例监控规则表（漏斗监控）
+CREATE TABLE IF NOT EXISTS ratio_monitors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  first_rule_id TEXT NOT NULL,
+  second_rule_id TEXT NOT NULL,
+  steps TEXT NOT NULL DEFAULT '[]',
+  threshold_percent REAL NOT NULL,
+  time_window TEXT NOT NULL DEFAULT '24h',
+  worker_scope TEXT NOT NULL DEFAULT 'global',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (first_rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE,
+  FOREIGN KEY (second_rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ratio_monitors_tag ON ratio_monitors(tag);
+CREATE INDEX IF NOT EXISTS idx_ratio_monitors_enabled ON ratio_monitors(enabled);
+CREATE INDEX IF NOT EXISTS idx_ratio_monitors_worker_scope ON ratio_monitors(worker_scope);
+
+-- 比例状态表
+CREATE TABLE IF NOT EXISTS ratio_states (
+  monitor_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'HEALTHY',
+  first_count INTEGER NOT NULL DEFAULT 0,
+  second_count INTEGER NOT NULL DEFAULT 0,
+  current_ratio REAL NOT NULL DEFAULT 0,
+  steps_data TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
+);
+
+-- 商户Worker状态表
+CREATE TABLE IF NOT EXISTS merchant_worker_status (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  merchant_id TEXT NOT NULL,
+  worker_name TEXT NOT NULL,
+  display_name TEXT,
+  analysis_status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE,
+  UNIQUE(merchant_id, worker_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_merchant_worker_status_merchant ON merchant_worker_status(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_merchant_worker_status_worker ON merchant_worker_status(worker_name);

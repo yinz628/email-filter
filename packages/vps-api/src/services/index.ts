@@ -13,3 +13,6 @@ export * from './analysis-queue.service.js';
 export * from './async-task-processor.js';
 export * from './rule-cache.js';
 export * from './rule-cache.instance.js';
+export * from './user.service.js';
+export * from './auth.service.js';
+export * from './user-settings.service.js';

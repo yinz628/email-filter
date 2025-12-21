@@ -17,8 +17,12 @@ import {
   ratioMonitoringRoutes,
   telegramRoutes,
   adminRoutes,
+  authRoutes,
+  userSettingsRoutes,
+  usersRoutes,
 } from './routes/index.js';
 import { SchedulerService } from './services/monitoring/index.js';
+import { UserService } from './services/user.service.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -76,6 +80,9 @@ await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
 await fastify.register(ratioMonitoringRoutes, { prefix: '/api/monitoring/ratio' });
 await fastify.register(telegramRoutes, { prefix: '/api/telegram' });
 await fastify.register(adminRoutes, { prefix: '/api/admin' });
+await fastify.register(authRoutes, { prefix: '/api/auth' });
+await fastify.register(userSettingsRoutes, { prefix: '/api/user' });
+await fastify.register(usersRoutes, { prefix: '/api/admin/users' });
 
 // Scheduler instance
 let scheduler: SchedulerService | null = null;
@@ -87,6 +94,15 @@ async function start() {
     console.log('Initializing database...');
     initializeDatabase();
     console.log('Database initialized successfully');
+
+    // Initialize UserService and ensure default admin exists
+    // Requirements: 1.4, 1.5
+    console.log('Checking for default admin user...');
+    const userService = new UserService(getDatabase());
+    await userService.ensureDefaultAdmin(
+      config.defaultAdminUsername,
+      config.defaultAdminPassword
+    );
 
     // Initialize and start scheduler for monitoring tasks
     // - Heartbeat checks every 5 minutes (Requirement 4.1)

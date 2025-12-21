@@ -17,3 +17,6 @@ export { monitoringRoutes } from './monitoring.js';
 export { ratioMonitoringRoutes } from './ratio-monitoring.js';
 export { telegramRoutes } from './telegram.js';
 export { adminRoutes } from './admin.js';
+export { authRoutes } from './auth.js';
+export { userSettingsRoutes } from './user-settings.js';
+export { usersRoutes } from './users.js';

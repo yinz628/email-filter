@@ -15,6 +15,14 @@ export interface Config {
   apiToken: string;
   defaultForwardTo: string;
   nodeEnv: string;
+  /** JWT secret key for signing tokens - MUST be changed in production */
+  jwtSecret: string;
+  /** JWT token expiration time (e.g., '24h', '7d') */
+  jwtExpiry: string;
+  /** Default admin username - used when no users exist in database */
+  defaultAdminUsername: string;
+  /** Default admin password - MUST be changed in production */
+  defaultAdminPassword: string;
   // Scheduler configuration
   scheduler: {
     /** Cron expression for heartbeat checks (default: every 5 minutes) */
@@ -37,6 +45,12 @@ export const config: Config = {
   apiToken: process.env.API_TOKEN || 'dev-token',
   defaultForwardTo: process.env.DEFAULT_FORWARD_TO || '',
   nodeEnv: process.env.NODE_ENV || 'development',
+  // JWT Authentication Configuration
+  jwtSecret: process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production',
+  jwtExpiry: process.env.JWT_EXPIRY || '24h',
+  // Default Admin Credentials (used on first startup when no users exist)
+  defaultAdminUsername: process.env.DEFAULT_ADMIN_USERNAME || 'admin',
+  defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
   scheduler: {
     heartbeatCron: process.env.HEARTBEAT_CRON || '*/5 * * * *',
     cleanupCron: process.env.CLEANUP_CRON || '0 3 * * *',

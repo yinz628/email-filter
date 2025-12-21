@@ -27,3 +27,6 @@ export * from './campaign.js';
 
 // Monitoring types
 export * from './monitoring.js';
+
+// Authentication and user types
+export * from './auth.js';

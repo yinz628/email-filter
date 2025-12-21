@@ -108,13 +108,64 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .path-node-stats { font-size: 12px; color: #666; }
     .btn-warning { background: #ffc107; color: #212529; border: 1px solid #ffc107; }
     .btn-warning:hover { background: #e0a800; border-color: #d39e00; }
+    /* Login page styles */
+    .login-container { max-width: 400px; margin: 100px auto; padding: 20px; }
+    .login-card { background: white; border-radius: 12px; padding: 32px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+    .login-card h2 { text-align: center; margin-bottom: 24px; color: #1a1a2e; font-size: 24px; }
+    .login-card .logo { text-align: center; font-size: 48px; margin-bottom: 16px; }
+    .login-error { background: #f8d7da; color: #721c24; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; display: none; }
+    /* User info in header */
+    .user-info { display: flex; align-items: center; gap: 12px; }
+    .user-info .username { font-size: 14px; color: rgba(255,255,255,0.9); }
+    .user-info .role-badge { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+    .btn-logout { background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+    .btn-logout:hover { background: rgba(255,255,255,0.2); }
+    /* Admin tab styles */
+    .tab.admin-only { background: #fff3cd; color: #856404; }
+    .tab.admin-only.active { background: #ffc107; color: #212529; }
   </style>
 </head>
 <body>
-  <div class="container">
+  <!-- Login Page -->
+  <div id="login-page" class="login-container">
+    <div class="login-card">
+      <div class="logo">📧</div>
+      <h2>Email Filter 管理面板</h2>
+      <div id="login-error" class="login-error"></div>
+      <form id="login-form">
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="login-username" required placeholder="输入用户名" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="password" id="login-password" required placeholder="输入密码" autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:12px;font-size:14px;">登录</button>
+      </form>
+      <div style="margin-top:16px;text-align:center;">
+        <p style="color:#999;font-size:12px;">或使用 API Token 登录（兼容旧版）</p>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="showLegacyLogin()" style="margin-top:8px;">使用 API Token</button>
+      </div>
+      <div id="legacy-login-section" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid #eee;">
+        <div class="form-group">
+          <label>API Token</label>
+          <input type="password" id="login-api-token" placeholder="输入 API Token">
+        </div>
+        <button type="button" class="btn btn-secondary" style="width:100%;" onclick="loginWithApiToken()">使用 Token 登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App (hidden until logged in) -->
+  <div id="main-app" class="container hidden">
     <div class="header">
       <h1>📧 Email Filter 管理面板</h1>
-      <span id="api-status">API Token: 需要配置</span>
+      <div class="user-info">
+        <span class="username" id="current-username">-</span>
+        <span class="role-badge" id="current-role">-</span>
+        <button class="btn-logout" onclick="logout()">退出登录</button>
+      </div>
     </div>
 
     <div class="tabs">
@@ -126,6 +177,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('campaign')">营销分析</button>
       <button class="tab" onclick="showTab('monitoring')">📡 信号监控</button>
       <button class="tab" onclick="showTab('settings')">设置</button>
+      <button class="tab admin-only hidden" id="users-tab-btn" onclick="showTab('users')">👥 用户管理</button>
     </div>
 
     <div id="alert-container"></div>
@@ -896,12 +948,40 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content hidden">
       <div class="card">
-        <h2>API 设置</h2>
-        <div class="form-group">
-          <label>API Token</label>
-          <input type="password" id="api-token" placeholder="输入 API Token">
+        <h2>👤 账户信息</h2>
+        <div id="account-info" style="margin-bottom:15px;">
+          <p><strong>用户名:</strong> <span id="settings-username">-</span></p>
+          <p><strong>角色:</strong> <span id="settings-role">-</span></p>
+          <p><strong>认证方式:</strong> <span id="settings-auth-type">-</span></p>
         </div>
-        <button class="btn btn-primary" onclick="saveToken()">保存 Token</button>
+        <div id="legacy-auth-warning" class="alert alert-error" style="display:none;">
+          ⚠️ 您正在使用旧版 API Token 认证。建议使用用户名/密码登录以获得完整功能（如设置同步）。
+        </div>
+      </div>
+      <div class="card" id="user-settings-card">
+        <h2>⚙️ 用户设置</h2>
+        <p style="color:#666;margin-bottom:15px">这些设置会自动同步到服务器，在任何设备上登录都可以使用。</p>
+        <div class="form-group">
+          <label>默认 Worker 实例</label>
+          <select id="setting-default-worker" onchange="saveUserSetting('defaultWorker', this.value)">
+            <option value="">不指定</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>日志自动刷新</label>
+          <select id="setting-logs-auto-refresh" onchange="saveUserSetting('logsAutoRefresh', this.value === 'true')">
+            <option value="false">禁用</option>
+            <option value="true">启用</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>统计自动刷新</label>
+          <select id="setting-stats-auto-refresh" onchange="saveUserSetting('statsAutoRefresh', this.value === 'true')">
+            <option value="false">禁用</option>
+            <option value="true">启用</option>
+          </select>
+        </div>
+        <div id="settings-sync-status" style="margin-top:10px;font-size:12px;color:#666;"></div>
       </div>
       <div class="card">
         <h2>默认转发配置</h2>
@@ -936,6 +1016,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-secondary" onclick="testTelegramConfig()">发送测试消息</button>
         </div>
         <div id="telegram-status" style="margin-top:10px;"></div>
+      </div>
+      <div class="card" id="legacy-settings-card" style="display:none;">
+        <h2>🔑 API Token 设置（旧版兼容）</h2>
+        <p style="color:#666;margin-bottom:15px">如果您需要使用 API Token 认证，可以在这里配置。</p>
+        <div class="form-group">
+          <label>API Token</label>
+          <input type="password" id="api-token" placeholder="输入 API Token">
+        </div>
+        <button class="btn btn-primary" onclick="saveToken()">保存 Token</button>
+      </div>
+    </div>
+
+    <!-- Users Tab (Admin Only) -->
+    <div id="users-tab" class="tab-content hidden">
+      <div class="card">
+        <h2>👥 用户管理</h2>
+        <p style="color:#666;margin-bottom:15px">管理系统用户账户。只有管理员可以访问此页面。</p>
+        <button class="btn btn-primary" onclick="showModal('add-user-modal')" style="margin-bottom:15px">+ 添加用户</button>
+        <table>
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>角色</th>
+              <th>创建时间</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="users-table"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -1569,6 +1679,119 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Add User Modal (Admin Only) -->
+  <div id="add-user-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>添加用户</h3>
+        <button class="modal-close" onclick="hideModal('add-user-modal')">&times;</button>
+      </div>
+      <form id="add-user-form">
+        <div class="form-group">
+          <label>用户名 *</label>
+          <input type="text" id="user-username" required placeholder="至少3个字符" minlength="3">
+        </div>
+        <div class="form-group">
+          <label>密码 *</label>
+          <input type="password" id="user-password" required placeholder="至少6个字符" minlength="6">
+        </div>
+        <div class="form-group">
+          <label>角色 *</label>
+          <select id="user-role" required>
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-success">创建</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit User Modal (Admin Only) -->
+  <div id="edit-user-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>编辑用户</h3>
+        <button class="modal-close" onclick="hideModal('edit-user-modal')">&times;</button>
+      </div>
+      <form id="edit-user-form">
+        <input type="hidden" id="edit-user-id">
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="edit-user-username" disabled style="background:#f5f5f5">
+        </div>
+        <div class="form-group">
+          <label>新密码（留空则不修改）</label>
+          <input type="password" id="edit-user-password" placeholder="至少6个字符" minlength="6">
+        </div>
+        <div class="form-group">
+          <label>角色 *</label>
+          <select id="edit-user-role" required>
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Settings Migration Modal -->
+  <div id="settings-migration-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:500px;">
+      <div class="modal-header">
+        <h3>📦 发现本地设置</h3>
+        <button class="modal-close" onclick="hideModal('settings-migration-modal')">&times;</button>
+      </div>
+      <div style="padding:15px 0;">
+        <div id="migration-detect-phase">
+          <p style="color:#666;margin-bottom:15px;">检测到浏览器中存储了旧的本地设置。是否要将这些设置迁移到服务器？</p>
+          <div style="background:#e3f2fd;border:1px solid #2196f3;border-radius:6px;padding:15px;margin-bottom:15px;">
+            <p style="margin:0 0 10px 0;font-weight:bold;color:#1976d2;">📋 检测到的设置：</p>
+            <ul id="migration-settings-list" style="margin:0;padding-left:20px;color:#333;font-size:13px;"></ul>
+          </div>
+          <p style="color:#666;font-size:13px;margin-bottom:15px;">迁移后，您的设置将保存在服务器上，可以在任何设备上同步使用。</p>
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="skipMigration()">跳过</button>
+            <button class="btn btn-primary" onclick="startMigration()">开始迁移</button>
+          </div>
+        </div>
+        <div id="migration-progress-phase" style="display:none;">
+          <p style="color:#666;margin-bottom:15px;">正在迁移设置到服务器...</p>
+          <div style="background:#e9ecef;border-radius:4px;height:20px;overflow:hidden;margin-bottom:15px;">
+            <div id="migration-progress-bar" style="background:#4caf50;height:100%;width:0%;transition:width 0.3s;"></div>
+          </div>
+          <p id="migration-status" style="font-size:13px;color:#666;text-align:center;">准备中...</p>
+        </div>
+        <div id="migration-success-phase" style="display:none;">
+          <div style="text-align:center;padding:20px 0;">
+            <div style="font-size:48px;margin-bottom:15px;">✅</div>
+            <p style="color:#28a745;font-weight:bold;font-size:16px;margin-bottom:15px;">设置迁移成功！</p>
+            <p style="color:#666;margin-bottom:20px;">您的设置已保存到服务器。是否清除浏览器中的旧设置？</p>
+            <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:12px;margin-bottom:20px;font-size:13px;">
+              <strong>提示：</strong>清除本地设置后，您的设置将完全由服务器管理，可在任何设备上同步。
+            </div>
+            <div style="display:flex;gap:10px;justify-content:center;">
+              <button class="btn btn-secondary" onclick="finishMigration(false)">保留本地设置</button>
+              <button class="btn btn-primary" onclick="finishMigration(true)">清除本地设置</button>
+            </div>
+          </div>
+        </div>
+        <div id="migration-error-phase" style="display:none;">
+          <div style="text-align:center;padding:20px 0;">
+            <div style="font-size:48px;margin-bottom:15px;">❌</div>
+            <p style="color:#e74c3c;font-weight:bold;font-size:16px;margin-bottom:15px;">迁移失败</p>
+            <p id="migration-error-message" style="color:#666;margin-bottom:20px;">发生错误，请稍后重试。</p>
+            <div style="display:flex;gap:10px;justify-content:center;">
+              <button class="btn btn-secondary" onclick="hideModal('settings-migration-modal')">关闭</button>
+              <button class="btn btn-primary" onclick="retryMigration()">重试</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let apiToken = localStorage.getItem('apiToken') || '';
     let workers = [];
@@ -1603,6 +1826,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'campaign') loadCampaignAnalytics();
       if (name === 'monitoring') loadMonitoringData();
       if (name === 'settings') loadSettings();
+      if (name === 'users') loadUsers();
     }
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
@@ -1651,6 +1875,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         workers = data.workers || [];
         renderWorkers();
         updateWorkerSelects();
+        // Update default worker dropdown in settings
+        populateDefaultWorkerDropdown();
       } catch (e) {
         showAlert('加载 Worker 失败，请检查 API Token', 'error');
       }
@@ -2484,6 +2710,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     function loadSettings() {
       document.getElementById('api-token').value = apiToken;
       loadTelegramConfig();
+      // Update settings tab with account info and user settings
+      updateSettingsTab();
     }
 
     function saveToken() {
@@ -2568,6 +2796,185 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       } catch (e) {
         statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 发送失败</span>';
+      }
+    }
+
+    // ============================================
+    // User Management (Admin Only)
+    // Requirements: 10.1, 10.2, 10.3, 10.4
+    // ============================================
+    
+    let usersData = [];
+    
+    /**
+     * Load all users from the server
+     * Requirements: 10.1 - Admin can view user list
+     */
+    async function loadUsers() {
+      if (!apiToken || !currentUser || currentUser.role !== 'admin') return;
+      try {
+        const res = await fetch('/api/admin/users', { headers: getHeaders() });
+        if (!res.ok) {
+          if (res.status === 403) {
+            showAlert('无权限访问用户管理', 'error');
+            return;
+          }
+          throw new Error('Failed');
+        }
+        const data = await res.json();
+        usersData = data.users || [];
+        renderUsers();
+      } catch (e) {
+        showAlert('加载用户列表失败', 'error');
+      }
+    }
+    
+    /**
+     * Render users table
+     */
+    function renderUsers() {
+      const tbody = document.getElementById('users-table');
+      if (usersData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999">暂无用户</td></tr>';
+        return;
+      }
+      tbody.innerHTML = usersData.map(u => {
+        const roleBadge = u.role === 'admin' 
+          ? '<span class="status" style="background:#fff3cd;color:#856404;">管理员</span>'
+          : '<span class="status" style="background:#e9ecef;color:#495057;">普通用户</span>';
+        const createdAt = new Date(u.createdAt).toLocaleDateString('zh-CN');
+        const updatedAt = new Date(u.updatedAt).toLocaleDateString('zh-CN');
+        const isSelf = currentUser && currentUser.userId === u.id;
+        const deleteBtn = isSelf 
+          ? '<button class="btn btn-sm btn-secondary" disabled title="不能删除自己">删除</button>'
+          : '<button class="btn btn-sm btn-danger" onclick="deleteUser(\\'' + u.id + '\\', \\'' + escapeHtml(u.username) + '\\')">删除</button>';
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(u.username) + '</strong>' + (isSelf ? ' <span style="color:#4a90d9;font-size:11px;">(当前用户)</span>' : '') + '</td>' +
+          '<td>' + roleBadge + '</td>' +
+          '<td>' + createdAt + '</td>' +
+          '<td>' + updatedAt + '</td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="showEditUserModal(\\'' + u.id + '\\')">编辑</button>' +
+            deleteBtn +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    }
+    
+    /**
+     * Show edit user modal
+     */
+    function showEditUserModal(userId) {
+      const user = usersData.find(u => u.id === userId);
+      if (!user) return;
+      
+      document.getElementById('edit-user-id').value = user.id;
+      document.getElementById('edit-user-username').value = user.username;
+      document.getElementById('edit-user-password').value = '';
+      document.getElementById('edit-user-role').value = user.role;
+      
+      showModal('edit-user-modal');
+    }
+    
+    /**
+     * Create a new user
+     * Requirements: 10.2 - Admin can create users with unique username
+     */
+    document.getElementById('add-user-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('user-username').value.trim();
+      const password = document.getElementById('user-password').value;
+      const role = document.getElementById('user-role').value;
+      
+      if (username.length < 3) {
+        showAlert('用户名至少需要3个字符', 'error');
+        return;
+      }
+      if (password.length < 6) {
+        showAlert('密码至少需要6个字符', 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({ username, password, role })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          hideModal('add-user-modal');
+          document.getElementById('add-user-form').reset();
+          showAlert('用户创建成功');
+          loadUsers();
+        } else {
+          showAlert(data.error || '创建失败', 'error');
+        }
+      } catch (e) {
+        showAlert('创建失败', 'error');
+      }
+    });
+    
+    /**
+     * Update an existing user
+     * Requirements: 10.3 - Admin can update user password and role
+     */
+    document.getElementById('edit-user-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const userId = document.getElementById('edit-user-id').value;
+      const password = document.getElementById('edit-user-password').value;
+      const role = document.getElementById('edit-user-role').value;
+      
+      if (password && password.length < 6) {
+        showAlert('密码至少需要6个字符', 'error');
+        return;
+      }
+      
+      const body = { role };
+      if (password) {
+        body.password = password;
+      }
+      
+      try {
+        const res = await fetch('/api/admin/users/' + userId, {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          hideModal('edit-user-modal');
+          showAlert('用户更新成功');
+          loadUsers();
+        } else {
+          showAlert(data.error || '更新失败', 'error');
+        }
+      } catch (e) {
+        showAlert('更新失败', 'error');
+      }
+    });
+    
+    /**
+     * Delete a user
+     * Requirements: 10.4 - Admin can delete users (cascade deletes settings)
+     */
+    async function deleteUser(userId, username) {
+      if (!confirm('确定要删除用户 "' + username + '" 吗？\\n\\n此操作将同时删除该用户的所有设置，且不可恢复！')) return;
+      
+      try {
+        const res = await fetch('/api/admin/users/' + userId, {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert('用户删除成功');
+          loadUsers();
+        } else {
+          showAlert(data.error || '删除失败', 'error');
+        }
+      } catch (e) {
+        showAlert('删除失败', 'error');
       }
     }
 
@@ -6592,11 +6999,633 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
-    // Init
-    if (apiToken) {
-      document.getElementById('api-status').textContent = 'API Token: 已配置';
-      loadWorkers();
+    // ============================================
+    // User Settings Functions
+    // ============================================
+    
+    // Cached user settings from server
+    let userSettings = {};
+    
+    /**
+     * Load user settings from server
+     * Requirements: 8.2 - Load settings from server on login
+     */
+    async function loadUserSettings() {
+      if (!apiToken) return;
+      
+      try {
+        const res = await fetch('/api/user/settings', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            userSettings = data.settings || {};
+            applyUserSettings();
+            updateSettingsSyncStatus('设置已从服务器加载');
+            console.log('[Settings] Loaded from server:', userSettings);
+          }
+        }
+      } catch (e) {
+        console.error('[Settings] Failed to load settings from server:', e);
+        updateSettingsSyncStatus('设置加载失败，使用本地缓存', true);
+      }
     }
+    
+    /**
+     * Save a single user setting to server
+     * Requirements: 8.1 - Save settings to server immediately on change
+     */
+    async function saveUserSetting(key, value) {
+      // Update local cache
+      userSettings[key] = value;
+      
+      // Check if using legacy auth
+      const authType = localStorage.getItem('authType');
+      if (authType === 'legacy') {
+        updateSettingsSyncStatus('旧版认证不支持设置同步', true);
+        return;
+      }
+      
+      if (!apiToken) {
+        updateSettingsSyncStatus('未登录，设置未保存', true);
+        return;
+      }
+      
+      try {
+        updateSettingsSyncStatus('正在保存...');
+        const res = await fetch('/api/user/settings', {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify({ [key]: value })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            userSettings = data.settings || userSettings;
+            updateSettingsSyncStatus('设置已保存');
+            console.log('[Settings] Saved to server:', key, '=', value);
+          } else {
+            updateSettingsSyncStatus('保存失败: ' + (data.error || '未知错误'), true);
+          }
+        } else {
+          const data = await res.json().catch(() => ({}));
+          updateSettingsSyncStatus('保存失败: ' + (data.error || '服务器错误'), true);
+        }
+      } catch (e) {
+        console.error('[Settings] Failed to save setting:', e);
+        updateSettingsSyncStatus('保存失败，请检查网络连接', true);
+      }
+    }
+    
+    /**
+     * Apply loaded user settings to UI
+     * Requirements: 8.3 - Apply settings to UI when loaded
+     */
+    function applyUserSettings() {
+      // Apply default worker setting
+      if (userSettings.defaultWorker) {
+        const workerSelect = document.getElementById('setting-default-worker');
+        if (workerSelect) {
+          workerSelect.value = userSettings.defaultWorker;
+        }
+      }
+      
+      // Apply logs auto-refresh setting
+      if (userSettings.logsAutoRefresh !== undefined) {
+        const logsSelect = document.getElementById('setting-logs-auto-refresh');
+        if (logsSelect) {
+          logsSelect.value = userSettings.logsAutoRefresh ? 'true' : 'false';
+        }
+        // Also apply to the actual auto-refresh checkbox
+        const logsCheckbox = document.getElementById('logs-auto-refresh');
+        if (logsCheckbox && userSettings.logsAutoRefresh) {
+          logsCheckbox.checked = true;
+          const interval = parseInt(document.getElementById('logs-refresh-interval')?.value || '60', 10) * 1000;
+          startAutoRefresh('logs', interval);
+        }
+      }
+      
+      // Apply stats auto-refresh setting
+      if (userSettings.statsAutoRefresh !== undefined) {
+        const statsSelect = document.getElementById('setting-stats-auto-refresh');
+        if (statsSelect) {
+          statsSelect.value = userSettings.statsAutoRefresh ? 'true' : 'false';
+        }
+        // Also apply to the actual auto-refresh checkbox
+        const statsCheckbox = document.getElementById('stats-auto-refresh');
+        if (statsCheckbox && userSettings.statsAutoRefresh) {
+          statsCheckbox.checked = true;
+          const interval = parseInt(document.getElementById('stats-refresh-interval')?.value || '60', 10) * 1000;
+          startAutoRefresh('stats', interval);
+        }
+      }
+    }
+    
+    /**
+     * Update settings sync status message
+     */
+    function updateSettingsSyncStatus(message, isError = false) {
+      const statusEl = document.getElementById('settings-sync-status');
+      if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.style.color = isError ? '#e74c3c' : '#27ae60';
+        // Clear message after 3 seconds
+        setTimeout(() => {
+          if (statusEl.textContent === message) {
+            statusEl.textContent = '';
+          }
+        }, 3000);
+      }
+    }
+    
+    /**
+     * Update settings tab with account info
+     */
+    function updateSettingsTab() {
+      const authType = localStorage.getItem('authType');
+      
+      // Update account info
+      if (currentUser) {
+        document.getElementById('settings-username').textContent = currentUser.username;
+        document.getElementById('settings-role').textContent = currentUser.role === 'admin' ? '管理员' : '用户';
+        document.getElementById('settings-auth-type').textContent = authType === 'jwt' ? 'JWT 认证' : 'API Token (旧版)';
+      }
+      
+      // Show/hide legacy auth warning
+      const legacyWarning = document.getElementById('legacy-auth-warning');
+      if (legacyWarning) {
+        legacyWarning.style.display = authType === 'legacy' ? 'block' : 'none';
+      }
+      
+      // Show/hide user settings card (only for JWT auth)
+      const userSettingsCard = document.getElementById('user-settings-card');
+      if (userSettingsCard) {
+        userSettingsCard.style.display = authType === 'jwt' ? 'block' : 'none';
+      }
+      
+      // Show/hide legacy settings card
+      const legacySettingsCard = document.getElementById('legacy-settings-card');
+      if (legacySettingsCard) {
+        legacySettingsCard.style.display = authType === 'legacy' ? 'block' : 'none';
+      }
+      
+      // Populate default worker dropdown
+      populateDefaultWorkerDropdown();
+    }
+    
+    /**
+     * Populate the default worker dropdown in settings
+     */
+    function populateDefaultWorkerDropdown() {
+      const select = document.getElementById('setting-default-worker');
+      if (!select) return;
+      
+      // Keep the first option (不指定)
+      select.innerHTML = '<option value="">不指定</option>';
+      
+      // Add worker options
+      workers.forEach(w => {
+        const option = document.createElement('option');
+        option.value = w.name;
+        option.textContent = w.name;
+        if (userSettings.defaultWorker === w.name) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+    }
+
+    // ============================================
+    // Settings Migration Functions
+    // ============================================
+    
+    // Keys to check for migration (old localStorage settings)
+    const MIGRATION_KEYS = ['autoRefreshSettings'];
+    // Key to track if migration has been offered
+    const MIGRATION_OFFERED_KEY = 'settingsMigrationOffered';
+    // Detected old settings for migration
+    let detectedOldSettings = {};
+    
+    /**
+     * Check if there are old localStorage settings to migrate
+     * Requirements: 8.2, 8.3 - Detect and migrate old settings on first login
+     */
+    function checkForSettingsMigration() {
+      // Only check for JWT auth (not legacy)
+      const authType = localStorage.getItem('authType');
+      if (authType !== 'jwt') {
+        console.log('[Migration] Skipping migration check for non-JWT auth');
+        return;
+      }
+      
+      // Check if migration has already been offered to this user
+      const migrationOfferedFor = localStorage.getItem(MIGRATION_OFFERED_KEY);
+      if (migrationOfferedFor === currentUser?.id) {
+        console.log('[Migration] Migration already offered for this user');
+        return;
+      }
+      
+      // Detect old settings
+      detectedOldSettings = {};
+      let hasOldSettings = false;
+      
+      MIGRATION_KEYS.forEach(key => {
+        const value = localStorage.getItem(key);
+        if (value) {
+          try {
+            detectedOldSettings[key] = JSON.parse(value);
+            hasOldSettings = true;
+          } catch (e) {
+            // If not valid JSON, store as string
+            detectedOldSettings[key] = value;
+            hasOldSettings = true;
+          }
+        }
+      });
+      
+      if (!hasOldSettings) {
+        console.log('[Migration] No old settings found');
+        // Mark as offered so we don't check again
+        if (currentUser?.id) {
+          localStorage.setItem(MIGRATION_OFFERED_KEY, currentUser.id);
+        }
+        return;
+      }
+      
+      console.log('[Migration] Detected old settings:', detectedOldSettings);
+      showMigrationModal();
+    }
+    
+    /**
+     * Show the migration modal with detected settings
+     */
+    function showMigrationModal() {
+      // Reset modal phases
+      document.getElementById('migration-detect-phase').style.display = 'block';
+      document.getElementById('migration-progress-phase').style.display = 'none';
+      document.getElementById('migration-success-phase').style.display = 'none';
+      document.getElementById('migration-error-phase').style.display = 'none';
+      
+      // Populate settings list
+      const listEl = document.getElementById('migration-settings-list');
+      listEl.innerHTML = '';
+      
+      Object.keys(detectedOldSettings).forEach(key => {
+        const li = document.createElement('li');
+        const value = detectedOldSettings[key];
+        
+        if (key === 'autoRefreshSettings') {
+          li.textContent = '自动刷新设置';
+          if (typeof value === 'object') {
+            const details = Object.keys(value).map(type => {
+              const setting = value[type];
+              return type + ': ' + (setting.enabled ? '开启' : '关闭');
+            }).join(', ');
+            if (details) {
+              li.textContent += ' (' + details + ')';
+            }
+          }
+        } else {
+          li.textContent = key;
+        }
+        
+        listEl.appendChild(li);
+      });
+      
+      showModal('settings-migration-modal');
+    }
+    
+    /**
+     * Skip migration and mark as offered
+     */
+    function skipMigration() {
+      if (currentUser?.id) {
+        localStorage.setItem(MIGRATION_OFFERED_KEY, currentUser.id);
+      }
+      hideModal('settings-migration-modal');
+      showAlert('已跳过设置迁移');
+    }
+    
+    /**
+     * Start the migration process
+     */
+    async function startMigration() {
+      // Show progress phase
+      document.getElementById('migration-detect-phase').style.display = 'none';
+      document.getElementById('migration-progress-phase').style.display = 'block';
+      
+      const progressBar = document.getElementById('migration-progress-bar');
+      const statusEl = document.getElementById('migration-status');
+      
+      try {
+        progressBar.style.width = '20%';
+        statusEl.textContent = '正在准备设置数据...';
+        
+        // Convert old settings to server format
+        const settingsToUpload = {};
+        
+        if (detectedOldSettings.autoRefreshSettings) {
+          const autoRefresh = detectedOldSettings.autoRefreshSettings;
+          // Convert to server format
+          if (autoRefresh.logs) {
+            settingsToUpload.logsAutoRefresh = autoRefresh.logs.enabled || false;
+            settingsToUpload.logsRefreshInterval = autoRefresh.logs.interval || '60';
+          }
+          if (autoRefresh.stats) {
+            settingsToUpload.statsAutoRefresh = autoRefresh.stats.enabled || false;
+            settingsToUpload.statsRefreshInterval = autoRefresh.stats.interval || '60';
+          }
+        }
+        
+        progressBar.style.width = '50%';
+        statusEl.textContent = '正在上传设置到服务器...';
+        
+        // Upload settings to server
+        const res = await fetch('/api/user/settings', {
+          method: 'PUT',
+          headers: getHeaders(),
+          body: JSON.stringify(settingsToUpload)
+        });
+        
+        progressBar.style.width = '80%';
+        
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || '服务器错误');
+        }
+        
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.error || '保存失败');
+        }
+        
+        // Update local cache
+        userSettings = data.settings || settingsToUpload;
+        
+        progressBar.style.width = '100%';
+        statusEl.textContent = '迁移完成！';
+        
+        // Mark migration as offered
+        if (currentUser?.id) {
+          localStorage.setItem(MIGRATION_OFFERED_KEY, currentUser.id);
+        }
+        
+        // Show success phase after a short delay
+        setTimeout(() => {
+          document.getElementById('migration-progress-phase').style.display = 'none';
+          document.getElementById('migration-success-phase').style.display = 'block';
+        }, 500);
+        
+      } catch (e) {
+        console.error('[Migration] Failed:', e);
+        document.getElementById('migration-progress-phase').style.display = 'none';
+        document.getElementById('migration-error-phase').style.display = 'block';
+        document.getElementById('migration-error-message').textContent = e.message || '发生错误，请稍后重试。';
+      }
+    }
+    
+    /**
+     * Finish migration - optionally clear local settings
+     */
+    function finishMigration(clearLocal) {
+      if (clearLocal) {
+        // Clear old localStorage settings
+        MIGRATION_KEYS.forEach(key => {
+          localStorage.removeItem(key);
+        });
+        console.log('[Migration] Cleared local settings');
+        showAlert('本地设置已清除，设置现在由服务器管理', 'success');
+      } else {
+        showAlert('设置已迁移到服务器，本地设置已保留', 'success');
+      }
+      
+      hideModal('settings-migration-modal');
+      
+      // Reload settings from server to ensure UI is in sync
+      loadUserSettings();
+    }
+    
+    /**
+     * Retry migration after error
+     */
+    function retryMigration() {
+      document.getElementById('migration-error-phase').style.display = 'none';
+      startMigration();
+    }
+
+    // ============================================
+    // Authentication Functions
+    // ============================================
+    
+    // Current user info
+    let currentUser = null;
+    
+    /**
+     * Show legacy API token login section
+     */
+    function showLegacyLogin() {
+      document.getElementById('legacy-login-section').style.display = 'block';
+    }
+    
+    /**
+     * Login with API token (legacy mode)
+     */
+    async function loginWithApiToken() {
+      const token = document.getElementById('login-api-token').value.trim();
+      if (!token) {
+        showLoginError('请输入 API Token');
+        return;
+      }
+      
+      // Store token and verify it works
+      apiToken = token;
+      localStorage.setItem('apiToken', token);
+      localStorage.setItem('authType', 'legacy');
+      
+      try {
+        // Verify token by calling /api/auth/me
+        const res = await fetch('/api/auth/me', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          showMainApp();
+        } else {
+          showLoginError('API Token 无效');
+          apiToken = '';
+          localStorage.removeItem('apiToken');
+          localStorage.removeItem('authType');
+        }
+      } catch (e) {
+        showLoginError('验证失败，请检查网络连接');
+        apiToken = '';
+        localStorage.removeItem('apiToken');
+        localStorage.removeItem('authType');
+      }
+    }
+    
+    /**
+     * Login with username and password
+     */
+    async function handleLogin(e) {
+      e.preventDefault();
+      
+      const username = document.getElementById('login-username').value.trim();
+      const password = document.getElementById('login-password').value;
+      
+      if (!username || !password) {
+        showLoginError('请输入用户名和密码');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok && data.success) {
+          // Store JWT token
+          apiToken = data.token;
+          currentUser = data.user;
+          localStorage.setItem('apiToken', data.token);
+          localStorage.setItem('authType', 'jwt');
+          
+          showMainApp();
+          
+          // Check for settings migration after login (Requirements: 8.2, 8.3)
+          // Use setTimeout to allow the main app to render first
+          setTimeout(() => {
+            checkForSettingsMigration();
+          }, 500);
+        } else {
+          showLoginError(data.error || '登录失败，请检查用户名和密码');
+        }
+      } catch (e) {
+        showLoginError('登录失败，请检查网络连接');
+      }
+    }
+    
+    /**
+     * Logout current user
+     */
+    async function logout() {
+      try {
+        // Call logout API to invalidate token
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+      } catch (e) {
+        // Ignore errors, still clear local state
+      }
+      
+      // Clear local state
+      apiToken = '';
+      currentUser = null;
+      localStorage.removeItem('apiToken');
+      localStorage.removeItem('authType');
+      
+      // Show login page
+      showLoginPage();
+    }
+    
+    /**
+     * Show login error message
+     */
+    function showLoginError(message) {
+      const errorEl = document.getElementById('login-error');
+      errorEl.textContent = message;
+      errorEl.style.display = 'block';
+      setTimeout(() => {
+        errorEl.style.display = 'none';
+      }, 5000);
+    }
+    
+    /**
+     * Show login page, hide main app
+     */
+    function showLoginPage() {
+      document.getElementById('login-page').classList.remove('hidden');
+      document.getElementById('main-app').classList.add('hidden');
+      
+      // Reset login form
+      document.getElementById('login-form').reset();
+      document.getElementById('login-error').style.display = 'none';
+      document.getElementById('legacy-login-section').style.display = 'none';
+    }
+    
+    /**
+     * Show main app, hide login page
+     */
+    function showMainApp() {
+      document.getElementById('login-page').classList.add('hidden');
+      document.getElementById('main-app').classList.remove('hidden');
+      
+      // Update user info in header
+      if (currentUser) {
+        document.getElementById('current-username').textContent = currentUser.username;
+        document.getElementById('current-role').textContent = currentUser.role === 'admin' ? '管理员' : '用户';
+        
+        // Show admin-only tabs for admin users
+        if (currentUser.role === 'admin') {
+          document.getElementById('users-tab-btn').classList.remove('hidden');
+        } else {
+          document.getElementById('users-tab-btn').classList.add('hidden');
+        }
+      }
+      
+      // Load initial data
+      loadWorkers();
+      
+      // Load user settings from server (Requirements: 8.2)
+      loadUserSettings();
+      
+      // Update settings tab with account info
+      updateSettingsTab();
+    }
+    
+    /**
+     * Check authentication status on page load
+     */
+    async function checkAuth() {
+      if (!apiToken) {
+        showLoginPage();
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/auth/me', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          showMainApp();
+        } else {
+          // Token invalid, show login page
+          apiToken = '';
+          localStorage.removeItem('apiToken');
+          localStorage.removeItem('authType');
+          showLoginPage();
+        }
+      } catch (e) {
+        // Network error, try to show main app if we have a token
+        // This allows offline usage with cached data
+        showLoginPage();
+      }
+    }
+    
+    // Attach login form submit handler
+    document.getElementById('login-form').addEventListener('submit', handleLogin);
+    
+    // ============================================
+    // Initialization
+    // ============================================
+    
+    // Check authentication on page load
+    checkAuth();
+    
     // Restore auto-refresh settings from localStorage
     restoreAutoRefreshSettings();
   </script>

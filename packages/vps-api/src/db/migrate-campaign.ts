@@ -442,5 +442,74 @@ if (!projectPathEdgesTableExists) {
   console.log('project_path_edges table already exists.');
 }
 
+// Migration: Create users table for user authentication
+const usersTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+`).get();
+
+if (!usersTableExists) {
+  console.log('Creating users table...');
+  db.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_users_username ON users(username);
+  `);
+  console.log('users table created.');
+} else {
+  console.log('users table already exists.');
+}
+
+// Migration: Create user_settings table for storing user preferences
+const userSettingsTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='user_settings'
+`).get();
+
+if (!userSettingsTableExists) {
+  console.log('Creating user_settings table...');
+  db.exec(`
+    CREATE TABLE user_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, key)
+    );
+    CREATE INDEX idx_user_settings_user ON user_settings(user_id);
+  `);
+  console.log('user_settings table created.');
+} else {
+  console.log('user_settings table already exists.');
+}
+
+// Migration: Create token_blacklist table for invalidated JWT tokens
+const tokenBlacklistTableExists = db.prepare(`
+  SELECT name FROM sqlite_master WHERE type='table' AND name='token_blacklist'
+`).get();
+
+if (!tokenBlacklistTableExists) {
+  console.log('Creating token_blacklist table...');
+  db.exec(`
+    CREATE TABLE token_blacklist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_token_blacklist_hash ON token_blacklist(token_hash);
+    CREATE INDEX idx_token_blacklist_expires ON token_blacklist(expires_at);
+  `);
+  console.log('token_blacklist table created.');
+} else {
+  console.log('token_blacklist table already exists.');
+}
+
 console.log('Campaign analytics migration completed!');
 db.close();

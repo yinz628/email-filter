@@ -379,9 +379,9 @@ async function createTestDb(): Promise<SqlJsDatabase> {
   // Enable foreign keys for cascade delete support
   db.run('PRAGMA foreign_keys = ON');
   
-  const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-  const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-  db.run(campaignSchema);
+  const schemaPath = join(__dirname, '../db/schema.sql');
+  const schema = readFileSync(schemaPath, 'utf-8');
+  db.run(schema);
   
   return db;
 }
@@ -468,9 +468,9 @@ describe('ProjectPathAnalysisService', () => {
           subjectArb,
           async (subject1, subject2) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -534,9 +534,9 @@ describe('ProjectPathAnalysisService', () => {
           emailArb,
           async (email1, email2) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -584,9 +584,9 @@ describe('ProjectPathAnalysisService', () => {
           emailArb,
           async (email) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -632,9 +632,9 @@ describe('ProjectPathAnalysisService', () => {
           fc.integer({ min: 1, max: 100 }),
           async (userCount) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -681,9 +681,9 @@ describe('ProjectPathAnalysisService', () => {
           fc.integer({ min: 1, max: 10 }), // Number of campaigns to add
           async (email, numCampaigns) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -732,9 +732,9 @@ describe('ProjectPathAnalysisService', () => {
           emailArb,
           async (email) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -779,9 +779,9 @@ describe('ProjectPathAnalysisService', () => {
             if (uniqueEmails.length < 2) return; // Skip if not enough unique emails
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -842,9 +842,9 @@ describe('ProjectPathAnalysisService', () => {
             if (uniqueEmails.length === 0) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -899,9 +899,9 @@ describe('ProjectPathAnalysisService', () => {
           emailArb,
           async (email) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -953,9 +953,9 @@ describe('ProjectPathAnalysisService', () => {
             if (uniqueEmails.length < 3) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -1015,9 +1015,9 @@ describe('ProjectPathAnalysisService', () => {
             if (uniqueEmails.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -1094,9 +1094,9 @@ describe('ProjectPathAnalysisService - Analysis Properties', () => {
             if (uniqueEmails.length === 0 || uniqueSubjects.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -1159,9 +1159,9 @@ describe('ProjectPathAnalysisService - Analysis Properties', () => {
             if (uniqueSubjects.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -1222,9 +1222,9 @@ describe('ProjectPathAnalysisService - Analysis Properties', () => {
             if (uniqueEmails.length < 2 || uniqueSubjects.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -1597,9 +1597,9 @@ describe('ProjectPathAnalysisService - Incremental Analysis Properties', () => {
             if (uniqueEmails.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -1683,9 +1683,9 @@ describe('ProjectPathAnalysisService - Incremental Analysis Properties', () => {
             if (uniqueSubjects.length < 3) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -1748,9 +1748,9 @@ describe('ProjectPathAnalysisService - Incremental Analysis Properties', () => {
             if (uniqueEmails.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -1821,9 +1821,9 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
           subjectArb,
           async (email, subject) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -1869,9 +1869,9 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
           subjectArb,
           async (email, subject) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -1924,9 +1924,9 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
           subjectArb,
           async (email, subject) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -1969,9 +1969,9 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
           fc.constant(null), // No specific input needed
           async () => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
             
@@ -2022,9 +2022,9 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
             const db = new SQL.Database();
             db.run('PRAGMA foreign_keys = ON');
             
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             
@@ -2073,9 +2073,9 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
             const db = new SQL.Database();
             db.run('PRAGMA foreign_keys = ON');
             
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestProjectPathAnalysisService(db);
             

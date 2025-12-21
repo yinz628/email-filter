@@ -47,7 +47,7 @@ export type AlertChannelType = 'webhook' | 'email';
 /**
  * Match mode for subject pattern matching
  */
-export type SubjectMatchMode = 'contains' | 'regex';
+export type SubjectMatchMode = 'exact' | 'contains' | 'startsWith' | 'endsWith' | 'regex';
 
 /**
  * Worker scope type for monitoring rules

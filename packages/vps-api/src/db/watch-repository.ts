@@ -34,12 +34,6 @@ interface WatchRuleRow {
   updated_at: string;
 }
 
-interface WatchStatsRow {
-  rule_id: string;
-  hit_count: number;
-  last_hit_at: string | null;
-}
-
 export interface CreateWatchRuleDTO {
   name: string;
   matchType: 'sender' | 'subject' | 'domain';

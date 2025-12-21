@@ -120,26 +120,27 @@ CREATE INDEX IF NOT EXISTS idx_logs_created ON system_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_level ON system_logs(level);
 CREATE INDEX IF NOT EXISTS idx_logs_worker_name ON system_logs(worker_name);
 
--- 监控规则表
+-- 监控规则表（实时信号监控）
 CREATE TABLE IF NOT EXISTS monitoring_rules (
   id TEXT PRIMARY KEY,
+  merchant TEXT NOT NULL,
   name TEXT NOT NULL,
-  match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
-  match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
-  pattern TEXT NOT NULL,
-  threshold INTEGER NOT NULL DEFAULT 1,
-  time_window_minutes INTEGER NOT NULL DEFAULT 60,
-  alert_type TEXT NOT NULL DEFAULT 'count' CHECK(alert_type IN ('count', 'rate')),
-  worker_scope TEXT DEFAULT 'global',
+  subject_pattern TEXT NOT NULL,
+  match_mode TEXT NOT NULL DEFAULT 'contains' CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
+  expected_interval_minutes INTEGER NOT NULL,
+  dead_after_minutes INTEGER NOT NULL,
+  tags TEXT NOT NULL DEFAULT '[]',
+  worker_scope TEXT NOT NULL DEFAULT 'global',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_monitoring_rules_merchant ON monitoring_rules(merchant);
 CREATE INDEX IF NOT EXISTS idx_monitoring_rules_enabled ON monitoring_rules(enabled);
 CREATE INDEX IF NOT EXISTS idx_monitoring_rules_worker_scope ON monitoring_rules(worker_scope);
 
--- 监控命中日志表
+-- 监控命中日志表（48-72小时后清理）
 CREATE TABLE IF NOT EXISTS hit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   rule_id TEXT NOT NULL,
@@ -151,23 +152,31 @@ CREATE TABLE IF NOT EXISTS hit_logs (
   FOREIGN KEY (rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_hit_logs_rule ON hit_logs(rule_id);
-CREATE INDEX IF NOT EXISTS idx_hit_logs_created ON hit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_hit_logs_rule_id ON hit_logs(rule_id);
+CREATE INDEX IF NOT EXISTS idx_hit_logs_created_at ON hit_logs(created_at);
 
--- 监控告警表
+-- 监控告警表（状态转换告警）
 CREATE TABLE IF NOT EXISTS alerts (
   id TEXT PRIMARY KEY,
   rule_id TEXT NOT NULL,
-  triggered_at TEXT NOT NULL,
-  hit_count INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'acknowledged', 'resolved')),
-  resolved_at TEXT,
+  alert_type TEXT NOT NULL,
+  previous_state TEXT NOT NULL,
+  current_state TEXT NOT NULL,
+  gap_minutes INTEGER NOT NULL,
+  count_1h INTEGER NOT NULL,
+  count_12h INTEGER NOT NULL,
+  count_24h INTEGER NOT NULL,
+  message TEXT NOT NULL,
+  worker_scope TEXT NOT NULL DEFAULT 'global',
+  sent_at TEXT,
+  created_at TEXT NOT NULL,
   FOREIGN KEY (rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_alerts_rule ON alerts(rule_id);
-CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
-CREATE INDEX IF NOT EXISTS idx_alerts_triggered ON alerts(triggered_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_rule_id ON alerts(rule_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_alert_type ON alerts(alert_type);
+CREATE INDEX IF NOT EXISTS idx_alerts_worker_scope ON alerts(worker_scope);
 
 -- 心跳日志表
 CREATE TABLE IF NOT EXISTS heartbeat_logs (
@@ -179,7 +188,7 @@ CREATE TABLE IF NOT EXISTS heartbeat_logs (
   duration_ms INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_checked ON heartbeat_logs(checked_at);
+CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_checked_at ON heartbeat_logs(checked_at);
 
 
 -- ============================================
@@ -192,7 +201,9 @@ CREATE TABLE IF NOT EXISTS merchants (
   domain TEXT UNIQUE NOT NULL,           -- 发件人域名
   display_name TEXT,                      -- 显示名称
   note TEXT,                              -- 备注
+  analysis_status TEXT DEFAULT 'pending', -- 分析状态: pending, active, ignored
   total_campaigns INTEGER DEFAULT 0,      -- 营销活动总数
+  valuable_campaigns INTEGER DEFAULT 0,   -- 有价值活动数
   total_emails INTEGER DEFAULT 0,         -- 邮件总数
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -453,6 +464,25 @@ CREATE TABLE IF NOT EXISTS ratio_states (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
 );
+
+-- 比例告警表
+CREATE TABLE IF NOT EXISTS ratio_alerts (
+  id TEXT PRIMARY KEY,
+  monitor_id TEXT NOT NULL,
+  alert_type TEXT NOT NULL,
+  previous_state TEXT NOT NULL,
+  current_state TEXT NOT NULL,
+  first_count INTEGER NOT NULL,
+  second_count INTEGER NOT NULL,
+  current_ratio REAL NOT NULL,
+  message TEXT NOT NULL,
+  sent_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (monitor_id) REFERENCES ratio_monitors(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ratio_alerts_monitor_id ON ratio_alerts(monitor_id);
+CREATE INDEX IF NOT EXISTS idx_ratio_alerts_created_at ON ratio_alerts(created_at);
 
 -- 商户Worker状态表
 CREATE TABLE IF NOT EXISTS merchant_worker_status (

@@ -67,15 +67,10 @@ describe('Property 5: Scope-Based Data Aggregation', () => {
     SQL = await initSqlJs();
     db = new SQL.Database();
 
-    // Load and execute main schema
-    const mainSchemaPath = join(__dirname, '../../db/schema.sql');
-    const mainSchema = readFileSync(mainSchemaPath, 'utf-8');
-    db.run(mainSchema);
-
-    // Load and execute monitoring schema
-    const monitoringSchemaPath = join(__dirname, '../../db/monitoring-schema.sql');
-    const monitoringSchema = readFileSync(monitoringSchemaPath, 'utf-8');
-    db.run(monitoringSchema);
+    // Load consolidated schema (includes all monitoring tables)
+    const schemaPath = join(__dirname, '../../db/schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
 
     // Apply worker instance migration
     applyWorkerInstanceMigration(db);

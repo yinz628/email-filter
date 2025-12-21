@@ -70,14 +70,6 @@ class TestLogRepository {
   getTopBlockedRules(hours: number = 24, limit: number = 5, workerName?: string): TrendingRule[] {
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-    let workerFilter = '';
-    const params: (string | number)[] = [cutoff];
-    if (workerName) {
-      workerFilter = ' AND worker_name = ?';
-      params.push(workerName);
-    }
-    params.push(limit);
-
     // Query logs where category is email_drop and extract matchedRule from details JSON
     const result = this.db.exec(`
       SELECT 
@@ -142,10 +134,12 @@ class TestLogRepository {
 
 /**
  * Apply the worker instance migration to the database
+ * Note: worker_name column is now part of the consolidated schema.sql,
+ * so we only need to ensure the index exists (which is also in schema.sql)
  */
-function applyWorkerInstanceMigration(db: SqlJsDatabase): void {
-  db.run("ALTER TABLE system_logs ADD COLUMN worker_name TEXT DEFAULT 'global'");
-  db.run('CREATE INDEX IF NOT EXISTS idx_logs_worker_name ON system_logs(worker_name)');
+function applyWorkerInstanceMigration(_db: SqlJsDatabase): void {
+  // worker_name column and index are now part of the consolidated schema.sql
+  // This function is kept for backwards compatibility but no longer needs to do anything
 }
 
 describe('Trending Rules Worker Breakdown', () => {
@@ -162,7 +156,7 @@ describe('Trending Rules Worker Breakdown', () => {
     const mainSchema = readFileSync(mainSchemaPath, 'utf-8');
     db.run(mainSchema);
 
-    // Apply worker instance migration
+    // Apply worker instance migration (no-op, kept for backwards compatibility)
     applyWorkerInstanceMigration(db);
 
     logRepository = new TestLogRepository(db);

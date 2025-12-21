@@ -378,7 +378,7 @@ async function createTestDb(): Promise<SqlJsDatabase> {
   const db = new SQL.Database();
   
   // Load campaign schema
-  const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
+  const campaignSchemaPath = join(__dirname, '../db/schema.sql');
   const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
   db.run(campaignSchema);
   

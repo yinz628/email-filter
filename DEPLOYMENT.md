@@ -9,11 +9,16 @@
 - [第一部分：VPS API 部署](#第一部分vps-api-部署)
   - [方式一：Docker 部署（推荐）](#方式一docker-部署推荐)
   - [方式二：Systemd 原生部署](#方式二systemd-原生部署)
-- [第二部分：Cloudflare Email Worker 部署](#第二部分cloudflare-email-worker-部署)
-- [第三部分：Nginx 反向代理配置](#第三部分nginx-反向代理配置)
-- [第四部分：多 Worker 配置](#第四部分多-worker-配置)
-- [第五部分：管理面板使用](#第五部分管理面板使用)
+- [第二部分：数据库管理](#第二部分数据库管理)
+  - [数据库初始化](#数据库初始化)
+  - [数据库迁移](#数据库迁移)
+  - [数据库备份与恢复](#数据库备份与恢复)
+- [第三部分：Cloudflare Email Worker 部署](#第三部分cloudflare-email-worker-部署)
+- [第四部分：Nginx 反向代理配置](#第四部分nginx-反向代理配置)
+- [第五部分：多 Worker 配置](#第五部分多-worker-配置)
+- [第六部分：管理面板使用](#第六部分管理面板使用)
 - [故障排除](#故障排除)
+  - [数据库常见问题](#数据库常见问题)
 
 ---
 
@@ -403,7 +408,156 @@ sudo journalctl -u email-filter-api -n 100
 
 ---
 
-## 第二部分：Cloudflare Email Worker 部署
+## 第二部分：数据库管理
+
+本系统使用 SQLite 数据库，所有表结构定义在统一的 `schema.sql` 文件中。
+
+### 数据库初始化
+
+#### 新环境部署
+
+对于新环境部署，数据库会在首次启动时自动初始化。系统会：
+
+1. 检查数据库文件是否存在
+2. 如果不存在，创建新数据库并执行 `schema.sql`
+3. 初始化所有必要的表和索引
+
+**手动初始化（可选）**：
+
+如果需要手动初始化数据库，可以执行：
+
+```bash
+# Docker 部署
+docker compose exec api sh -c "cat /app/src/db/schema.sql | sqlite3 /data/filter.db"
+
+# Systemd 部署
+cd /opt/email-filter/packages/vps-api
+sqlite3 /opt/email-filter/data/filter.db < src/db/schema.sql
+```
+
+#### 数据库文件位置
+
+| 部署方式 | 数据库路径 |
+|---------|-----------|
+| Docker | `/opt/email-filter/data/filter.db` (宿主机) |
+| Systemd | `/opt/email-filter/data/filter.db` |
+| 开发环境 | `packages/vps-api/data/filter.db` |
+
+可通过环境变量 `DB_PATH` 自定义数据库路径。
+
+### 数据库迁移
+
+当系统升级需要修改数据库结构时，需要运行迁移脚本。迁移脚本是幂等的，可以安全地多次运行。
+
+#### 运行迁移
+
+```bash
+# Docker 部署
+docker compose exec api npx tsx src/db/migrate.ts
+
+# Systemd 部署
+cd /opt/email-filter/packages/vps-api
+npx tsx src/db/migrate.ts
+
+# 或者使用 node（需要先构建）
+node dist/db/migrate.js
+```
+
+#### 迁移输出示例
+
+```
+============================================================
+Database Migration Script
+============================================================
+Database path: /opt/email-filter/data/filter.db
+
+Running 19 migrations...
+
+[○] worker_instances.worker_url: Column already exists
+[○] filter_rules.tags: Column already exists
+[✓] campaign_emails.worker_name: Column and index added successfully
+[○] system_logs.worker_name: Column already exists
+...
+
+============================================================
+Migration Summary
+============================================================
+Applied: 1
+Skipped: 18
+Errors:  0
+
+✓ All migrations completed successfully!
+```
+
+- `✓` 表示迁移已应用
+- `○` 表示迁移已跳过（已存在）
+- `✗` 表示迁移失败
+
+#### 迁移前备份
+
+**重要**：在运行迁移前，建议先备份数据库：
+
+```bash
+# 创建备份
+cp /opt/email-filter/data/filter.db /opt/email-filter/data/filter-backup-$(date +%Y%m%d-%H%M%S).db
+```
+
+### 数据库备份与恢复
+
+#### 定期备份
+
+建议设置定期备份任务：
+
+```bash
+# 创建备份脚本
+cat > /opt/email-filter/backup.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/opt/email-filter/backups"
+DB_PATH="/opt/email-filter/data/filter.db"
+DATE=$(date +%Y%m%d-%H%M%S)
+
+mkdir -p $BACKUP_DIR
+cp $DB_PATH $BACKUP_DIR/filter-$DATE.db
+
+# 保留最近 7 天的备份
+find $BACKUP_DIR -name "filter-*.db" -mtime +7 -delete
+EOF
+
+chmod +x /opt/email-filter/backup.sh
+
+# 添加到 crontab（每天凌晨 3 点备份）
+(crontab -l 2>/dev/null; echo "0 3 * * * /opt/email-filter/backup.sh") | crontab -
+```
+
+#### 恢复数据库
+
+```bash
+# 停止服务
+docker compose stop api
+# 或
+sudo systemctl stop email-filter-api
+
+# 恢复备份
+cp /opt/email-filter/backups/filter-20241220-030000.db /opt/email-filter/data/filter.db
+
+# 重启服务
+docker compose start api
+# 或
+sudo systemctl start email-filter-api
+```
+
+#### 数据库完整性检查
+
+```bash
+# 检查数据库完整性
+sqlite3 /opt/email-filter/data/filter.db "PRAGMA integrity_check;"
+
+# 预期输出：ok
+```
+
+---
+
+## 第三部分：Cloudflare Email Worker 部署
 
 ### 1. 安装 Wrangler CLI
 
@@ -478,7 +632,7 @@ sudo journalctl -u email-filter-api -f
 
 ---
 
-## 第三部分：Nginx 反向代理配置
+## 第四部分：Nginx 反向代理配置
 
 ### 1. 安装 Nginx 和 Certbot
 
@@ -599,7 +753,7 @@ sudo certbot renew --dry-run
 
 ---
 
-## 第四部分：多 Worker 配置
+## 第五部分：多 Worker 配置
 
 如果你有多个域名需要不同的过滤规则，可以配置多个 Worker。
 
@@ -685,7 +839,7 @@ curl -X POST https://your-vps-domain.com/api/rules \
 
 ---
 
-## 第五部分：管理面板使用
+## 第六部分：管理面板使用
 
 ### 访问管理面板
 
@@ -765,6 +919,145 @@ ls -la /opt/email-filter/data/
 # 修复权限
 sudo chown -R www-data:www-data /opt/email-filter/data/
 sudo chmod 750 /opt/email-filter/data/
+```
+
+### 数据库常见问题
+
+#### 数据库文件不存在
+
+**症状**: `Database file not found` 或 `SQLITE_CANTOPEN`
+
+**解决方案**:
+```bash
+# 1. 检查数据目录是否存在
+ls -la /opt/email-filter/data/
+
+# 2. 如果目录不存在，创建它
+sudo mkdir -p /opt/email-filter/data
+sudo chown -R www-data:www-data /opt/email-filter/data
+
+# 3. 手动初始化数据库
+cd /opt/email-filter/packages/vps-api
+sqlite3 /opt/email-filter/data/filter.db < src/db/schema.sql
+
+# 4. 重启服务
+sudo systemctl restart email-filter-api
+```
+
+#### 表结构不完整
+
+**症状**: `no such table` 或 `no such column` 错误
+
+**解决方案**:
+```bash
+# 1. 检查表是否存在
+sqlite3 /opt/email-filter/data/filter.db ".tables"
+
+# 2. 运行迁移脚本
+cd /opt/email-filter/packages/vps-api
+npx tsx src/db/migrate.ts
+
+# 3. 如果迁移失败，检查 schema 完整性
+sqlite3 /opt/email-filter/data/filter.db ".schema monitoring_rules"
+```
+
+#### 迁移脚本失败
+
+**症状**: 迁移输出显示 `[✗]` 错误
+
+**解决方案**:
+```bash
+# 1. 备份当前数据库
+cp /opt/email-filter/data/filter.db /opt/email-filter/data/filter-backup.db
+
+# 2. 检查具体错误信息
+cd /opt/email-filter/packages/vps-api
+npx tsx src/db/migrate.ts 2>&1 | tee migration.log
+
+# 3. 常见错误处理：
+
+# 错误：duplicate column name
+# 原因：列已存在，迁移脚本应该跳过
+# 解决：检查 migrate.ts 中的 columnExists 检查
+
+# 错误：foreign key constraint failed
+# 原因：引用的表或记录不存在
+# 解决：确保按正确顺序创建表
+
+# 错误：database is locked
+# 原因：其他进程正在使用数据库
+# 解决：停止 API 服务后再运行迁移
+sudo systemctl stop email-filter-api
+npx tsx src/db/migrate.ts
+sudo systemctl start email-filter-api
+```
+
+#### 数据库损坏
+
+**症状**: `database disk image is malformed` 或 `SQLITE_CORRUPT`
+
+**解决方案**:
+```bash
+# 1. 尝试修复
+sqlite3 /opt/email-filter/data/filter.db "PRAGMA integrity_check;"
+
+# 2. 如果显示错误，尝试导出数据
+sqlite3 /opt/email-filter/data/filter.db ".dump" > dump.sql
+
+# 3. 创建新数据库并导入
+mv /opt/email-filter/data/filter.db /opt/email-filter/data/filter-corrupted.db
+sqlite3 /opt/email-filter/data/filter.db < dump.sql
+
+# 4. 如果导出失败，从备份恢复
+cp /opt/email-filter/backups/filter-latest.db /opt/email-filter/data/filter.db
+```
+
+#### 外键约束错误
+
+**症状**: `FOREIGN KEY constraint failed`
+
+**解决方案**:
+```bash
+# 1. 检查外键状态
+sqlite3 /opt/email-filter/data/filter.db "PRAGMA foreign_keys;"
+# 应该返回 1
+
+# 2. 检查外键违规
+sqlite3 /opt/email-filter/data/filter.db "PRAGMA foreign_key_check;"
+
+# 3. 如果有违规记录，需要清理孤立数据
+# 例如：清理引用不存在规则的告警
+sqlite3 /opt/email-filter/data/filter.db "
+DELETE FROM alerts WHERE rule_id NOT IN (SELECT id FROM monitoring_rules);
+"
+```
+
+#### 数据库性能问题
+
+**症状**: 查询缓慢，API 响应时间长
+
+**解决方案**:
+```bash
+# 1. 检查数据库大小
+ls -lh /opt/email-filter/data/filter.db
+
+# 2. 分析查询性能
+sqlite3 /opt/email-filter/data/filter.db "
+EXPLAIN QUERY PLAN SELECT * FROM system_logs ORDER BY created_at DESC LIMIT 100;
+"
+
+# 3. 重建索引
+sqlite3 /opt/email-filter/data/filter.db "REINDEX;"
+
+# 4. 清理旧数据（保留最近 30 天）
+sqlite3 /opt/email-filter/data/filter.db "
+DELETE FROM system_logs WHERE created_at < datetime('now', '-30 days');
+DELETE FROM hit_logs WHERE created_at < datetime('now', '-3 days');
+VACUUM;
+"
+
+# 5. 优化数据库
+sqlite3 /opt/email-filter/data/filter.db "VACUUM; ANALYZE;"
 ```
 
 ### 5. SSL 证书问题

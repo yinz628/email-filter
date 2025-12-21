@@ -239,14 +239,10 @@ describe('AlertService', () => {
     SQL = await initSqlJs();
     db = new SQL.Database();
 
-    // Load schemas
-    const mainSchemaPath = join(__dirname, '../../db/schema.sql');
-    const mainSchema = readFileSync(mainSchemaPath, 'utf-8');
-    db.run(mainSchema);
-
-    const monitoringSchemaPath = join(__dirname, '../../db/monitoring-schema.sql');
-    const monitoringSchema = readFileSync(monitoringSchemaPath, 'utf-8');
-    db.run(monitoringSchema);
+    // Load consolidated schema (includes all monitoring tables)
+    const schemaPath = join(__dirname, '../../db/schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
 
     service = new TestAlertService(db);
   });

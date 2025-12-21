@@ -141,10 +141,12 @@ class TestLogRepository {
 
 /**
  * Apply the worker instance migration to the database
+ * Note: worker_name column is now part of the consolidated schema.sql,
+ * so we only need to ensure the index exists (which is also in schema.sql)
  */
-function applyWorkerInstanceMigration(db: SqlJsDatabase): void {
-  db.run("ALTER TABLE system_logs ADD COLUMN worker_name TEXT DEFAULT 'global'");
-  db.run('CREATE INDEX IF NOT EXISTS idx_logs_worker_name ON system_logs(worker_name)');
+function applyWorkerInstanceMigration(_db: SqlJsDatabase): void {
+  // worker_name column and index are now part of the consolidated schema.sql
+  // This function is kept for backwards compatibility but no longer needs to do anything
 }
 
 describe('Log Repository Worker Instance Support', () => {

@@ -60,16 +60,19 @@ class TestMonitoringRuleRepository {
   constructor(private db: SqlJsDatabase) {}
 
   private rowToRule(row: any[]): MonitoringRule {
+    // Schema: id, merchant, name, subject_pattern, match_mode, expected_interval_minutes, dead_after_minutes, tags, worker_scope, enabled, created_at, updated_at
     return {
       id: row[0] as string,
       merchant: row[1] as string,
       name: row[2] as string,
       subjectPattern: row[3] as string,
-      expectedIntervalMinutes: row[4] as number,
-      deadAfterMinutes: row[5] as number,
-      enabled: row[6] === 1,
-      createdAt: new Date(row[7] as string),
-      updatedAt: new Date(row[8] as string),
+      matchMode: (row[4] as string) || 'contains',
+      expectedIntervalMinutes: row[5] as number,
+      deadAfterMinutes: row[6] as number,
+      workerScope: (row[8] as string) || 'global',
+      enabled: row[9] === 1,
+      createdAt: new Date(row[10] as string),
+      updatedAt: new Date(row[11] as string),
     };
   }
 
@@ -77,21 +80,25 @@ class TestMonitoringRuleRepository {
     const id = uuidv4();
     const now = new Date().toISOString();
     const enabled = dto.enabled !== undefined ? dto.enabled : true;
+    const matchMode = dto.matchMode || 'contains';
 
     this.db.run(
       `INSERT INTO monitoring_rules (
-        id, merchant, name, subject_pattern, 
+        id, merchant, name, subject_pattern, match_mode,
         expected_interval_minutes, dead_after_minutes, 
-        enabled, created_at, updated_at
+        tags, worker_scope, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         dto.merchant,
         dto.name,
         dto.subjectPattern,
+        matchMode,
         dto.expectedIntervalMinutes,
         dto.deadAfterMinutes,
+        '[]',
+        'global',
         enabled ? 1 : 0,
         now,
         now,
@@ -110,8 +117,10 @@ class TestMonitoringRuleRepository {
       merchant: dto.merchant,
       name: dto.name,
       subjectPattern: dto.subjectPattern,
+      matchMode,
       expectedIntervalMinutes: dto.expectedIntervalMinutes,
       deadAfterMinutes: dto.deadAfterMinutes,
+      workerScope: 'global',
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -338,15 +347,10 @@ describe('HeartbeatService', () => {
     SQL = await initSqlJs();
     db = new SQL.Database();
 
-    // Load and execute main schema first
-    const mainSchemaPath = join(__dirname, '../../db/schema.sql');
-    const mainSchema = readFileSync(mainSchemaPath, 'utf-8');
-    db.run(mainSchema);
-
-    // Load and execute monitoring schema
-    const monitoringSchemaPath = join(__dirname, '../../db/monitoring-schema.sql');
-    const monitoringSchema = readFileSync(monitoringSchemaPath, 'utf-8');
-    db.run(monitoringSchema);
+    // Load consolidated schema (includes all monitoring tables)
+    const schemaPath = join(__dirname, '../../db/schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
 
     ruleRepo = new TestMonitoringRuleRepository(db);
     stateRepo = new TestSignalStateRepository(db);

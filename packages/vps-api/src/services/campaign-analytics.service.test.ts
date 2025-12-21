@@ -792,9 +792,9 @@ async function createTestDb(): Promise<SqlJsDatabase> {
   const db = new SQL.Database();
   
   // Load campaign schema (includes worker_name column)
-  const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-  const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-  db.run(campaignSchema);
+  const schemaPath = join(__dirname, '../db/schema.sql');
+  const schema = readFileSync(schemaPath, 'utf-8');
+  db.run(schema);
   
   return db;
 }
@@ -930,9 +930,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipient) => {
             // Create fresh database for each iteration to ensure isolation
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -976,9 +976,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipient) => {
             // Create fresh database for each iteration to ensure isolation
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1032,9 +1032,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1086,9 +1086,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1206,9 +1206,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipient, note) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1274,9 +1274,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipient, markOperations) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1326,9 +1326,9 @@ describe('CampaignAnalyticsService', () => {
           (campaignId, valuable) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1375,9 +1375,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, campaignConfigs, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1445,9 +1445,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, campaignConfigs, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1513,9 +1513,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, campaignConfigs, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1577,9 +1577,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1640,9 +1640,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1710,9 +1710,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipient, repeatCount) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1772,9 +1772,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, campaignConfigs, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1834,9 +1834,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipient, repeatCount) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1892,9 +1892,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -1969,9 +1969,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipient) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2026,9 +2026,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, [recipient1, recipient2]) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2100,9 +2100,9 @@ describe('CampaignAnalyticsService', () => {
           (merchantId) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2139,9 +2139,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2201,9 +2201,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2256,9 +2256,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, [recipient1, recipient2]) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2333,9 +2333,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2398,9 +2398,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subject, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2450,9 +2450,9 @@ describe('CampaignAnalyticsService', () => {
           (sender, subjects, recipients) => {
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -2534,9 +2534,9 @@ describe('CampaignAnalyticsService', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestCampaignAnalyticsService(db);
 
@@ -2616,9 +2616,9 @@ describe('CampaignAnalyticsService', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestCampaignAnalyticsService(db);
 
@@ -2783,9 +2783,9 @@ describe('CampaignAnalyticsService', () => {
       const db = new SQL.Database();
       
       // Load campaign schema
-      const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-      const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-      db.run(campaignSchema);
+      const schemaPath = join(__dirname, '../db/schema.sql');
+      const schema = readFileSync(schemaPath, 'utf-8');
+      db.run(schema);
       
       // Add analysis_projects table
       db.run(`
@@ -2825,9 +2825,9 @@ describe('CampaignAnalyticsService', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add analysis_projects table
             db.run(`
@@ -2922,9 +2922,9 @@ describe('CampaignAnalyticsService', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add analysis_projects table
             db.run(`
@@ -2999,9 +2999,9 @@ describe('CampaignAnalyticsService', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithProjects(db);
 
@@ -3308,9 +3308,9 @@ describe('Merchant Data Deletion', () => {
           workerNameArb,
           (sender, subjects, recipients, workerName) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDelete(db);
 
@@ -3377,9 +3377,9 @@ describe('Merchant Data Deletion', () => {
           workerNameArb,
           (sender, subjects, recipient, workerName) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDelete(db);
 
@@ -3456,9 +3456,9 @@ describe('Merchant Data Deletion', () => {
             if (workerA === workerB) return;
 
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDelete(db);
 
@@ -3536,9 +3536,9 @@ describe('Merchant Data Deletion', () => {
           workerNameArb,
           (sender, subject, recipient, workerName) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDelete(db);
 
@@ -3595,9 +3595,9 @@ describe('Merchant Data Deletion', () => {
             if (workerA === workerB) return;
 
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDelete(db);
 
@@ -3779,9 +3779,9 @@ describe('Worker Data Isolation', () => {
             if (senders.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithWorkerStats(db);
 
@@ -3877,9 +3877,9 @@ describe('Worker Data Isolation', () => {
             if (subjects.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithWorkerStats(db);
 
@@ -3990,9 +3990,9 @@ describe('Worker Data Isolation', () => {
             if (workerA === workerB) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithWorkerStats(db);
 
@@ -4133,9 +4133,9 @@ describe('Worker Data Isolation', () => {
           workerNameArb, // workerName
           (sender, subject, recipient, workerName) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithWorkerVerification(db);
 
@@ -4173,9 +4173,9 @@ describe('Worker Data Isolation', () => {
           validEmailArb, // recipient
           (sender, subject, recipient) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithWorkerVerification(db);
 
@@ -4220,9 +4220,9 @@ describe('Worker Data Isolation', () => {
             if (recipients.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithWorkerVerification(db);
 
@@ -4458,9 +4458,9 @@ describe('Project Worker Association', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add analysis_projects table
             db.run(`
@@ -4543,9 +4543,9 @@ describe('Project Worker Association', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add analysis_projects table
             db.run(`
@@ -4643,9 +4643,9 @@ describe('Project Worker Association', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add analysis_projects table
             db.run(`
@@ -4737,9 +4737,9 @@ describe('Project Worker Association', () => {
             
             // Create fresh database for each iteration
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add analysis_projects table
             db.run(`
@@ -5070,9 +5070,9 @@ describe('Statistics Update After Delete', () => {
             if (subjects.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDeleteStats(db);
 
@@ -5163,9 +5163,9 @@ describe('Statistics Update After Delete', () => {
           workerNameArb,
           (sender, subject, recipient, workerName) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDeleteStats(db);
 
@@ -5233,9 +5233,9 @@ describe('Statistics Update After Delete', () => {
             if (workerA === workerB) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             const service = new TestServiceWithDeleteStats(db);
 
@@ -5536,9 +5536,9 @@ describe('Statistics Update After Delete', () => {
           fc.array(fc.integer({ min: 0, max: 86400000 }), { minLength: 2, maxLength: 5 }), // time offsets in ms
           (sender, subjects, recipient, workerName, timeOffsets) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
 
             const service = new TestServiceWithRebuild(db);
 
@@ -5803,9 +5803,9 @@ describe('Statistics Update After Delete', () => {
             if (subjectA === subjectB) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
 
             const service = new TestServiceWithRebuild(db);
 
@@ -5876,9 +5876,9 @@ describe('Statistics Update After Delete', () => {
             if (subjectA === subjectB) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
 
             const service = new TestServiceWithRebuild(db);
 
@@ -6050,9 +6050,9 @@ describe('Statistics Update After Delete', () => {
             if (newCustomer === oldCustomer) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
 
             // Add migration columns for root campaign and new user tracking
             db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -6300,9 +6300,9 @@ describe('Statistics Update After Delete', () => {
             if (rootSubject === nonRootSubject) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
 
             // Add migration columns for root campaign and new user tracking
             db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -6544,8 +6544,8 @@ describe('Statistics Update After Delete', () => {
             const db = new SQL.Database();
             
             try {
-              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+              const schemaPath = join(__dirname, '../db/schema.sql');
+              db.run(readFileSync(schemaPath, 'utf-8'));
 
               // Add migration columns for root campaign and new user tracking
               db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -6622,8 +6622,8 @@ describe('Statistics Update After Delete', () => {
             const db = new SQL.Database();
             
             try {
-              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+              const schemaPath = join(__dirname, '../db/schema.sql');
+              db.run(readFileSync(schemaPath, 'utf-8'));
 
               // Add migration columns
               db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -6757,8 +6757,8 @@ describe('Statistics Update After Delete', () => {
             const db = new SQL.Database();
             
             try {
-              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+              const schemaPath = join(__dirname, '../db/schema.sql');
+              db.run(readFileSync(schemaPath, 'utf-8'));
 
               // Add migration columns
               db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -6833,8 +6833,8 @@ describe('Statistics Update After Delete', () => {
             const db = new SQL.Database();
             
             try {
-              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+              const schemaPath = join(__dirname, '../db/schema.sql');
+              db.run(readFileSync(schemaPath, 'utf-8'));
 
               // Add migration columns
               db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -6912,8 +6912,8 @@ describe('Statistics Update After Delete', () => {
             const db = new SQL.Database();
             
             try {
-              const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-              db.run(readFileSync(campaignSchemaPath, 'utf-8'));
+              const schemaPath = join(__dirname, '../db/schema.sql');
+              db.run(readFileSync(schemaPath, 'utf-8'));
 
               // Add migration columns
               db.run('ALTER TABLE campaigns ADD COLUMN is_root INTEGER DEFAULT 0');
@@ -7021,9 +7021,9 @@ describe('Statistics Update After Delete', () => {
           fc.array(fc.tuple(workerNameArb, fc.integer({ min: 1, max: 5 })), { minLength: 2, maxLength: 3 }),
           (domain, workerEmailCounts) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -7100,9 +7100,9 @@ describe('Statistics Update After Delete', () => {
           fc.integer({ min: 1, max: 10 }),
           (domain, worker1Emails, worker2Emails) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -7206,9 +7206,9 @@ describe('Statistics Update After Delete', () => {
             if (uniqueWorkers.size < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -7283,9 +7283,9 @@ describe('Statistics Update After Delete', () => {
             if (uniqueWorkers.length < 2) return;
             
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -7335,9 +7335,9 @@ describe('Statistics Update After Delete', () => {
           fc.integer({ min: 1, max: 10 }),
           (domain, worker1Emails, worker2Emails) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             const service = new TestCampaignAnalyticsService(db);
 
             try {
@@ -7510,9 +7510,9 @@ describe('Statistics Update After Delete', () => {
           workerNameArb,
           (domain, projectName, workerName) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add worker_names column for multi-worker support
             db.run(`
@@ -7578,9 +7578,9 @@ describe('Statistics Update After Delete', () => {
             .filter(arr => new Set(arr).size === arr.length), // Ensure unique workers
           (domain, projectName, workerNames) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add worker_names column for multi-worker support
             db.run(`
@@ -7650,9 +7650,9 @@ describe('Statistics Update After Delete', () => {
           fc.shuffledSubarray(['worker1.store', 'worker2.store', 'worker3.store'], { minLength: 2, maxLength: 3 }),
           (domain, projectName, workerNames) => {
             const db = new SQL.Database();
-            const campaignSchemaPath = join(__dirname, '../db/campaign-schema.sql');
-            const campaignSchema = readFileSync(campaignSchemaPath, 'utf-8');
-            db.run(campaignSchema);
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
             
             // Add worker_names column for multi-worker support
             db.run(`

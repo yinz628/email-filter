@@ -111,12 +111,75 @@ CREATE TABLE IF NOT EXISTS system_logs (
   level TEXT NOT NULL DEFAULT 'info' CHECK(level IN ('info', 'warn', 'error')),
   message TEXT NOT NULL,
   details TEXT,
+  worker_name TEXT DEFAULT 'global',
   created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_logs_category ON system_logs(category);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON system_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_level ON system_logs(level);
+CREATE INDEX IF NOT EXISTS idx_logs_worker_name ON system_logs(worker_name);
+
+-- 监控规则表
+CREATE TABLE IF NOT EXISTS monitoring_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
+  match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
+  pattern TEXT NOT NULL,
+  threshold INTEGER NOT NULL DEFAULT 1,
+  time_window_minutes INTEGER NOT NULL DEFAULT 60,
+  alert_type TEXT NOT NULL DEFAULT 'count' CHECK(alert_type IN ('count', 'rate')),
+  worker_scope TEXT DEFAULT 'global',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_monitoring_rules_enabled ON monitoring_rules(enabled);
+CREATE INDEX IF NOT EXISTS idx_monitoring_rules_worker_scope ON monitoring_rules(worker_scope);
+
+-- 监控命中日志表
+CREATE TABLE IF NOT EXISTS hit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hit_logs_rule ON hit_logs(rule_id);
+CREATE INDEX IF NOT EXISTS idx_hit_logs_created ON hit_logs(created_at);
+
+-- 监控告警表
+CREATE TABLE IF NOT EXISTS alerts (
+  id TEXT PRIMARY KEY,
+  rule_id TEXT NOT NULL,
+  triggered_at TEXT NOT NULL,
+  hit_count INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'acknowledged', 'resolved')),
+  resolved_at TEXT,
+  FOREIGN KEY (rule_id) REFERENCES monitoring_rules(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_rule ON alerts(rule_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+CREATE INDEX IF NOT EXISTS idx_alerts_triggered ON alerts(triggered_at);
+
+-- 心跳日志表
+CREATE TABLE IF NOT EXISTS heartbeat_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checked_at TEXT NOT NULL,
+  rules_checked INTEGER NOT NULL DEFAULT 0,
+  state_changes INTEGER NOT NULL DEFAULT 0,
+  alerts_triggered INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_checked ON heartbeat_logs(checked_at);
 
 
 -- ============================================

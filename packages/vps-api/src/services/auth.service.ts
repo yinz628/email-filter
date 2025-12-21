@@ -112,9 +112,32 @@ export class AuthService {
     };
 
     // Requirement 2.5: Set expiration time
+    // Parse tokenExpiry string to get seconds
+    const expiresInSeconds = this.parseExpiry(this.tokenExpiry);
     return jwt.sign(payload, this.jwtSecret, {
-      expiresIn: this.tokenExpiry,
+      expiresIn: expiresInSeconds,
     });
+  }
+
+  /**
+   * Parse expiry string to seconds
+   * @param expiry - Expiry string like '24h', '7d', '1h'
+   * @returns Number of seconds
+   */
+  private parseExpiry(expiry: string): number {
+    const match = expiry.match(/^(\d+)([hdms])$/);
+    if (!match) {
+      return 86400; // Default to 24 hours
+    }
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    switch (unit) {
+      case 'h': return value * 3600;
+      case 'd': return value * 86400;
+      case 'm': return value * 60;
+      case 's': return value;
+      default: return 86400;
+    }
   }
 
   /**

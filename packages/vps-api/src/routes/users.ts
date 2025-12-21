@@ -82,9 +82,9 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
    * 
    * Requirements: 10.2
    */
-  fastify.post<{ Body: CreateUserBody }>('/', async (request: AuthenticatedRequest, reply: FastifyReply) => {
+  fastify.post<{ Body: CreateUserBody }>('/', async (request, reply: FastifyReply) => {
     try {
-      const { username, password, role } = request.body;
+      const { username, password, role } = request.body as CreateUserBody;
 
       // Validate input
       if (!username || !password) {
@@ -155,10 +155,10 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
    * 
    * Requirements: 10.3
    */
-  fastify.put<{ Params: UserParams; Body: UpdateUserBody }>('/:id', async (request: AuthenticatedRequest, reply: FastifyReply) => {
+  fastify.put<{ Params: UserParams; Body: UpdateUserBody }>('/:id', async (request, reply: FastifyReply) => {
     try {
-      const { id } = request.params;
-      const { password, role } = request.body;
+      const { id } = request.params as UserParams;
+      const { password, role } = request.body as UpdateUserBody;
 
       // Check if user exists
       const existingUser = userService.findById(id);
@@ -227,9 +227,9 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
    * 
    * Requirements: 10.4
    */
-  fastify.delete<{ Params: UserParams }>('/:id', async (request: AuthenticatedRequest, reply: FastifyReply) => {
+  fastify.delete<{ Params: UserParams }>('/:id', async (request, reply: FastifyReply) => {
     try {
-      const { id } = request.params;
+      const { id } = request.params as UserParams;
 
       // Check if user exists
       const existingUser = userService.findById(id);
@@ -241,7 +241,8 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Prevent deleting yourself
-      if (request.user && request.user.userId === id) {
+      const authRequest = request as AuthenticatedRequest;
+      if (authRequest.user && authRequest.user.userId === id) {
         return reply.status(400).send({
           success: false,
           error: 'Cannot delete your own account',

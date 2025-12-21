@@ -26,6 +26,7 @@ import { ProjectPathAnalysisService, type ProjectRootCampaign, type ProjectPathE
 import { analysisQueue } from '../services/analysis-queue.service.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { getEffectiveWorkerNames, campaignBelongsToWorkers } from '../utils/project-helpers.js';
 
 // ============================================
 // Validation Functions
@@ -1796,7 +1797,11 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
    * GET /api/campaign/projects/:id/root-campaigns
    * Get Root campaigns for a project
    * 
-   * Requirements: 2.2, 2.5
+   * Note: This endpoint returns root campaigns that are already project-scoped
+   * (stored in project_root_campaigns table). No additional worker filtering
+   * is needed because root campaigns are explicitly set per project.
+   * 
+   * Requirements: 2.2, 2.3, 2.5
    */
   fastify.get('/projects/:id/root-campaigns', async (
     request: FastifyRequest<{ Params: { id: string } }>,
@@ -1813,6 +1818,9 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Project not found' });
       }
 
+      // Root campaigns are already project-scoped in the database
+      // No worker filtering needed here - data isolation is maintained
+      // by the project_root_campaigns table's project_id foreign key
       const rootCampaigns = pathService.getProjectRootCampaigns(request.params.id);
 
       return reply.send({
@@ -1829,7 +1837,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
    * POST /api/campaign/projects/:id/root-campaigns
    * Set a Root campaign for a project
    * 
-   * Requirements: 2.1, 2.4
+   * Requirements: 2.1, 2.3, 2.4
    */
   fastify.post('/projects/:id/root-campaigns', async (
     request: FastifyRequest<{ Params: { id: string } }>,
@@ -1859,6 +1867,20 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       const campaign = analyticsService.getCampaignById(body.campaignId);
       if (!campaign) {
         return reply.status(404).send({ error: 'Campaign not found' });
+      }
+
+      // Derive effective worker names from project configuration (Requirements: 2.3)
+      // Ensure consistent worker filter logic across all project endpoints
+      const effectiveWorkerNames = getEffectiveWorkerNames(project);
+
+      // Validate that the campaign belongs to the project's worker(s)
+      if (effectiveWorkerNames && effectiveWorkerNames.length > 0) {
+        if (!campaignBelongsToWorkers(db, body.campaignId, effectiveWorkerNames)) {
+          return reply.status(400).send({ 
+            error: 'Invalid campaign', 
+            message: 'Campaign does not belong to this project\'s worker(s)' 
+          });
+        }
       }
 
       pathService.setProjectRootCampaign(request.params.id, body.campaignId, isConfirmed);
@@ -2071,6 +2093,8 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
    * 
    * This endpoint returns campaigns with project-specific tag overrides,
    * ensuring data isolation between projects.
+   * 
+   * Requirements: 1.1, 1.2, 2.1, 2.2
    */
   fastify.get('/projects/:id/campaigns', async (
     request: FastifyRequest<{ Params: { id: string } }>,
@@ -2087,11 +2111,15 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Project not found' });
       }
 
+      // Derive effective worker names from project configuration
+      // Use workerNames if available and non-empty, otherwise use [workerName]
+      const effectiveWorkerNames = getEffectiveWorkerNames(project);
+
       // Get campaigns with project-level tags
       const campaigns = pathService.getProjectCampaignsWithTags(
         request.params.id,
         project.merchantId,
-        project.workerNames
+        effectiveWorkerNames
       );
 
       return reply.send({

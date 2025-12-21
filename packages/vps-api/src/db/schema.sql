@@ -284,3 +284,43 @@ CREATE TABLE IF NOT EXISTS project_campaign_tags (
 
 CREATE INDEX IF NOT EXISTS idx_project_campaign_tags_project ON project_campaign_tags(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_campaign_tags_campaign ON project_campaign_tags(campaign_id);
+
+-- ============================================
+-- User Authentication Schema
+-- ============================================
+
+-- 用户表
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+-- 用户设置表
+CREATE TABLE IF NOT EXISTS user_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_settings_user ON user_settings(user_id);
+
+-- Token黑名单表
+CREATE TABLE IF NOT EXISTS token_blacklist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_hash ON token_blacklist(token_hash);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);

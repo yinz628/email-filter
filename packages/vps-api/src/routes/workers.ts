@@ -49,7 +49,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
    * Create a new worker instance
    */
   fastify.post<{ Body: CreateWorkerInput }>('/', async (request, reply) => {
-    const { name, domain, defaultForwardTo } = request.body;
+    const { name, domain, defaultForwardTo, workerUrl } = request.body;
 
     if (!name || !defaultForwardTo) {
       return reply.status(400).send({
@@ -59,7 +59,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     try {
-      const worker = getRepository().create({ name, domain, defaultForwardTo });
+      const worker = getRepository().create({ name, domain, defaultForwardTo, workerUrl });
       return reply.status(201).send({ worker });
     } catch (error: any) {
       if (error.message?.includes('UNIQUE constraint failed')) {

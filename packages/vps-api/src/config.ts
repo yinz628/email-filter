@@ -15,6 +15,8 @@ export interface Config {
   apiToken: string;
   defaultForwardTo: string;
   nodeEnv: string;
+  /** Public URL of this VPS API (for webhook endpoint) */
+  vpsPublicUrl: string;
   /** JWT secret key for signing tokens - MUST be changed in production */
   jwtSecret: string;
   /** JWT token expiration time (e.g., '24h', '7d') */
@@ -45,6 +47,8 @@ export const config: Config = {
   apiToken: process.env.API_TOKEN || 'dev-token',
   defaultForwardTo: process.env.DEFAULT_FORWARD_TO || '',
   nodeEnv: process.env.NODE_ENV || 'development',
+  // VPS Public URL (for checking if worker is connected to this VPS)
+  vpsPublicUrl: process.env.VPS_PUBLIC_URL || '',
   // JWT Authentication Configuration
   jwtSecret: process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production',
   jwtExpiry: process.env.JWT_EXPIRY || '24h',

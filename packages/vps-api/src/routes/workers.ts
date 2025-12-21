@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { WorkerRepository, type CreateWorkerInput, type UpdateWorkerInput } from '../db/worker-repository.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { config } from '../config.js';
 
 interface WorkerParams {
   id: string;
@@ -129,7 +130,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
       return { online: false, error: 'No worker URL configured' };
     }
 
-    const health = await getRepository().checkWorkerHealth(worker.workerUrl);
+    const health = await getRepository().checkWorkerHealth(worker.workerUrl, config.vpsPublicUrl);
     return health;
   });
 
@@ -139,12 +140,12 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get('/health/all', async () => {
     const workers = getRepository().findAll();
-    const results: Record<string, { online: boolean; latency?: number; error?: string }> = {};
+    const results: Record<string, { online: boolean; latency?: number; error?: string; connectedToMe?: boolean; workerVpsUrl?: string }> = {};
 
     await Promise.all(
       workers.map(async (worker) => {
         if (worker.workerUrl) {
-          results[worker.id] = await getRepository().checkWorkerHealth(worker.workerUrl);
+          results[worker.id] = await getRepository().checkWorkerHealth(worker.workerUrl, config.vpsPublicUrl);
         } else {
           results[worker.id] = { online: false, error: 'No URL' };
         }

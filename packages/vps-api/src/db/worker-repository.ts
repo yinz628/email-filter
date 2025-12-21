@@ -192,11 +192,13 @@ export class WorkerRepository {
   /**
    * Check if a worker is online by calling its health endpoint
    */
-  async checkWorkerHealth(workerUrl: string): Promise<{ 
+  async checkWorkerHealth(workerUrl: string, vpsPublicUrl?: string): Promise<{ 
     online: boolean; 
     latency?: number; 
     error?: string;
     vpsConnection?: { success: boolean; latency: number; error?: string };
+    connectedToMe?: boolean;
+    workerVpsUrl?: string;
   }> {
     if (!workerUrl) {
       return { online: false, error: 'No worker URL configured' };
@@ -220,10 +222,24 @@ export class WorkerRepository {
 
       if (response.ok) {
         const data = await response.json() as any;
+        const workerVpsUrl = data.vpsApiUrl || '';
+        
+        // Check if worker is connected to this VPS
+        let connectedToMe = false;
+        if (vpsPublicUrl && workerVpsUrl && workerVpsUrl !== 'NOT SET') {
+          // Normalize URLs for comparison (remove trailing slashes)
+          const normalizedVpsUrl = vpsPublicUrl.replace(/\/+$/, '');
+          const normalizedWorkerUrl = workerVpsUrl.replace(/\/+$/, '');
+          connectedToMe = normalizedWorkerUrl.includes(normalizedVpsUrl) || 
+                          normalizedVpsUrl.includes(normalizedWorkerUrl.replace('/api/webhook/email', ''));
+        }
+        
         return { 
           online: true, 
           latency,
           vpsConnection: data.vpsConnection,
+          connectedToMe,
+          workerVpsUrl,
         };
       } else {
         return { online: false, latency, error: `HTTP ${response.status}` };

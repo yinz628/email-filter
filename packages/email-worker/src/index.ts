@@ -428,7 +428,7 @@ export default {
     if (url.pathname === '/test-connection') {
       const result = {
         workerName: env.WORKER_NAME,
-        vpsApiUrl: env.VPS_API_URL ? env.VPS_API_URL.substring(0, 50) + '...' : 'NOT SET',
+        vpsApiUrl: env.VPS_API_URL || 'NOT SET',
         vpsApiToken: env.VPS_API_TOKEN ? '***configured***' : 'NOT SET',
         timestamp: Date.now(),
         vpsConnection: { success: false, error: '', latency: 0 },

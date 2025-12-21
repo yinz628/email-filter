@@ -10,7 +10,7 @@
 /**
  * Match mode for pattern matching
  */
-export type MatchMode = 'contains' | 'regex';
+export type MatchMode = 'exact' | 'contains' | 'startsWith' | 'endsWith' | 'regex';
 
 /**
  * Result of a pattern match operation
@@ -38,17 +38,23 @@ export interface PatternValidationResult {
  */
 export function matchSubject(pattern: string, subject: string, mode: MatchMode = 'contains'): PatternMatchResult {
   try {
-    if (mode === 'contains') {
-      // Case-insensitive contains matching
-      return {
-        matched: subject.toLowerCase().includes(pattern.toLowerCase()),
-      };
-    } else {
-      // Regex matching
-      const regex = new RegExp(pattern, 'i'); // Case-insensitive matching
-      return {
-        matched: regex.test(subject),
-      };
+    const lowerSubject = subject.toLowerCase();
+    const lowerPattern = pattern.toLowerCase();
+    
+    switch (mode) {
+      case 'exact':
+        return { matched: lowerSubject === lowerPattern };
+      case 'contains':
+        return { matched: lowerSubject.includes(lowerPattern) };
+      case 'startsWith':
+        return { matched: lowerSubject.startsWith(lowerPattern) };
+      case 'endsWith':
+        return { matched: lowerSubject.endsWith(lowerPattern) };
+      case 'regex':
+        const regex = new RegExp(pattern, 'i');
+        return { matched: regex.test(subject) };
+      default:
+        return { matched: false, error: `Unknown match mode: ${mode}` };
     }
   } catch (error) {
     return {

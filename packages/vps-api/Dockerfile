@@ -9,9 +9,9 @@ RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /et
     echo "deb http://security.debian.org/debian-security bullseye-security main contrib non-free" >> /etc/apt/sources.list
 
 # Install build tools for native modules
-RUN apt-get update
-RUN apt-get install -y --no-install-recommends python3 build-essential wget
-RUN rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 build-essential wget g++ make && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
@@ -25,8 +25,16 @@ COPY pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/vps-api/package.json ./packages/vps-api/
 
-# Install dependencies (this will compile better-sqlite3)
+# Install dependencies
 RUN pnpm install --frozen-lockfile
+
+# Force rebuild better-sqlite3 from source
+RUN cd /app/node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && \
+    npm run build-release && \
+    ls -la build/Release/
+
+# Verify better-sqlite3 is working
+RUN node -e "require('better-sqlite3'); console.log('✓ better-sqlite3 compiled successfully')"
 
 # Copy source files
 COPY tsconfig.json ./

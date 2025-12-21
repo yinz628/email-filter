@@ -263,8 +263,15 @@ cd /opt/email-filter
 # 上传项目文件（从本地）
 # scp -r ./* user@your-vps:/opt/email-filter/
 
+# 安装编译工具（用于编译原生模块）
+sudo apt-get install -y build-essential python3
+
 # 安装依赖
 pnpm install
+
+# 编译原生模块（better-sqlite3 需要编译）
+# pnpm 可能会跳过 build scripts，需要手动编译
+npm rebuild better-sqlite3
 
 # 构建 shared 包
 cd packages/shared
@@ -907,7 +914,30 @@ docker compose logs -f api
 1. 确认 Worker 的 `WORKER_NAME` 已在 VPS API 中注册
 2. 检查名称是否完全匹配（区分大小写）
 
-### 4. 数据库权限问题
+### 4. 原生模块编译问题 (better-sqlite3)
+
+**症状**: `Could not locate the bindings file` 或 `better_sqlite3.node` 找不到
+
+**原因**: `better-sqlite3` 是原生 Node.js 模块，需要在目标系统上编译。pnpm 可能会跳过 build scripts。
+
+**解决方案**:
+```bash
+# 1. 安装编译工具
+sudo apt-get install -y build-essential python3
+
+# 2. 重新编译原生模块
+cd /opt/email-filter
+npm rebuild better-sqlite3
+
+# 3. 如果上述方法不行，手动进入模块目录编译
+cd /opt/email-filter/node_modules/.pnpm/better-sqlite3@9.6.0/node_modules/better-sqlite3
+npm run build-release
+
+# 4. 重启服务
+sudo systemctl restart email-filter-api
+```
+
+### 5. 数据库权限问题
 
 **症状**: `SQLITE_CANTOPEN` 错误
 

@@ -16,3 +16,4 @@ export * from './rule-cache.instance.js';
 export * from './user.service.js';
 export * from './auth.service.js';
 export * from './user-settings.service.js';
+export * from './backup.service.js';

@@ -21,6 +21,7 @@ import {
   userSettingsRoutes,
   usersRoutes,
   cleanupSettingsRoutes,
+  backupRoutes,
 } from './routes/index.js';
 import { SchedulerService } from './services/monitoring/index.js';
 import { UserService } from './services/user.service.js';
@@ -115,6 +116,7 @@ async function start() {
     await fastify.register(userSettingsRoutes, { prefix: '/api/user' });
     await fastify.register(usersRoutes, { prefix: '/api/admin/users' });
     await fastify.register(cleanupSettingsRoutes, { prefix: '/api/admin/cleanup' });
+    await fastify.register(backupRoutes, { prefix: '/api/admin/backup' });
 
     // Initialize and start scheduler for monitoring tasks
     // - Heartbeat checks every 5 minutes (Requirement 4.1)

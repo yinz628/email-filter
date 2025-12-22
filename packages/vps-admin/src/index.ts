@@ -20,6 +20,11 @@ await app.register(cookie, {
   secret: config.sessionSecret,
 });
 
+// Add content type parser for raw binary data (used by backup restore proxy)
+app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (req, body, done) => {
+  done(null, body);
+});
+
 // Health check (no auth)
 app.get('/health', async () => {
   return { status: 'healthy', service: 'vps-admin' };

@@ -68,6 +68,11 @@ async function start() {
       origin: true,
     });
 
+    // Add content type parser for raw binary data (used by backup restore)
+    fastify.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (req, body, done) => {
+      done(null, body);
+    });
+
     // Health check endpoint
     fastify.get('/health', async (request, reply) => {
       const startTime = Date.now();

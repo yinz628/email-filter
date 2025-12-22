@@ -3135,7 +3135,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       try {
         const res = await fetch('/api/admin/cleanup/run', {
           method: 'POST',
-          headers: getHeaders()
+          headers: getHeaders(),
+          body: JSON.stringify({})
         });
         const data = await res.json();
         

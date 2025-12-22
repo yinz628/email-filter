@@ -30,14 +30,14 @@ export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
    * GET /api/admin/backup/download/:filename
    * Download a specific backup file
    * This route has special auth handling to support token in query params for browser downloads
+   * Registered WITHOUT the global auth hook
    * 
    * Requirements: 2.1, 2.2, 2.3
    */
   fastify.get<{ Params: { filename: string }; Querystring: { token?: string } }>(
     '/download/:filename',
-    {
-      // Skip the global preHandler hook for this route
-      preHandler: async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
+      try {
         // Support token from query params for browser downloads
         const queryToken = request.query.token;
         const authHeader = queryToken 
@@ -47,16 +47,12 @@ export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
         // Verify authentication
         const authResult = verifyBearerToken(authHeader);
         if (!authResult.valid) {
-          reply.status(401).send({
+          return reply.status(401).send({
             success: false,
             error: authResult.error || 'Unauthorized',
           });
-          return;
         }
-      }
-    },
-    async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
-      try {
+        
         const { filename } = request.params;
         
         // Validate filename (prevent path traversal)
@@ -95,151 +91,154 @@ export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Apply auth middleware to all other routes in this plugin
-  // Requirement: 6.1
-  fastify.addHook('preHandler', authMiddleware);
+  // Register protected routes in a sub-plugin with auth middleware
+  // This ensures the download route above is NOT affected by the auth hook
+  await fastify.register(async (protectedRoutes) => {
+    // Apply auth middleware only to routes in this sub-plugin
+    protectedRoutes.addHook('preHandler', authMiddleware);
 
-  /**
-   * POST /api/admin/backup/create
-   * Create a new backup of the database
-   * 
-   * Requirements: 1.1, 1.4
-   */
-  fastify.post('/create', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const result = backupService.createBackup();
-      
-      return reply.send({
-        success: true,
-        backup: {
-          filename: result.filename,
-          size: result.size,
-          createdAt: result.createdAt,
-          isPreRestore: false,
-        },
-        message: 'Backup created successfully',
-      });
-    } catch (error) {
-      request.log.error(error, 'Error creating backup');
-      return reply.status(500).send({
-        success: false,
-        error: `Failed to create backup: ${error instanceof Error ? error.message : 'unknown error'}`,
-      });
-    }
-  });
-
-  /**
-   * GET /api/admin/backup/list
-   * List all available backups
-   * 
-   * Requirements: 4.1, 4.2, 4.3
-   */
-  fastify.get('/list', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const result = backupService.listBackups();
-      
-      return reply.send({
-        success: true,
-        backups: result.backups,
-        totalCount: result.totalCount,
-        totalSize: result.totalSize,
-      });
-    } catch (error) {
-      request.log.error(error, 'Error listing backups');
-      return reply.status(500).send({
-        success: false,
-        error: `Failed to list backups: ${error instanceof Error ? error.message : 'unknown error'}`,
-      });
-    }
-  });
-
-  /**
-   * POST /api/admin/backup/restore
-   * Restore database from uploaded backup file
-   * 
-   * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5
-   */
-  fastify.post('/restore', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      // Get raw body as buffer
-      const body = request.body as Buffer;
-      
-      if (!body || body.length === 0) {
-        return reply.status(400).send({
-          success: false,
-          error: 'No backup file provided',
-        });
-      }
-      
-      // Restore the backup with database callbacks
-      const result = backupService.restoreBackup(
-        body,
-        () => closeDatabase(),
-        () => initializeDatabase()
-      );
-      
-      return reply.send({
-        success: true,
-        preRestoreBackup: result.preRestoreBackup,
-        restoredFrom: result.restoredFrom,
-        message: 'Database restored successfully',
-      });
-    } catch (error) {
-      request.log.error(error, 'Error restoring backup');
-      
-      // Check if it's a validation error
-      const errorMessage = error instanceof Error ? error.message : 'unknown error';
-      const isValidationError = errorMessage.includes('Invalid backup file');
-      
-      return reply.status(isValidationError ? 400 : 500).send({
-        success: false,
-        error: errorMessage,
-      });
-    }
-  });
-
-  /**
-   * DELETE /api/admin/backup/:filename
-   * Delete a specific backup file
-   * 
-   * Requirements: 5.1, 5.2, 5.3
-   */
-  fastify.delete<{ Params: { filename: string } }>(
-    '/:filename',
-    async (request: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
+    /**
+     * POST /api/admin/backup/create
+     * Create a new backup of the database
+     * 
+     * Requirements: 1.1, 1.4
+     */
+    protectedRoutes.post('/create', async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { filename } = request.params;
-        
-        // Validate filename (prevent path traversal)
-        const sanitizedFilename = basename(filename);
-        if (sanitizedFilename !== filename || !filename.endsWith('.db.gz')) {
-          return reply.status(400).send({
-            success: false,
-            error: 'Invalid filename',
-          });
-        }
-        
-        const deleted = backupService.deleteBackup(sanitizedFilename);
-        
-        if (!deleted) {
-          return reply.status(404).send({
-            success: false,
-            error: 'Backup file not found',
-          });
-        }
+        const result = backupService.createBackup();
         
         return reply.send({
           success: true,
-          deleted: sanitizedFilename,
-          message: 'Backup deleted successfully',
+          backup: {
+            filename: result.filename,
+            size: result.size,
+            createdAt: result.createdAt,
+            isPreRestore: false,
+          },
+          message: 'Backup created successfully',
         });
       } catch (error) {
-        request.log.error(error, 'Error deleting backup');
+        request.log.error(error, 'Error creating backup');
         return reply.status(500).send({
           success: false,
-          error: `Failed to delete backup: ${error instanceof Error ? error.message : 'unknown error'}`,
+          error: `Failed to create backup: ${error instanceof Error ? error.message : 'unknown error'}`,
         });
       }
-    }
-  );
+    });
+
+    /**
+     * GET /api/admin/backup/list
+     * List all available backups
+     * 
+     * Requirements: 4.1, 4.2, 4.3
+     */
+    protectedRoutes.get('/list', async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const result = backupService.listBackups();
+        
+        return reply.send({
+          success: true,
+          backups: result.backups,
+          totalCount: result.totalCount,
+          totalSize: result.totalSize,
+        });
+      } catch (error) {
+        request.log.error(error, 'Error listing backups');
+        return reply.status(500).send({
+          success: false,
+          error: `Failed to list backups: ${error instanceof Error ? error.message : 'unknown error'}`,
+        });
+      }
+    });
+
+    /**
+     * POST /api/admin/backup/restore
+     * Restore database from uploaded backup file
+     * 
+     * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5
+     */
+    protectedRoutes.post('/restore', async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        // Get raw body as buffer
+        const body = request.body as Buffer;
+        
+        if (!body || body.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: 'No backup file provided',
+          });
+        }
+        
+        // Restore the backup with database callbacks
+        const result = backupService.restoreBackup(
+          body,
+          () => closeDatabase(),
+          () => initializeDatabase()
+        );
+        
+        return reply.send({
+          success: true,
+          preRestoreBackup: result.preRestoreBackup,
+          restoredFrom: result.restoredFrom,
+          message: 'Database restored successfully',
+        });
+      } catch (error) {
+        request.log.error(error, 'Error restoring backup');
+        
+        // Check if it's a validation error
+        const errorMessage = error instanceof Error ? error.message : 'unknown error';
+        const isValidationError = errorMessage.includes('Invalid backup file');
+        
+        return reply.status(isValidationError ? 400 : 500).send({
+          success: false,
+          error: errorMessage,
+        });
+      }
+    });
+
+    /**
+     * DELETE /api/admin/backup/:filename
+     * Delete a specific backup file
+     * 
+     * Requirements: 5.1, 5.2, 5.3
+     */
+    protectedRoutes.delete<{ Params: { filename: string } }>(
+      '/:filename',
+      async (request: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
+        try {
+          const { filename } = request.params;
+          
+          // Validate filename (prevent path traversal)
+          const sanitizedFilename = basename(filename);
+          if (sanitizedFilename !== filename || !filename.endsWith('.db.gz')) {
+            return reply.status(400).send({
+              success: false,
+              error: 'Invalid filename',
+            });
+          }
+          
+          const deleted = backupService.deleteBackup(sanitizedFilename);
+          
+          if (!deleted) {
+            return reply.status(404).send({
+              success: false,
+              error: 'Backup file not found',
+            });
+          }
+          
+          return reply.send({
+            success: true,
+            deleted: sanitizedFilename,
+            message: 'Backup deleted successfully',
+          });
+        } catch (error) {
+          request.log.error(error, 'Error deleting backup');
+          return reply.status(500).send({
+            success: false,
+            error: `Failed to delete backup: ${error instanceof Error ? error.message : 'unknown error'}`,
+          });
+        }
+      }
+    );
+  });
 }

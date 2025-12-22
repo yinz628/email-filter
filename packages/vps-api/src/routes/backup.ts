@@ -35,8 +35,9 @@ export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get<{ Params: { filename: string }; Querystring: { token?: string } }>(
     '/download/:filename',
-    async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
-      try {
+    {
+      // Skip the global preHandler hook for this route
+      preHandler: async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
         // Support token from query params for browser downloads
         const queryToken = request.query.token;
         const authHeader = queryToken 
@@ -46,12 +47,16 @@ export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
         // Verify authentication
         const authResult = verifyBearerToken(authHeader);
         if (!authResult.valid) {
-          return reply.status(401).send({
+          reply.status(401).send({
             success: false,
             error: authResult.error || 'Unauthorized',
           });
+          return;
         }
-        
+      }
+    },
+    async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
+      try {
         const { filename } = request.params;
         
         // Validate filename (prevent path traversal)

@@ -172,6 +172,13 @@ docker compose down
 docker compose build --no-cache
 docker compose up -d
 
+# 小更新
+cd /opt/email-filter
+git pull
+docker compose build
+docker compose up -d
+
+
 # 进入容器调试
 docker compose exec api sh
 docker compose exec admin sh

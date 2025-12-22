@@ -2129,7 +2129,8 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       });
     } catch (error) {
       request.log.error(error, 'Error fetching project campaigns');
-      return reply.status(500).send({ error: 'Internal error' });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return reply.status(500).send({ error: 'Internal error', message: errorMessage });
     }
   });
 

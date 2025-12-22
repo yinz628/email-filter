@@ -356,12 +356,13 @@ sudo nano /etc/nginx/sites-available/email-filter
 ```nginx
 server {
 listen 80;
-server_name jpacc-e.feimails.com; # 你设置的A解析的域名
+server_name lx.feimails.com; # 你设置的A解析的域名
 return 301 https://$server_name$request_uri;
 }
 server {
-listen 443 ssl http2;
-server_name jpacc-e.feimails.com; # 你设置的A解析的域名
+listen 443 ssl;
+http2 on;
+server_name lx.feimails.com; # 你设置的A解析的域名
 # SSL证书配置
 ssl_certificate /opt/api/server.cer; # 替换为你的证书路径
 ssl_certificate_key /opt/api/server.key; # 替换为你的私钥路径

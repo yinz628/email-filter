@@ -8005,7 +8005,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     async function loadBackups() {
       try {
-        const res = await fetch(API_BASE + '/admin/backup/list', {
+        const res = await fetch('/api/admin/backup/list', {
           headers: { 'Authorization': 'Bearer ' + apiToken }
         });
         const data = await res.json();
@@ -8054,7 +8054,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         btn.textContent = '创建中...';
       }
       try {
-        const res = await fetch(API_BASE + '/admin/backup/create', {
+        const res = await fetch('/api/admin/backup/create', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + apiToken }
         });
@@ -8077,13 +8077,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     function downloadBackup(filename) {
-      window.location.href = API_BASE + '/admin/backup/download/' + encodeURIComponent(filename) + '?token=' + encodeURIComponent(apiToken);
+      window.location.href = '/api/admin/backup/download/' + encodeURIComponent(filename) + '?token=' + encodeURIComponent(apiToken);
     }
 
     async function deleteBackup(filename) {
       if (!confirm('确定要删除备份 ' + filename + ' 吗？')) return;
       try {
-        const res = await fetch(API_BASE + '/admin/backup/' + encodeURIComponent(filename), {
+        const res = await fetch('/api/admin/backup/' + encodeURIComponent(filename), {
           method: 'DELETE',
           headers: { 'Authorization': 'Bearer ' + apiToken }
         });
@@ -8118,7 +8118,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       try {
         const buffer = await file.arrayBuffer();
-        const res = await fetch(API_BASE + '/admin/backup/restore', {
+        const res = await fetch('/api/admin/backup/restore', {
           method: 'POST',
           headers: { 
             'Authorization': 'Bearer ' + apiToken,

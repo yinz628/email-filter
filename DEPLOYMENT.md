@@ -79,7 +79,7 @@ exit
 ```bash
 # 创建目录
 sudo mkdir -p /opt/email-filter
-cd /opt/email-filter
+cd /opt/
 
 # 克隆项目
 git clone -b feature/backup-restore https://github.com/yinz628/email-filter.git
@@ -89,6 +89,7 @@ git clone -b feature/backup-restore https://github.com/yinz628/email-filter.git
 
 ```bash
 # 复制示例配置
+cd /opt/email-filter
 cp .env.example .env
 
 # 生成随机令牌

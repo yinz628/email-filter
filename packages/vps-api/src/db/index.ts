@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config.js';
+import { runMigrations } from './run-migrations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,6 +13,7 @@ let db: Database.Database | null = null;
 /**
  * Initialize the SQLite database
  * Creates the database file and tables if they don't exist
+ * Automatically runs migrations to ensure schema is up to date
  */
 export function initializeDatabase(dbPath?: string): Database.Database {
   const path = dbPath || config.dbPath;
@@ -32,6 +34,9 @@ export function initializeDatabase(dbPath?: string): Database.Database {
   const schemaPath = join(__dirname, 'schema.sql');
   const schema = readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
+  
+  // Run migrations to ensure schema is up to date
+  runMigrations(db);
   
   return db;
 }

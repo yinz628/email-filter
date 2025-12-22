@@ -283,17 +283,23 @@ sudo systemctl restart email-filter-api
 
 ### 迁移
 
-```bash
-# 备份后运行迁移
-cp /opt/email-filter/data/filter.db /opt/email-filter/data/filter-backup-$(date +%Y%m%d).db
+数据库迁移现在会在服务启动时自动运行。如果需要手动运行迁移：
 
-# Systemd
+```bash
+# Docker - 迁移会在容器启动时自动执行
+# 查看迁移日志
+docker compose logs api | grep -i migration
+
+# 如需手动运行迁移
+docker compose exec api npx tsx src/db/migrate.ts
+
+# Systemd - 迁移会在服务启动时自动执行
+# 如需手动运行迁移
 cd /opt/email-filter/packages/vps-api
 DB_PATH=/opt/email-filter/data/filter.db npx tsx src/db/migrate.ts
-
-# Docker
-docker compose exec api npx tsx src/db/migrate.ts
 ```
+
+> **注意**: 从旧版本升级时，首次启动会自动应用所有待处理的迁移。迁移是幂等的，可以安全地多次运行。
 
 ### 定期备份
 

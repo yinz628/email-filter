@@ -8,7 +8,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createReadStream } from 'fs';
 import { basename, join, dirname } from 'path';
-import { authMiddleware } from '../middleware/auth.js';
+import { authMiddleware, verifyBearerToken } from '../middleware/auth.js';
 import { BackupService } from '../services/backup.service.js';
 import { config } from '../config.js';
 import { closeDatabase, initializeDatabase } from '../db/index.js';
@@ -26,7 +26,71 @@ const backupService = new BackupService(config.dbPath, backupDir);
  * Requirement: 6.1
  */
 export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
-  // Apply auth middleware to all routes in this plugin
+  /**
+   * GET /api/admin/backup/download/:filename
+   * Download a specific backup file
+   * This route has special auth handling to support token in query params for browser downloads
+   * 
+   * Requirements: 2.1, 2.2, 2.3
+   */
+  fastify.get<{ Params: { filename: string }; Querystring: { token?: string } }>(
+    '/download/:filename',
+    async (request: FastifyRequest<{ Params: { filename: string }; Querystring: { token?: string } }>, reply: FastifyReply) => {
+      try {
+        // Support token from query params for browser downloads
+        const queryToken = request.query.token;
+        const authHeader = queryToken 
+          ? `Bearer ${queryToken}` 
+          : request.headers.authorization;
+        
+        // Verify authentication
+        const authResult = verifyBearerToken(authHeader);
+        if (!authResult.valid) {
+          return reply.status(401).send({
+            success: false,
+            error: authResult.error || 'Unauthorized',
+          });
+        }
+        
+        const { filename } = request.params;
+        
+        // Validate filename (prevent path traversal)
+        const sanitizedFilename = basename(filename);
+        if (sanitizedFilename !== filename || !filename.endsWith('.db.gz')) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Invalid filename',
+          });
+        }
+        
+        const filePath = backupService.getBackupPath(sanitizedFilename);
+        
+        if (!filePath) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Backup file not found',
+          });
+        }
+        
+        // Set appropriate headers for file download
+        // Requirement: 2.2
+        reply.header('Content-Type', 'application/gzip');
+        reply.header('Content-Disposition', `attachment; filename="${sanitizedFilename}"`);
+        
+        // Stream the file
+        const stream = createReadStream(filePath);
+        return reply.send(stream);
+      } catch (error) {
+        request.log.error(error, 'Error downloading backup');
+        return reply.status(500).send({
+          success: false,
+          error: `Failed to download backup: ${error instanceof Error ? error.message : 'unknown error'}`,
+        });
+      }
+    }
+  );
+
+  // Apply auth middleware to all other routes in this plugin
   // Requirement: 6.1
   fastify.addHook('preHandler', authMiddleware);
 
@@ -83,54 +147,6 @@ export async function backupRoutes(fastify: FastifyInstance): Promise<void> {
       });
     }
   });
-
-  /**
-   * GET /api/admin/backup/download/:filename
-   * Download a specific backup file
-   * 
-   * Requirements: 2.1, 2.2, 2.3
-   */
-  fastify.get<{ Params: { filename: string } }>(
-    '/download/:filename',
-    async (request: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
-      try {
-        const { filename } = request.params;
-        
-        // Validate filename (prevent path traversal)
-        const sanitizedFilename = basename(filename);
-        if (sanitizedFilename !== filename || !filename.endsWith('.db.gz')) {
-          return reply.status(400).send({
-            success: false,
-            error: 'Invalid filename',
-          });
-        }
-        
-        const filePath = backupService.getBackupPath(sanitizedFilename);
-        
-        if (!filePath) {
-          return reply.status(404).send({
-            success: false,
-            error: 'Backup file not found',
-          });
-        }
-        
-        // Set appropriate headers for file download
-        // Requirement: 2.2
-        reply.header('Content-Type', 'application/gzip');
-        reply.header('Content-Disposition', `attachment; filename="${sanitizedFilename}"`);
-        
-        // Stream the file
-        const stream = createReadStream(filePath);
-        return reply.send(stream);
-      } catch (error) {
-        request.log.error(error, 'Error downloading backup');
-        return reply.status(500).send({
-          success: false,
-          error: `Failed to download backup: ${error instanceof Error ? error.message : 'unknown error'}`,
-        });
-      }
-    }
-  );
 
   /**
    * POST /api/admin/backup/restore

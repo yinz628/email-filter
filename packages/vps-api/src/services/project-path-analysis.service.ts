@@ -640,6 +640,40 @@ export class ProjectPathAnalysisService {
   }
 
   /**
+   * Force a full re-analysis for a project
+   * Clears all existing analysis data and runs a fresh full analysis
+   * 
+   * @param projectId - Project ID
+   * @param onProgress - Optional progress callback
+   * @returns Analysis result
+   * 
+   * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7
+   */
+  async forceFullAnalysis(
+    projectId: string,
+    onProgress?: (progress: AnalysisProgress) => void
+  ): Promise<AnalysisResult> {
+    // Clear last analysis time to force full analysis
+    this.clearLastAnalysisTime(projectId);
+    
+    // Run full analysis
+    return this.runFullAnalysis(projectId, onProgress);
+  }
+
+  /**
+   * Clear last analysis time for a project
+   * This will cause the next analysis to be a full analysis
+   */
+  private clearLastAnalysisTime(projectId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE analysis_projects
+      SET last_analysis_time = NULL
+      WHERE id = ?
+    `);
+    stmt.run(projectId);
+  }
+
+  /**
    * Run full analysis for a project (first time analysis)
    * Processes all historical Root campaign emails
    * 

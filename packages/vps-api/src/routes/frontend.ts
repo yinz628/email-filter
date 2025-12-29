@@ -663,6 +663,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <div style="display:flex;gap:8px;align-items:center;">
                 <span id="path-last-analysis-time" style="font-size:12px;color:#666;"></span>
                 <button class="btn btn-success btn-sm" id="start-analysis-btn" onclick="startProjectAnalysis()">▶️ 开始分析</button>
+                <button class="btn btn-primary btn-sm" id="reanalyze-btn" onclick="startProjectReanalysis()" title="清除现有分析数据，重新分析所有新用户路径">🔄 重新分析</button>
                 <button class="btn btn-warning btn-sm" onclick="cleanupOldCustomersForProject()">🧹 清理老客户数据</button>
               </div>
             </div>
@@ -5103,6 +5104,114 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } else if (data.phase) {
         // Progress update
         updateAnalysisProgress(data);
+      }
+    }
+
+    /**
+     * Start project path re-analysis (force full analysis)
+     * Clears existing analysis data and re-analyzes all new user paths
+     */
+    async function startProjectReanalysis() {
+      if (!currentProjectId) {
+        showAlert('请先选择一个项目', 'error');
+        return;
+      }
+      
+      if (isAnalyzing) {
+        showAlert('分析正在进行中', 'error');
+        return;
+      }
+      
+      // Confirm with user
+      if (!confirm('重新分析将清除现有的分析数据（新用户、事件流、路径边），然后重新分析所有数据。\\n\\n确定要继续吗？')) {
+        return;
+      }
+      
+      // Reset UI state
+      isAnalyzing = true;
+      updateAnalysisButton(true);
+      updateReanalysisButton(true);
+      hideAnalysisContainers();
+      showAnalysisProgress();
+      
+      try {
+        // Use SSE to receive progress updates
+        const url = '/api/campaign/projects/' + currentProjectId + '/reanalyze';
+        
+        // For POST request with SSE, we need to use fetch with streaming
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({})
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || errorData.error || 'Re-analysis failed');
+        }
+        
+        // Read the SSE stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete SSE events
+          const lines = buffer.split('\\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+          
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              continue;
+            }
+            if (line.startsWith('data: ')) {
+              const dataStr = line.substring(6);
+              try {
+                const data = JSON.parse(dataStr);
+                handleAnalysisEvent(data);
+              } catch (e) {
+                console.error('Error parsing SSE data:', e);
+              }
+            }
+          }
+        }
+        
+      } catch (e) {
+        console.error('Error starting re-analysis:', e);
+        showAnalysisError(e.message || '重新分析失败');
+      } finally {
+        isAnalyzing = false;
+        updateAnalysisButton(false);
+        updateReanalysisButton(false);
+        if (analysisEventSource) {
+          analysisEventSource.close();
+          analysisEventSource = null;
+        }
+      }
+    }
+    
+    /**
+     * Update re-analysis button state
+     */
+    function updateReanalysisButton(analyzing) {
+      const btn = document.getElementById('reanalyze-btn');
+      if (btn) {
+        if (analyzing) {
+          btn.disabled = true;
+          btn.innerHTML = '⏳ 重新分析中...';
+          btn.classList.remove('btn-primary');
+          btn.classList.add('btn-secondary');
+        } else {
+          btn.disabled = false;
+          btn.innerHTML = '🔄 重新分析';
+          btn.classList.remove('btn-secondary');
+          btn.classList.add('btn-primary');
+        }
       }
     }
     

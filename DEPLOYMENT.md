@@ -150,6 +150,9 @@ curl http://localhost:3000/health
 curl http://localhost:3001/health
 ```
 
+
+
+
 预期输出：
 ```json
 {"status":"healthy","service":"vps-email-filter-api","timestamp":"..."}
@@ -187,6 +190,12 @@ docker compose exec admin sh
 docker volume ls
 docker volume inspect email-filter_email-filter-data
 ```
+
+
+打包
+docker save -o email-filter-api_latest.tar email-filter-api:latest
+gzip email-filter-api_latest.tar
+
 
 #### Docker 数据持久化
 
@@ -515,3 +524,27 @@ openssl rand -hex 32
 - 定期检查日志和更新依赖
 
 
+清理
+
+# 1. 清理系统日志（最大的占用）
+sudo journalctl --vacuum-size=100M
+sudo find /var/log -name "*.gz" -delete
+sudo find /var/log -name "*.1" -delete
+sudo find /var/log -name "*.old" -delete
+
+# 2. 清理 pnpm 缓存
+pnpm store prune
+
+# 3. 清理 npm 缓存
+npm cache clean --force
+rm -rf ~/.npm/_cacache
+
+# 4. 清理 apt 缓存
+sudo apt-get clean
+sudo apt-get autoremove -y
+
+# 5. 查看 /var/lib/email-filter 里有什么
+du -h /var/lib/email-filter --max-depth=2
+
+# 6. 检查清理效果
+df -h

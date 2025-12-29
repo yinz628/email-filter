@@ -1994,6 +1994,71 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   /**
+   * POST /api/campaign/projects/:id/reanalyze
+   * Force a full re-analysis for a project (clears existing data and re-analyzes)
+   * 
+   * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7
+   */
+  fastify.post('/projects/:id/reanalyze', async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const analyticsService = new CampaignAnalyticsService(db);
+      const pathService = new ProjectPathAnalysisService(db);
+
+      // Check if project exists
+      const project = analyticsService.getAnalysisProjectById(request.params.id);
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      // Check if analysis is already running for this project
+      if (analysisQueue.isProjectInQueue(request.params.id)) {
+        return reply.status(409).send({ 
+          error: 'Conflict', 
+          message: 'Analysis is already in progress or queued for this project' 
+        });
+      }
+
+      // Set up SSE response
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no', // Disable nginx buffering
+      });
+
+      // Set up the analyze function for the queue (force full analysis)
+      analysisQueue.setAnalyzeFunction(async (projectId, onProgress) => {
+        return pathService.forceFullAnalysis(projectId, onProgress);
+      });
+
+      // Send progress updates via SSE
+      const sendProgress = (progress: AnalysisProgress) => {
+        reply.raw.write(`event: progress\ndata: ${JSON.stringify(progress)}\n\n`);
+      };
+
+      try {
+        // Enqueue the analysis
+        const result = await analysisQueue.enqueue(request.params.id, sendProgress);
+
+        // Send completion event
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(result)}\n\n`);
+      } catch (error: any) {
+        // Send error event
+        reply.raw.write(`event: error\ndata: ${JSON.stringify({ error: error.message })}\n\n`);
+      }
+
+      reply.raw.end();
+    } catch (error) {
+      request.log.error(error, 'Error starting project re-analysis');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
    * GET /api/campaign/projects/:id/path-analysis
    * Get path analysis results for a project
    * 

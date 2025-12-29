@@ -6970,7 +6970,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + checkbox + '</td>' +
           '<td style="white-space:nowrap;font-size:12px;">' + time + '</td>' +
           '<td class="hide-mobile">' + typeIcon + ' ' + typeText + '</td>' +
-          '<td class="text-truncate" style="max-width:150px;" title="' + escapeHtml(a.rule?.name || a.message || a.ruleId || a.monitorId) + '">' + nameCol + '</td>' +
+          '<td style="min-width:200px;" title="' + escapeHtml(a.rule?.name || a.message || a.ruleId || a.monitorId) + '">' + nameCol + '</td>' +
           '<td style="white-space:nowrap;font-size:11px;">' + a.previousState + ' → ' + a.currentState + '</td>' +
           '<td style="white-space:nowrap;">' + infoCol + '</td>' +
           '<td>' + sentStatus + '</td>' +

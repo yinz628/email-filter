@@ -418,6 +418,37 @@ curl -X POST https://your-vps-domain.com/api/workers \
   -d '{"name": "domain1-worker", "domain": "domain1.com", "defaultForwardTo": "admin@domain1.com", "enabled": true}'
 ```
 
+### 多 Worker 聚合分析
+
+路径分析支持跨多个 Worker 实例聚合分析同一商户的数据：
+
+**场景示例：**
+- 商户 `example.com` 有两个 Worker：`worker_A` 和 `worker_B`
+- 用户 `user1@gmail.com` 可能在两个 Worker 中都收到邮件
+- 配置 `worker_names = '["worker_A", "worker_B"]'` 后，分析会聚合两个 Worker 的数据
+
+**配置方法：**
+
+1. 创建分析项目时指定多个 Worker：
+```bash
+curl -X POST https://your-vps-domain.com/api/campaign/projects \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "跨Worker分析项目",
+    "merchantId": "merchant-uuid",
+    "workerName": "worker_A",
+    "workerNames": ["worker_A", "worker_B"]
+  }'
+```
+
+2. 或通过管理面板在项目设置中配置 Worker 列表
+
+**注意事项：**
+- 同一收件人在不同 Worker 收到的邮件会合并到同一事件流
+- 事件按 `received_at` 时间排序，确保正确的 seq 序列
+- 路径边统计会包含所有指定 Worker 的数据
+
 ---
 
 ## 故障排除
@@ -485,6 +516,80 @@ ls -la /opt/email-filter/packages/vps-api/dist/db/schema.sql # schema 文件
 sudo systemctl status email-filter-api                       # 服务状态
 curl http://localhost:3000/health                            # 健康检查
 ```
+
+---
+
+## 路径分析 API
+
+路径分析功能用于追踪用户从首次收到 Root 活动邮件开始的营销路径流向。
+
+### API 端点
+
+#### 触发分析
+```bash
+POST /api/campaign/projects/:projectId/analyze
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "isIncremental": false,
+    "newUsersAdded": 150,
+    "eventsCreated": 450,
+    "edgesUpdated": 12,
+    "duration": 2500
+  }
+}
+```
+
+**说明：**
+- 首次分析（`last_analysis_time` 为空）：处理所有历史数据
+- 增量分析（`last_analysis_time` 存在）：只处理新增数据
+
+#### 强制重新分析
+```bash
+POST /api/campaign/projects/:projectId/reanalyze
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+**说明：**
+- 清空现有分析数据（new_users, events, edges）
+- 重新执行首次分析流程
+- 适用于 Root 活动配置变更后
+
+### Worker 实例过滤
+
+项目支持单 Worker 和多 Worker 分析：
+
+| 配置 | 说明 |
+|------|------|
+| `worker_name` | 主 Worker 实例名称（向后兼容） |
+| `worker_names` | 多 Worker 实例列表（JSON 数组） |
+
+**过滤逻辑：**
+- 如果 `worker_names` 存在且非空，使用 `worker_names` 数组
+- 否则使用 `[worker_name]` 作为单元素数组
+
+**示例：**
+```json
+{
+  "worker_name": "worker_A",
+  "worker_names": "[\"worker_A\", \"worker_B\"]"
+}
+```
+
+### 分析结果字段
+
+| 字段 | 说明 |
+|------|------|
+| `isIncremental` | 是否为增量分析 |
+| `newUsersAdded` | 新增用户数 |
+| `eventsCreated` | 新增事件数 |
+| `edgesUpdated` | 更新的路径边数 |
+| `duration` | 分析耗时（毫秒） |
 
 ---
 

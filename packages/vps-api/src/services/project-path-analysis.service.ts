@@ -326,7 +326,7 @@ export class ProjectPathAnalysisService {
    * @param recipient - Recipient email
    * @param campaignId - Campaign ID
    * @param receivedAt - When the email was received
-   * @returns The assigned sequence number
+   * @returns Object with seq number and whether it was newly created
    * 
    * Requirements: 4.1, 4.2, 4.5
    */
@@ -335,7 +335,7 @@ export class ProjectPathAnalysisService {
     recipient: string,
     campaignId: string,
     receivedAt: Date
-  ): number {
+  ): { seq: number; isNew: boolean } {
     // Check if this event already exists (same project, recipient, campaign)
     const existingStmt = this.db.prepare(`
       SELECT seq FROM project_user_events
@@ -345,7 +345,7 @@ export class ProjectPathAnalysisService {
     
     if (existing) {
       // Event already exists, return existing seq
-      return existing.seq;
+      return { seq: existing.seq, isNew: false };
     }
     
     // Get the max seq for this user in this project
@@ -359,7 +359,7 @@ export class ProjectPathAnalysisService {
     
     stmt.run(projectId, recipient, campaignId, newSeq, receivedAt.toISOString());
     
-    return newSeq;
+    return { seq: newSeq, isNew: true };
   }
 
   /**
@@ -770,8 +770,10 @@ export class ProjectPathAnalysisService {
         newUsersAdded++;
         
         // Create seq=1 event
-        this.addUserEvent(projectId, recipient, firstRoot.campaignId, firstRoot.receivedAt);
-        eventsCreated++;
+        const result = this.addUserEvent(projectId, recipient, firstRoot.campaignId, firstRoot.receivedAt);
+        if (result.isNew) {
+          eventsCreated++;
+        }
       },
       (progress: BatchProgress) => {
         onProgress?.({
@@ -813,8 +815,8 @@ export class ProjectPathAnalysisService {
         }
         
         // Add event (will auto-calculate seq)
-        const seq = this.addUserEvent(projectId, email.recipient, email.campaign_id, new Date(email.received_at));
-        if (seq > 1) {
+        const result = this.addUserEvent(projectId, email.recipient, email.campaign_id, new Date(email.received_at));
+        if (result.isNew && result.seq > 1) {
           eventsCreated++;
         }
       },
@@ -962,8 +964,10 @@ export class ProjectPathAnalysisService {
         this.addProjectNewUser(projectId, recipient, firstRoot.campaignId);
         newUsersAdded++;
         
-        this.addUserEvent(projectId, recipient, firstRoot.campaignId, firstRoot.receivedAt);
-        eventsCreated++;
+        const result = this.addUserEvent(projectId, recipient, firstRoot.campaignId, firstRoot.receivedAt);
+        if (result.isNew) {
+          eventsCreated++;
+        }
         
         // Add to existing recipients set for next phase
         existingRecipients.add(recipient);
@@ -1010,14 +1014,9 @@ export class ProjectPathAnalysisService {
         }
         
         // Add event (will auto-calculate seq, skip if already exists)
-        const seq = this.addUserEvent(projectId, email.recipient, email.campaign_id, new Date(email.received_at));
-        if (seq > 0) {
-          // Check if this is a new event (not already existing)
-          const existingEvents = this.getUserEvents(projectId, email.recipient);
-          const isNewEvent = existingEvents.some(e => e.campaignId === email.campaign_id && e.seq === seq);
-          if (isNewEvent) {
-            eventsCreated++;
-          }
+        const result = this.addUserEvent(projectId, email.recipient, email.campaign_id, new Date(email.received_at));
+        if (result.isNew) {
+          eventsCreated++;
         }
       },
       (progress: BatchProgress) => {

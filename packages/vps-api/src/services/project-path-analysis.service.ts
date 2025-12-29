@@ -800,6 +800,8 @@ export class ProjectPathAnalysisService {
 
     // Phase 2: Build events for all subsequent emails
     // Requirements 2.1, 2.2: Group emails by user first, then sort each user's emails by received_at
+    // IMPORTANT: Only process emails received AFTER the user's first Root email
+    // This ensures the path always starts from the Root campaign
     onProgress?.({
       phase: 'building_events',
       progress: 40,
@@ -809,6 +811,12 @@ export class ProjectPathAnalysisService {
     // Get all emails for new users (non-Root emails)
     const newUsers = this.getProjectNewUsers(projectId);
     const newUserRecipients = new Set(newUsers.map(u => u.recipient));
+    
+    // Build a map of each user's first Root email time
+    const userFirstRootTime = new Map<string, Date>();
+    for (const [recipient, firstRoot] of recipientFirstRoot) {
+      userFirstRootTime.set(recipient, firstRoot.receivedAt);
+    }
     
     // Get all campaign emails for these recipients within worker scope
     const allEmails = this.getAllCampaignEmails(projectInfo.merchantId, projectInfo.workerNames);
@@ -836,10 +844,21 @@ export class ProjectPathAnalysisService {
     const totalRecipients = recipientEntries2.length;
     
     for (const [recipient, emails] of recipientEntries2) {
+      // Get this user's first Root email time
+      const firstRootTime = userFirstRootTime.get(recipient);
+      
       // Process this user's emails in time order
       for (const email of emails) {
         // Skip if this is a Root campaign email (already processed as seq=1)
         if (rootCampaignIds.includes(email.campaign_id)) {
+          continue;
+        }
+        
+        // CRITICAL FIX: Skip emails received BEFORE the user's first Root email
+        // This ensures the path always starts from the Root campaign (seq=1)
+        // Emails before the Root email are not part of the "new user journey"
+        const emailTime = new Date(email.received_at);
+        if (firstRootTime && emailTime < firstRootTime) {
           continue;
         }
         
@@ -1012,11 +1031,28 @@ export class ProjectPathAnalysisService {
     );
 
     // Phase 2: Process new emails for all new users (existing + newly added)
+    // IMPORTANT: For newly added users, only process emails received AFTER their first Root email
     onProgress?.({
       phase: 'building_events',
       progress: 35,
       message: '处理新用户邮件...',
     });
+
+    // Build a map of each newly added user's first Root email time
+    const newUserFirstRootTime = new Map<string, Date>();
+    for (const [recipient, firstRoot] of newRecipientFirstRoot) {
+      newUserFirstRootTime.set(recipient, firstRoot.receivedAt);
+    }
+    
+    // For existing users, get their first Root email time from the database
+    const existingUserFirstRootTime = new Map<string, Date>();
+    for (const user of existingNewUsers) {
+      // Get the user's seq=1 event to find their first Root email time
+      const events = this.getUserEvents(projectId, user.recipient);
+      if (events.length > 0 && events[0].seq === 1) {
+        existingUserFirstRootTime.set(user.recipient, events[0].receivedAt);
+      }
+    }
 
     // Get all new emails since last analysis for new users
     const newEmails = this.getCampaignEmailsSince(
@@ -1040,6 +1076,16 @@ export class ProjectPathAnalysisService {
         const isNewlyAddedUser = newRecipientFirstRoot.has(email.recipient);
         if (isNewlyAddedUser && rootCampaignIds.includes(email.campaign_id)) {
           return;
+        }
+        
+        // CRITICAL FIX: For newly added users, skip emails received BEFORE their first Root email
+        // This ensures the path always starts from the Root campaign (seq=1)
+        if (isNewlyAddedUser) {
+          const firstRootTime = newUserFirstRootTime.get(email.recipient);
+          const emailTime = new Date(email.received_at);
+          if (firstRootTime && emailTime < firstRootTime) {
+            return;
+          }
         }
         
         // Add event (will auto-calculate seq, skip if already exists)

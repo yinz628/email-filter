@@ -2123,6 +2123,7 @@ class TestProjectPathAnalysisServiceWithAnalysis extends TestProjectPathAnalysis
   /**
    * Run full analysis (simplified for testing)
    * Requirements 2.1, 2.2: Group emails by user first, then sort each user's emails by received_at
+   * CRITICAL FIX: Only process emails received AFTER the user's first Root email
    */
   runFullAnalysis(projectId: string): { newUsersAdded: number; eventsCreated: number; edgesUpdated: number } {
     let newUsersAdded = 0;
@@ -2163,6 +2164,12 @@ class TestProjectPathAnalysisServiceWithAnalysis extends TestProjectPathAnalysis
       eventsCreated++;
     }
 
+    // Build a map of each user's first Root email time
+    const userFirstRootTime = new Map<string, Date>();
+    for (const [recipient, firstRoot] of recipientFirstRoot) {
+      userFirstRootTime.set(recipient, firstRoot.receivedAt);
+    }
+
     // Get all emails and group by recipient (Requirements 2.1)
     const newUserRecipients = new Set(recipientFirstRoot.keys());
     const allEmails = this.getAllCampaignEmails(projectInfo.merchantId, projectInfo.workerNames);
@@ -2184,8 +2191,20 @@ class TestProjectPathAnalysisServiceWithAnalysis extends TestProjectPathAnalysis
     
     // Process each user's emails in time order
     for (const [recipient, emails] of emailsByRecipient) {
+      // Get this user's first Root email time
+      const firstRootTime = userFirstRootTime.get(recipient);
+      
       for (const email of emails) {
+        // Skip Root campaign emails (already processed as seq=1)
         if (rootCampaignIds.includes(email.campaign_id)) continue;
+        
+        // CRITICAL FIX: Skip emails received BEFORE the user's first Root email
+        // This ensures the path always starts from the Root campaign (seq=1)
+        const emailTime = new Date(email.received_at);
+        if (firstRootTime && emailTime < firstRootTime) {
+          continue;
+        }
+        
         const result = this.addUserEvent(projectId, recipient, email.campaign_id, new Date(email.received_at));
         if (result.isNew && result.seq > 1) eventsCreated++;
       }
@@ -4361,6 +4380,225 @@ describe('ProjectPathAnalysisService - Path Edge Rebuild Properties', () => {
             // A -> C edge should no longer exist
             const updatedAcEdge = updatedEdges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignC);
             expect(updatedAcEdge).toBeUndefined();
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+/**
+ * **Feature: path-analysis-seq-fix, Property 19: Path Always Starts From Root**
+ * **Validates: Requirements 1.1, 3.1**
+ * 
+ * For any user in a project, the path should always start from the Root campaign (seq=1),
+ * even if the user received other campaign emails before the Root email.
+ * Emails received before the Root email should be excluded from the path analysis.
+ */
+describe('ProjectPathAnalysisService - Path Start From Root Properties', () => {
+  describe('Property 19: Path Always Starts From Root', () => {
+    it('should always start path from Root campaign even if user received other emails before Root', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          async (email) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Welcome to Macys - Root');
+            const priceDropCampaign = createTestCampaign(db, merchantId, 'Price drop alert');
+            const followUpCampaign = createTestCampaign(db, merchantId, 'Follow up campaign');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // CRITICAL TEST CASE: User receives "Price drop alert" BEFORE "Root" email
+            // This simulates the bug scenario where path incorrectly starts from "Price drop alert"
+            createTestCampaignEmail(db, priceDropCampaign, email, baseTime); // Before Root
+            createTestCampaignEmail(db, rootCampaign, email, new Date(baseTime.getTime() + 3600000)); // Root at +1 hour
+            createTestCampaignEmail(db, followUpCampaign, email, new Date(baseTime.getTime() + 7200000)); // After Root at +2 hours
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Verify the path starts from Root, not from "Price drop alert"
+            const events = service.getUserEvents(projectId, email);
+            
+            // Should have exactly 2 events: Root (seq=1) and Follow up (seq=2)
+            // "Price drop alert" should be excluded because it was received before Root
+            expect(events.length).toBe(2);
+            
+            // First event (seq=1) should be the Root campaign
+            expect(events[0].seq).toBe(1);
+            expect(events[0].campaignId).toBe(rootCampaign);
+            
+            // Second event (seq=2) should be the follow up campaign
+            expect(events[1].seq).toBe(2);
+            expect(events[1].campaignId).toBe(followUpCampaign);
+            
+            // "Price drop alert" should NOT be in the events
+            const priceDropEvent = events.find(e => e.campaignId === priceDropCampaign);
+            expect(priceDropEvent).toBeUndefined();
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should include all emails received after Root in the path', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.integer({ min: 1, max: 5 }), // Number of emails before Root
+          fc.integer({ min: 1, max: 5 }), // Number of emails after Root
+          async (email, beforeCount, afterCount) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            const rootTime = new Date('2024-06-01T12:00:00Z');
+            
+            // Create campaigns and emails BEFORE Root
+            const beforeCampaigns: string[] = [];
+            for (let i = 0; i < beforeCount; i++) {
+              const campaign = createTestCampaign(db, merchantId, `Before Campaign ${i}`);
+              beforeCampaigns.push(campaign);
+              // Emails before Root (1 hour apart, ending 1 hour before Root)
+              const emailTime = new Date(rootTime.getTime() - (beforeCount - i) * 3600000);
+              createTestCampaignEmail(db, campaign, email, emailTime);
+            }
+            
+            // Create Root email
+            createTestCampaignEmail(db, rootCampaign, email, rootTime);
+            
+            // Create campaigns and emails AFTER Root
+            const afterCampaigns: string[] = [];
+            for (let i = 0; i < afterCount; i++) {
+              const campaign = createTestCampaign(db, merchantId, `After Campaign ${i}`);
+              afterCampaigns.push(campaign);
+              // Emails after Root (1 hour apart, starting 1 hour after Root)
+              const emailTime = new Date(rootTime.getTime() + (i + 1) * 3600000);
+              createTestCampaignEmail(db, campaign, email, emailTime);
+            }
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Verify events
+            const events = service.getUserEvents(projectId, email);
+            
+            // Should have Root + afterCount events (beforeCount emails should be excluded)
+            expect(events.length).toBe(1 + afterCount);
+            
+            // First event should be Root
+            expect(events[0].campaignId).toBe(rootCampaign);
+            expect(events[0].seq).toBe(1);
+            
+            // All "before" campaigns should NOT be in events
+            for (const beforeCampaign of beforeCampaigns) {
+              const found = events.find(e => e.campaignId === beforeCampaign);
+              expect(found).toBeUndefined();
+            }
+            
+            // All "after" campaigns should be in events
+            for (const afterCampaign of afterCampaigns) {
+              const found = events.find(e => e.campaignId === afterCampaign);
+              expect(found).toBeDefined();
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should build correct path edges starting from Root', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.tuple(emailArb, emailArb).filter(([a, b]) => a !== b),
+          async ([email1, email2]) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const priceDropCampaign = createTestCampaign(db, merchantId, 'Price drop alert');
+            const followUpCampaign = createTestCampaign(db, merchantId, 'Follow up campaign');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // User 1: Price drop (before Root) -> Root -> Follow up
+            createTestCampaignEmail(db, priceDropCampaign, email1, baseTime);
+            createTestCampaignEmail(db, rootCampaign, email1, new Date(baseTime.getTime() + 3600000));
+            createTestCampaignEmail(db, followUpCampaign, email1, new Date(baseTime.getTime() + 7200000));
+            
+            // User 2: Root -> Follow up (no email before Root)
+            createTestCampaignEmail(db, rootCampaign, email2, baseTime);
+            createTestCampaignEmail(db, followUpCampaign, email2, new Date(baseTime.getTime() + 3600000));
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Verify path edges
+            const edges = service.getProjectPathEdges(projectId);
+            
+            // Should have Root -> Follow up edge with count 2 (both users)
+            const rootToFollowUp = edges.find(
+              e => e.fromCampaignId === rootCampaign && e.toCampaignId === followUpCampaign
+            );
+            expect(rootToFollowUp).toBeDefined();
+            expect(rootToFollowUp!.userCount).toBe(2);
+            
+            // Should NOT have Price drop -> Root edge (Price drop is excluded for user 1)
+            const priceDropToRoot = edges.find(
+              e => e.fromCampaignId === priceDropCampaign && e.toCampaignId === rootCampaign
+            );
+            expect(priceDropToRoot).toBeUndefined();
+            
+            // Should NOT have Price drop -> anything edge
+            const priceDropEdges = edges.filter(e => e.fromCampaignId === priceDropCampaign);
+            expect(priceDropEdges.length).toBe(0);
             
             db.close();
           }

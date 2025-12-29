@@ -474,6 +474,29 @@ function migrateCreateRatioAlerts(): MigrationResult {
   return { name, status: 'applied', message: 'Table created successfully' };
 }
 
+/**
+ * Migration 20: Add time index to project_user_events for seq calculation optimization
+ * 
+ * This index optimizes queries that calculate seq numbers based on received_at time,
+ * such as: COUNT(*) WHERE project_id = ? AND recipient = ? AND received_at <= ?
+ * 
+ * Requirements: 1.1 - Event sequence numbers should be calculated based on received_at time
+ */
+function migrateProjectUserEventsTimeIndex(): MigrationResult {
+  const name = 'idx_project_user_events_time';
+  
+  if (!tableExists(db, 'project_user_events')) {
+    return { name, status: 'skipped', message: 'Table project_user_events does not exist' };
+  }
+  
+  if (indexExists(db, 'idx_project_user_events_time')) {
+    return { name, status: 'skipped', message: 'Index already exists' };
+  }
+  
+  db.exec('CREATE INDEX idx_project_user_events_time ON project_user_events(project_id, recipient, received_at)');
+  return { name, status: 'applied', message: 'Time index added for seq calculation optimization' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -498,6 +521,7 @@ const migrations = [
   migrateAnalysisProjectsWorkerNames,
   migrateAnalysisProjectsLastAnalysisTime,
   migrateCreateRatioAlerts,
+  migrateProjectUserEventsTimeIndex,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

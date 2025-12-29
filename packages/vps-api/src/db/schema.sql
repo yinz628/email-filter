@@ -326,6 +326,7 @@ CREATE TABLE IF NOT EXISTS project_user_events (
 CREATE INDEX IF NOT EXISTS idx_project_user_events_project ON project_user_events(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_user_events_recipient ON project_user_events(project_id, recipient);
 CREATE INDEX IF NOT EXISTS idx_project_user_events_seq ON project_user_events(project_id, recipient, seq);
+CREATE INDEX IF NOT EXISTS idx_project_user_events_time ON project_user_events(project_id, recipient, received_at);
 
 -- 项目级路径边表
 CREATE TABLE IF NOT EXISTS project_path_edges (

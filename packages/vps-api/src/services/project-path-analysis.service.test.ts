@@ -171,7 +171,7 @@ class TestProjectPathAnalysisService {
     recipient: string,
     campaignId: string,
     receivedAt: Date
-  ): number {
+  ): { seq: number; isNew: boolean } {
     // Check if exists
     const existing = this.db.exec(
       `SELECT seq FROM project_user_events WHERE project_id = ? AND recipient = ? AND campaign_id = ?`,
@@ -179,11 +179,27 @@ class TestProjectPathAnalysisService {
     );
     
     if (existing.length > 0 && existing[0].values.length > 0) {
-      return existing[0].values[0][0] as number;
+      return { seq: existing[0].values[0][0] as number, isNew: false };
     }
     
-    const maxSeq = this.getMaxSeq(projectId, recipient);
-    const newSeq = maxSeq + 1;
+    // Calculate the correct seq based on received_at time order
+    // Count how many events this user has with received_at <= this event's received_at
+    const seqResult = this.db.exec(
+      `SELECT COUNT(*) as count FROM project_user_events
+       WHERE project_id = ? AND recipient = ? AND received_at <= ?`,
+      [projectId, recipient, receivedAt.toISOString()]
+    );
+    const newSeq = (seqResult.length > 0 && seqResult[0].values.length > 0 
+      ? (seqResult[0].values[0][0] as number) 
+      : 0) + 1;
+    
+    // Shift existing events with later received_at
+    this.db.run(
+      `UPDATE project_user_events
+       SET seq = seq + 1
+       WHERE project_id = ? AND recipient = ? AND received_at > ?`,
+      [projectId, recipient, receivedAt.toISOString()]
+    );
     
     this.db.run(
       `INSERT INTO project_user_events (project_id, recipient, campaign_id, seq, received_at)
@@ -191,7 +207,7 @@ class TestProjectPathAnalysisService {
       [projectId, recipient, campaignId, newSeq, receivedAt.toISOString()]
     );
     
-    return newSeq;
+    return { seq: newSeq, isNew: true };
   }
 
   getUserEvents(projectId: string, recipient: string): Array<{
@@ -365,6 +381,175 @@ class TestProjectPathAnalysisService {
       const [fromCampaignId, toCampaignId] = key.split(':');
       this.updatePathEdge(projectId, fromCampaignId, toCampaignId, count);
     }
+  }
+
+  // ========== Event Sequence Validation ==========
+
+  validateEventSequence(projectId: string): {
+    isValid: boolean;
+    totalUsers: number;
+    usersWithIssues: number;
+    issues: Array<{
+      recipient: string;
+      issueType: 'gap' | 'order' | 'duplicate';
+      details: string;
+    }>;
+  } {
+    const issues: Array<{
+      recipient: string;
+      issueType: 'gap' | 'order' | 'duplicate';
+      details: string;
+    }> = [];
+    
+    // Get all distinct recipients for this project
+    const recipientsResult = this.db.exec(
+      `SELECT DISTINCT recipient FROM project_user_events WHERE project_id = ?`,
+      [projectId]
+    );
+    
+    const recipients: string[] = [];
+    if (recipientsResult.length > 0) {
+      for (const row of recipientsResult[0].values) {
+        recipients.push(row[0] as string);
+      }
+    }
+    
+    const totalUsers = recipients.length;
+    const usersWithIssuesSet = new Set<string>();
+    
+    for (const recipient of recipients) {
+      // Get all events for this user ordered by seq
+      const events = this.getUserEvents(projectId, recipient);
+      
+      if (events.length === 0) continue;
+      
+      // Check 1: seq numbers should start from 1 and be consecutive
+      for (let i = 0; i < events.length; i++) {
+        const expectedSeq = i + 1;
+        if (events[i].seq !== expectedSeq) {
+          usersWithIssuesSet.add(recipient);
+          if (events[i].seq > expectedSeq) {
+            issues.push({
+              recipient,
+              issueType: 'gap',
+              details: `Gap in seq: expected ${expectedSeq}, got ${events[i].seq}`,
+            });
+          } else {
+            issues.push({
+              recipient,
+              issueType: 'duplicate',
+              details: `Duplicate or out-of-order seq: expected ${expectedSeq}, got ${events[i].seq}`,
+            });
+          }
+          break;
+        }
+      }
+      
+      // Check 2: seq order should match received_at time order
+      for (let i = 0; i < events.length - 1; i++) {
+        const currentTime = events[i].receivedAt.getTime();
+        const nextTime = events[i + 1].receivedAt.getTime();
+        
+        if (currentTime > nextTime) {
+          usersWithIssuesSet.add(recipient);
+          issues.push({
+            recipient,
+            issueType: 'order',
+            details: `Time order mismatch: seq ${events[i].seq} (${events[i].receivedAt.toISOString()}) > seq ${events[i + 1].seq} (${events[i + 1].receivedAt.toISOString()})`,
+          });
+          break;
+        }
+      }
+    }
+    
+    return {
+      isValid: issues.length === 0,
+      totalUsers,
+      usersWithIssues: usersWithIssuesSet.size,
+      issues,
+    };
+  }
+
+  fixEventSequence(projectId: string): {
+    usersFixed: number;
+    eventsReordered: number;
+    pathEdgesRebuilt: boolean;
+  } {
+    let usersFixed = 0;
+    let eventsReordered = 0;
+    
+    // Get all distinct recipients for this project
+    const recipientsResult = this.db.exec(
+      `SELECT DISTINCT recipient FROM project_user_events WHERE project_id = ?`,
+      [projectId]
+    );
+    
+    const recipients: string[] = [];
+    if (recipientsResult.length > 0) {
+      for (const row of recipientsResult[0].values) {
+        recipients.push(row[0] as string);
+      }
+    }
+    
+    for (const recipient of recipients) {
+      // Get all events for this user ordered by received_at time
+      const eventsResult = this.db.exec(
+        `SELECT id, campaign_id, seq, received_at
+         FROM project_user_events
+         WHERE project_id = ? AND recipient = ?
+         ORDER BY received_at ASC, id ASC`,
+        [projectId, recipient]
+      );
+      
+      if (eventsResult.length === 0 || eventsResult[0].values.length === 0) continue;
+      
+      const events = eventsResult[0].values.map(row => ({
+        id: row[0] as number,
+        campaignId: row[1] as string,
+        seq: row[2] as number,
+        receivedAt: row[3] as string,
+      }));
+      
+      let userNeedsFixing = false;
+      
+      // Check if this user needs fixing
+      for (let i = 0; i < events.length; i++) {
+        const expectedSeq = i + 1;
+        if (events[i].seq !== expectedSeq) {
+          userNeedsFixing = true;
+          break;
+        }
+      }
+      
+      if (userNeedsFixing) {
+        usersFixed++;
+        
+        // Update seq numbers based on time order
+        for (let i = 0; i < events.length; i++) {
+          const newSeq = i + 1;
+          if (events[i].seq !== newSeq) {
+            this.db.run(
+              `UPDATE project_user_events SET seq = ? WHERE id = ?`,
+              [newSeq, events[i].id]
+            );
+            eventsReordered++;
+          }
+        }
+      }
+    }
+    
+    // Rebuild path edges if any fixes were made
+    let pathEdgesRebuilt = false;
+    if (usersFixed > 0) {
+      this.buildPathEdgesFromEvents(projectId);
+      pathEdgesRebuilt = true;
+    }
+    
+    return {
+      usersFixed,
+      eventsReordered,
+      pathEdgesRebuilt,
+    };
   }
 }
 
@@ -700,9 +885,9 @@ describe('ProjectPathAnalysisService', () => {
             
             // Add events one by one
             for (let i = 0; i < numCampaigns; i++) {
-              const seq = service.addUserEvent(projectId, email, campaigns[i], now);
+              const result = service.addUserEvent(projectId, email, campaigns[i], now);
               // Each new event should get seq = i + 1
-              expect(seq).toBe(i + 1);
+              expect(result.seq).toBe(i + 1);
             }
             
             // Verify all events have consecutive seq numbers
@@ -745,14 +930,17 @@ describe('ProjectPathAnalysisService', () => {
             const now = new Date();
             
             // Add same campaign multiple times
-            const seq1 = service.addUserEvent(projectId, email, campaign, now);
-            const seq2 = service.addUserEvent(projectId, email, campaign, now);
-            const seq3 = service.addUserEvent(projectId, email, campaign, now);
+            const result1 = service.addUserEvent(projectId, email, campaign, now);
+            const result2 = service.addUserEvent(projectId, email, campaign, now);
+            const result3 = service.addUserEvent(projectId, email, campaign, now);
             
             // All should return the same seq (no duplicates)
-            expect(seq1).toBe(1);
-            expect(seq2).toBe(1);
-            expect(seq3).toBe(1);
+            expect(result1.seq).toBe(1);
+            expect(result1.isNew).toBe(true);
+            expect(result2.seq).toBe(1);
+            expect(result2.isNew).toBe(false);
+            expect(result3.seq).toBe(1);
+            expect(result3.isNew).toBe(false);
             
             // Only one event should exist
             const events = service.getUserEvents(projectId, email);
@@ -813,6 +1001,513 @@ describe('ProjectPathAnalysisService', () => {
                 expect(events[i].seq).toBe(i + 1);
               }
             }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-seq-fix, Property 16: Event Insertion Correctness**
+   * **Validates: Requirements 1.2, 3.1, 3.2**
+   * 
+   * For any new event added to a user's event stream, if its received_at time is earlier
+   * than existing events, the new event should be inserted at the correct position and
+   * all subsequent events should have their seq numbers incremented by 1.
+   */
+  describe('Property 16: Event Insertion Correctness', () => {
+    it('should insert events at correct position based on received_at time', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.integer({ min: 2, max: 10 }), // Number of campaigns
+          async (email, numCampaigns) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const campaigns: string[] = [];
+            for (let i = 0; i < numCampaigns; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            
+            const baseTime = new Date('2024-01-01T00:00:00Z');
+            
+            // Add events in REVERSE time order (latest first)
+            // This tests that seq is calculated based on received_at, not insertion order
+            for (let i = numCampaigns - 1; i >= 0; i--) {
+              const receivedAt = new Date(baseTime.getTime() + i * 60000); // i minutes after base
+              service.addUserEvent(projectId, email, campaigns[i], receivedAt);
+            }
+            
+            // Verify events are ordered by received_at time
+            const events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(numCampaigns);
+            
+            // Events should be in time order (seq 1 = earliest, seq n = latest)
+            for (let i = 0; i < events.length; i++) {
+              expect(events[i].seq).toBe(i + 1);
+              expect(events[i].campaignId).toBe(campaigns[i]);
+            }
+            
+            // Verify time order matches seq order
+            for (let i = 0; i < events.length - 1; i++) {
+              expect(events[i].receivedAt.getTime()).toBeLessThanOrEqual(events[i + 1].receivedAt.getTime());
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should shift subsequent seq numbers when inserting earlier event', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          async (email) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create 3 campaigns
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const campaignC = createTestCampaign(db, merchantId, 'Campaign C');
+            
+            const time1 = new Date('2024-01-01T10:00:00Z');
+            const time2 = new Date('2024-01-01T12:00:00Z');
+            const time3 = new Date('2024-01-01T11:00:00Z'); // Between time1 and time2
+            
+            // Add events: A at time1, B at time2
+            service.addUserEvent(projectId, email, campaignA, time1);
+            service.addUserEvent(projectId, email, campaignB, time2);
+            
+            // Verify initial state: A=seq1, B=seq2
+            let events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(2);
+            expect(events[0].campaignId).toBe(campaignA);
+            expect(events[0].seq).toBe(1);
+            expect(events[1].campaignId).toBe(campaignB);
+            expect(events[1].seq).toBe(2);
+            
+            // Insert C at time3 (between A and B)
+            const result = service.addUserEvent(projectId, email, campaignC, time3);
+            expect(result.seq).toBe(2); // C should get seq=2
+            expect(result.isNew).toBe(true);
+            
+            // Verify final state: A=seq1, C=seq2, B=seq3
+            events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(3);
+            expect(events[0].campaignId).toBe(campaignA);
+            expect(events[0].seq).toBe(1);
+            expect(events[1].campaignId).toBe(campaignC);
+            expect(events[1].seq).toBe(2);
+            expect(events[2].campaignId).toBe(campaignB);
+            expect(events[2].seq).toBe(3);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should insert event at beginning when received_at is earliest', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.integer({ min: 2, max: 5 }),
+          async (email, numExistingEvents) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const campaigns: string[] = [];
+            for (let i = 0; i <= numExistingEvents; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            
+            const baseTime = new Date('2024-01-01T10:00:00Z');
+            
+            // Add existing events (campaigns 1 to n) with times starting from baseTime
+            for (let i = 1; i <= numExistingEvents; i++) {
+              const receivedAt = new Date(baseTime.getTime() + i * 60000);
+              service.addUserEvent(projectId, email, campaigns[i], receivedAt);
+            }
+            
+            // Verify existing events
+            let events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(numExistingEvents);
+            
+            // Insert campaign 0 with earliest time (before baseTime)
+            const earliestTime = new Date(baseTime.getTime() - 60000);
+            const result = service.addUserEvent(projectId, email, campaigns[0], earliestTime);
+            expect(result.seq).toBe(1); // Should be inserted at seq=1
+            expect(result.isNew).toBe(true);
+            
+            // Verify all events shifted correctly
+            events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(numExistingEvents + 1);
+            expect(events[0].campaignId).toBe(campaigns[0]);
+            expect(events[0].seq).toBe(1);
+            
+            // All other events should have seq incremented by 1
+            for (let i = 1; i <= numExistingEvents; i++) {
+              expect(events[i].campaignId).toBe(campaigns[i]);
+              expect(events[i].seq).toBe(i + 1);
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should maintain seq-time consistency after multiple out-of-order insertions', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.array(fc.integer({ min: 0, max: 100 }), { minLength: 3, maxLength: 10 }),
+          async (email, timeOffsets) => {
+            // Ensure unique time offsets to avoid same-time conflicts
+            const uniqueOffsets = [...new Set(timeOffsets)];
+            if (uniqueOffsets.length < 3) return; // Skip if not enough unique offsets
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns for each unique offset
+            const campaigns: string[] = [];
+            for (let i = 0; i < uniqueOffsets.length; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            
+            const baseTime = new Date('2024-01-01T00:00:00Z');
+            
+            // Add events in the order of timeOffsets (which may be out of time order)
+            for (let i = 0; i < uniqueOffsets.length; i++) {
+              const receivedAt = new Date(baseTime.getTime() + uniqueOffsets[i] * 60000);
+              service.addUserEvent(projectId, email, campaigns[i], receivedAt);
+            }
+            
+            // Get all events
+            const events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(uniqueOffsets.length);
+            
+            // Property: seq numbers should be consecutive starting from 1
+            for (let i = 0; i < events.length; i++) {
+              expect(events[i].seq).toBe(i + 1);
+            }
+            
+            // Property: events should be sorted by received_at time
+            for (let i = 0; i < events.length - 1; i++) {
+              expect(events[i].receivedAt.getTime()).toBeLessThanOrEqual(events[i + 1].receivedAt.getTime());
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-seq-fix, Property 15: Seq-Time Consistency**
+   * **Validates: Requirements 1.1, 1.4, 2.2, 6.1, 6.2**
+   * 
+   * For any user in a project, the sequence numbers in their event stream should be
+   * consecutive integers starting from 1, and the seq order should match the received_at
+   * time order.
+   */
+  describe('Property 15: Seq-Time Consistency', () => {
+    it('should validate that seq numbers are consecutive starting from 1', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 1, maxLength: 5 }),
+          fc.integer({ min: 1, max: 5 }), // Number of campaigns per user
+          async (emails, numCampaigns) => {
+            // Ensure unique emails
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length === 0) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const campaigns: string[] = [];
+            for (let i = 0; i < numCampaigns; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            
+            const baseTime = new Date('2024-01-01T00:00:00Z');
+            
+            // Add events for each user in time order
+            for (const email of uniqueEmails) {
+              for (let i = 0; i < numCampaigns; i++) {
+                const receivedAt = new Date(baseTime.getTime() + i * 60000);
+                service.addUserEvent(projectId, email, campaigns[i], receivedAt);
+              }
+            }
+            
+            // Validate event sequence
+            const validation = service.validateEventSequence(projectId);
+            
+            // Property: validation should pass (no issues)
+            expect(validation.isValid).toBe(true);
+            expect(validation.usersWithIssues).toBe(0);
+            expect(validation.issues.length).toBe(0);
+            expect(validation.totalUsers).toBe(uniqueEmails.length);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should validate that seq order matches received_at time order', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.array(fc.integer({ min: 0, max: 100 }), { minLength: 2, maxLength: 8 }),
+          async (email, timeOffsets) => {
+            // Ensure unique time offsets
+            const uniqueOffsets = [...new Set(timeOffsets)];
+            if (uniqueOffsets.length < 2) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const campaigns: string[] = [];
+            for (let i = 0; i < uniqueOffsets.length; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            
+            const baseTime = new Date('2024-01-01T00:00:00Z');
+            
+            // Add events in random order (based on timeOffsets order)
+            for (let i = 0; i < uniqueOffsets.length; i++) {
+              const receivedAt = new Date(baseTime.getTime() + uniqueOffsets[i] * 60000);
+              service.addUserEvent(projectId, email, campaigns[i], receivedAt);
+            }
+            
+            // Validate event sequence
+            const validation = service.validateEventSequence(projectId);
+            
+            // Property: validation should pass (seq order matches time order)
+            expect(validation.isValid).toBe(true);
+            expect(validation.usersWithIssues).toBe(0);
+            
+            // Also verify directly that events are in time order
+            const events = service.getUserEvents(projectId, email);
+            for (let i = 0; i < events.length - 1; i++) {
+              expect(events[i].receivedAt.getTime()).toBeLessThanOrEqual(events[i + 1].receivedAt.getTime());
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should fix event sequence when seq numbers have gaps', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.integer({ min: 2, max: 5 }),
+          async (email, numCampaigns) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const campaigns: string[] = [];
+            for (let i = 0; i < numCampaigns; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            
+            const baseTime = new Date('2024-01-01T00:00:00Z');
+            
+            // Manually insert events with gaps in seq numbers
+            for (let i = 0; i < numCampaigns; i++) {
+              const receivedAt = new Date(baseTime.getTime() + i * 60000);
+              const gappedSeq = (i + 1) * 2; // seq: 2, 4, 6, ... (gaps)
+              db.run(
+                `INSERT INTO project_user_events (project_id, recipient, campaign_id, seq, received_at)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [projectId, email, campaigns[i], gappedSeq, receivedAt.toISOString()]
+              );
+            }
+            
+            // Validate should detect gaps
+            const validationBefore = service.validateEventSequence(projectId);
+            expect(validationBefore.isValid).toBe(false);
+            expect(validationBefore.usersWithIssues).toBe(1);
+            
+            // Fix the sequence
+            const fixResult = service.fixEventSequence(projectId);
+            expect(fixResult.usersFixed).toBe(1);
+            expect(fixResult.eventsReordered).toBeGreaterThan(0);
+            
+            // Validate should pass after fix
+            const validationAfter = service.validateEventSequence(projectId);
+            expect(validationAfter.isValid).toBe(true);
+            expect(validationAfter.usersWithIssues).toBe(0);
+            
+            // Verify seq numbers are now consecutive
+            const events = service.getUserEvents(projectId, email);
+            for (let i = 0; i < events.length; i++) {
+              expect(events[i].seq).toBe(i + 1);
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should rebuild path edges after fixing event sequence', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          async (email) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create 3 campaigns
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const campaignC = createTestCampaign(db, merchantId, 'Campaign C');
+            
+            const time1 = new Date('2024-01-01T10:00:00Z');
+            const time2 = new Date('2024-01-01T11:00:00Z');
+            const time3 = new Date('2024-01-01T12:00:00Z');
+            
+            // Manually insert events with wrong seq order (not matching time order)
+            // Time order: A(10:00) -> B(11:00) -> C(12:00)
+            // But we insert with seq: A=3, B=1, C=2 (wrong order)
+            db.run(
+              `INSERT INTO project_user_events (project_id, recipient, campaign_id, seq, received_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              [projectId, email, campaignA, 3, time1.toISOString()]
+            );
+            db.run(
+              `INSERT INTO project_user_events (project_id, recipient, campaign_id, seq, received_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              [projectId, email, campaignB, 1, time2.toISOString()]
+            );
+            db.run(
+              `INSERT INTO project_user_events (project_id, recipient, campaign_id, seq, received_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              [projectId, email, campaignC, 2, time3.toISOString()]
+            );
+            
+            // Fix the sequence
+            const fixResult = service.fixEventSequence(projectId);
+            expect(fixResult.usersFixed).toBe(1);
+            expect(fixResult.pathEdgesRebuilt).toBe(true);
+            
+            // Verify events are now in correct time order with correct seq
+            const events = service.getUserEvents(projectId, email);
+            expect(events.length).toBe(3);
+            expect(events[0].campaignId).toBe(campaignA);
+            expect(events[0].seq).toBe(1);
+            expect(events[1].campaignId).toBe(campaignB);
+            expect(events[1].seq).toBe(2);
+            expect(events[2].campaignId).toBe(campaignC);
+            expect(events[2].seq).toBe(3);
+            
+            // Verify path edges are correct: A->B, B->C
+            const edges = service.getProjectPathEdges(projectId);
+            expect(edges.length).toBe(2);
+            
+            const edgeAB = edges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignB);
+            const edgeBC = edges.find(e => e.fromCampaignId === campaignB && e.toCampaignId === campaignC);
+            
+            expect(edgeAB).toBeDefined();
+            expect(edgeAB!.userCount).toBe(1);
+            expect(edgeBC).toBeDefined();
+            expect(edgeBC!.userCount).toBe(1);
             
             db.close();
           }
@@ -1427,6 +2122,7 @@ class TestProjectPathAnalysisServiceWithAnalysis extends TestProjectPathAnalysis
 
   /**
    * Run full analysis (simplified for testing)
+   * Requirements 2.1, 2.2: Group emails by user first, then sort each user's emails by received_at
    */
   runFullAnalysis(projectId: string): { newUsersAdded: number; eventsCreated: number; edgesUpdated: number } {
     let newUsersAdded = 0;
@@ -1467,18 +2163,32 @@ class TestProjectPathAnalysisServiceWithAnalysis extends TestProjectPathAnalysis
       eventsCreated++;
     }
 
-    // Get all emails and add events
+    // Get all emails and group by recipient (Requirements 2.1)
     const newUserRecipients = new Set(recipientFirstRoot.keys());
     const allEmails = this.getAllCampaignEmails(projectInfo.merchantId, projectInfo.workerNames);
     
-    const newUserEmails = allEmails
-      .filter(email => newUserRecipients.has(email.recipient))
-      .sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
-
-    for (const email of newUserEmails) {
-      if (rootCampaignIds.includes(email.campaign_id)) continue;
-      const seq = this.addUserEvent(projectId, email.recipient, email.campaign_id, new Date(email.received_at));
-      if (seq > 1) eventsCreated++;
+    // Group emails by recipient first
+    const emailsByRecipient = new Map<string, Array<{ campaign_id: string; recipient: string; received_at: string }>>();
+    for (const email of allEmails) {
+      if (!newUserRecipients.has(email.recipient)) continue;
+      if (!emailsByRecipient.has(email.recipient)) {
+        emailsByRecipient.set(email.recipient, []);
+      }
+      emailsByRecipient.get(email.recipient)!.push(email);
+    }
+    
+    // Sort each user's emails by received_at time (Requirements 2.2)
+    for (const [, emails] of emailsByRecipient) {
+      emails.sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
+    }
+    
+    // Process each user's emails in time order
+    for (const [recipient, emails] of emailsByRecipient) {
+      for (const email of emails) {
+        if (rootCampaignIds.includes(email.campaign_id)) continue;
+        const result = this.addUserEvent(projectId, recipient, email.campaign_id, new Date(email.received_at));
+        if (result.isNew && result.seq > 1) eventsCreated++;
+      }
     }
 
     // Build path edges
@@ -3024,6 +3734,635 @@ describe('ProjectPathAnalysisService - Level Stats Sorting Properties', () => {
             
             // Property assertion: sorting twice should give same result
             expect(sorted2.map(s => s.campaignId)).toEqual(sorted1.map(s => s.campaignId));
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+/**
+ * **Feature: path-analysis-seq-fix, Property 17: Full Analysis Event Order**
+ * **Validates: Requirements 2.1, 2.3**
+ * 
+ * For any full analysis execution, each user's events should be processed in received_at time order,
+ * and duplicate campaign events (same user, same campaign) should only record the first occurrence.
+ */
+describe('ProjectPathAnalysisService - Full Analysis Event Order Properties', () => {
+  describe('Property 17: Full Analysis Event Order', () => {
+    it('should process each user events in received_at time order', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 1, maxLength: 3 }),
+          fc.array(fc.date({ min: new Date('2024-01-01'), max: new Date('2024-12-31') }), { minLength: 3, maxLength: 6 }),
+          async (emails, dates) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length === 0) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const campaign1 = createTestCampaign(db, merchantId, 'Campaign 1');
+            const campaign2 = createTestCampaign(db, merchantId, 'Campaign 2');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Sort dates to create a predictable time sequence
+            const sortedDates = [...dates].sort((a, b) => a.getTime() - b.getTime());
+            
+            // Create emails for each user with various timestamps
+            for (const email of uniqueEmails) {
+              // Root email at earliest time
+              createTestCampaignEmail(db, rootCampaign, email, sortedDates[0]);
+              
+              // Add other campaign emails at different times
+              if (sortedDates.length > 1) {
+                createTestCampaignEmail(db, campaign1, email, sortedDates[1]);
+              }
+              if (sortedDates.length > 2) {
+                createTestCampaignEmail(db, campaign2, email, sortedDates[2]);
+              }
+            }
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Verify each user's events are in time order
+            for (const email of uniqueEmails) {
+              const events = service.getUserEvents(projectId, email);
+              
+              // Events should be sorted by seq
+              for (let i = 0; i < events.length - 1; i++) {
+                expect(events[i].seq).toBeLessThan(events[i + 1].seq);
+              }
+              
+              // Seq order should match received_at time order
+              for (let i = 0; i < events.length - 1; i++) {
+                expect(events[i].receivedAt.getTime()).toBeLessThanOrEqual(events[i + 1].receivedAt.getTime());
+              }
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should only record first occurrence of duplicate campaign events for same user', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.integer({ min: 2, max: 5 }), // Number of duplicate emails
+          async (email, duplicateCount) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const campaign1 = createTestCampaign(db, merchantId, 'Campaign 1');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // Create Root email
+            createTestCampaignEmail(db, rootCampaign, email, baseTime);
+            
+            // Create multiple emails for the same campaign (duplicates)
+            for (let i = 0; i < duplicateCount; i++) {
+              const emailTime = new Date(baseTime.getTime() + (i + 1) * 3600000); // 1 hour apart
+              createTestCampaignEmail(db, campaign1, email, emailTime);
+            }
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Verify only one event per campaign per user (Requirements 2.3)
+            const events = service.getUserEvents(projectId, email);
+            const campaignIds = events.map(e => e.campaignId);
+            const uniqueCampaignIds = [...new Set(campaignIds)];
+            
+            // Should have exactly 2 events: root + campaign1 (no duplicates)
+            expect(events.length).toBe(2);
+            expect(uniqueCampaignIds.length).toBe(2);
+            expect(uniqueCampaignIds).toContain(rootCampaign);
+            expect(uniqueCampaignIds).toContain(campaign1);
+            
+            // The campaign1 event should have the earliest received_at time
+            const campaign1Event = events.find(e => e.campaignId === campaign1);
+            expect(campaign1Event).toBeDefined();
+            // First duplicate was at baseTime + 1 hour
+            const expectedTime = new Date(baseTime.getTime() + 3600000);
+            expect(campaign1Event!.receivedAt.getTime()).toBe(expectedTime.getTime());
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should process users independently - one user events should not affect another', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.tuple(emailArb, emailArb).filter(([a, b]) => a !== b),
+          async ([email1, email2]) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // User 1: Root -> A -> B (in time order)
+            createTestCampaignEmail(db, rootCampaign, email1, baseTime);
+            createTestCampaignEmail(db, campaignA, email1, new Date(baseTime.getTime() + 1000));
+            createTestCampaignEmail(db, campaignB, email1, new Date(baseTime.getTime() + 2000));
+            
+            // User 2: Root -> B -> A (different order)
+            createTestCampaignEmail(db, rootCampaign, email2, baseTime);
+            createTestCampaignEmail(db, campaignB, email2, new Date(baseTime.getTime() + 1000));
+            createTestCampaignEmail(db, campaignA, email2, new Date(baseTime.getTime() + 2000));
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Verify user 1's events
+            const events1 = service.getUserEvents(projectId, email1);
+            expect(events1.length).toBe(3);
+            expect(events1[0].campaignId).toBe(rootCampaign);
+            expect(events1[1].campaignId).toBe(campaignA);
+            expect(events1[2].campaignId).toBe(campaignB);
+            
+            // Verify user 2's events (different order)
+            const events2 = service.getUserEvents(projectId, email2);
+            expect(events2.length).toBe(3);
+            expect(events2[0].campaignId).toBe(rootCampaign);
+            expect(events2[1].campaignId).toBe(campaignB);
+            expect(events2[2].campaignId).toBe(campaignA);
+            
+            // Verify seq numbers are independent
+            expect(events1.map(e => e.seq)).toEqual([1, 2, 3]);
+            expect(events2.map(e => e.seq)).toEqual([1, 2, 3]);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should maintain seq-time consistency after full analysis', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 1, maxLength: 5 }),
+          fc.array(fc.date({ min: new Date('2024-01-01'), max: new Date('2024-12-31') }), { minLength: 2, maxLength: 8 }),
+          async (emails, dates) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length === 0 || dates.length < 2) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithAnalysis(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const campaigns = [
+              createTestCampaign(db, merchantId, 'Campaign 1'),
+              createTestCampaign(db, merchantId, 'Campaign 2'),
+              createTestCampaign(db, merchantId, 'Campaign 3'),
+            ];
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Sort dates
+            const sortedDates = [...dates].sort((a, b) => a.getTime() - b.getTime());
+            
+            // Create emails for each user
+            for (const email of uniqueEmails) {
+              // Root email at earliest time
+              createTestCampaignEmail(db, rootCampaign, email, sortedDates[0]);
+              
+              // Add other campaign emails
+              for (let i = 0; i < Math.min(campaigns.length, sortedDates.length - 1); i++) {
+                createTestCampaignEmail(db, campaigns[i], email, sortedDates[i + 1]);
+              }
+            }
+            
+            // Run full analysis
+            service.runFullAnalysis(projectId);
+            
+            // Validate event sequence for all users
+            const validation = service.validateEventSequence(projectId);
+            
+            // Property assertion: all users should have valid event sequences
+            expect(validation.isValid).toBe(true);
+            expect(validation.usersWithIssues).toBe(0);
+            expect(validation.issues.length).toBe(0);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+
+/**
+ * **Feature: path-analysis-seq-fix, Property 18: Path Edge Rebuild After Modification**
+ * **Validates: Requirements 3.3, 5.1, 5.2**
+ * 
+ * For any modification to user events (insertion, deletion, or reordering), the path edges
+ * should be rebuilt to accurately reflect the updated event transitions.
+ */
+describe('ProjectPathAnalysisService - Path Edge Rebuild Properties', () => {
+  describe('Property 18: Path Edge Rebuild After Modification', () => {
+    it('should rebuild path edges correctly after inserting new events', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 1, maxLength: 3 }),
+          async (emails) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length === 0) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const campaignC = createTestCampaign(db, merchantId, 'Campaign C');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // Add initial events for each user: A -> C (skipping B)
+            for (const email of uniqueEmails) {
+              service.addUserEvent(projectId, email, campaignA, baseTime);
+              service.addUserEvent(projectId, email, campaignC, new Date(baseTime.getTime() + 2000));
+            }
+            
+            // Build initial path edges
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify initial edges: A -> C
+            const initialEdges = service.getProjectPathEdges(projectId);
+            expect(initialEdges.length).toBe(1);
+            expect(initialEdges[0].fromCampaignId).toBe(campaignA);
+            expect(initialEdges[0].toCampaignId).toBe(campaignC);
+            expect(initialEdges[0].userCount).toBe(uniqueEmails.length);
+            
+            // Insert event B between A and C (time between A and C)
+            for (const email of uniqueEmails) {
+              service.addUserEvent(projectId, email, campaignB, new Date(baseTime.getTime() + 1000));
+            }
+            
+            // Rebuild path edges after modification (Requirements 3.3)
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify new edges: A -> B -> C
+            const newEdges = service.getProjectPathEdges(projectId);
+            expect(newEdges.length).toBe(2);
+            
+            // Find A -> B edge
+            const abEdge = newEdges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignB);
+            expect(abEdge).toBeDefined();
+            expect(abEdge!.userCount).toBe(uniqueEmails.length);
+            
+            // Find B -> C edge
+            const bcEdge = newEdges.find(e => e.fromCampaignId === campaignB && e.toCampaignId === campaignC);
+            expect(bcEdge).toBeDefined();
+            expect(bcEdge!.userCount).toBe(uniqueEmails.length);
+            
+            // Verify A -> C edge no longer exists (Requirements 5.1: only consecutive seq transitions)
+            const acEdge = newEdges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignC);
+            expect(acEdge).toBeUndefined();
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should only count consecutive seq transitions in path edges (Requirements 5.1)', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          fc.integer({ min: 3, max: 6 }), // Number of campaigns
+          async (email, numCampaigns) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const campaigns: string[] = [];
+            for (let i = 0; i < numCampaigns; i++) {
+              campaigns.push(createTestCampaign(db, merchantId, `Campaign ${i}`));
+            }
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // Add events in order
+            for (let i = 0; i < numCampaigns; i++) {
+              service.addUserEvent(projectId, email, campaigns[i], new Date(baseTime.getTime() + i * 1000));
+            }
+            
+            // Build path edges
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify edges
+            const edges = service.getProjectPathEdges(projectId);
+            
+            // Should have exactly numCampaigns - 1 edges (consecutive transitions)
+            expect(edges.length).toBe(numCampaigns - 1);
+            
+            // Each edge should be from campaign[i] to campaign[i+1]
+            for (let i = 0; i < numCampaigns - 1; i++) {
+              const edge = edges.find(e => 
+                e.fromCampaignId === campaigns[i] && e.toCampaignId === campaigns[i + 1]
+              );
+              expect(edge).toBeDefined();
+              expect(edge!.userCount).toBe(1);
+            }
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should correctly count user_count for path edges (Requirements 5.2)', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 2, maxLength: 5 }),
+          async (emails) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length < 2) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const campaignC = createTestCampaign(db, merchantId, 'Campaign C');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // All users: A -> B
+            for (const email of uniqueEmails) {
+              service.addUserEvent(projectId, email, campaignA, baseTime);
+              service.addUserEvent(projectId, email, campaignB, new Date(baseTime.getTime() + 1000));
+            }
+            
+            // Only first user: B -> C
+            service.addUserEvent(projectId, uniqueEmails[0], campaignC, new Date(baseTime.getTime() + 2000));
+            
+            // Build path edges
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify edges
+            const edges = service.getProjectPathEdges(projectId);
+            
+            // A -> B edge should have all users
+            const abEdge = edges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignB);
+            expect(abEdge).toBeDefined();
+            expect(abEdge!.userCount).toBe(uniqueEmails.length);
+            
+            // B -> C edge should have only 1 user
+            const bcEdge = edges.find(e => e.fromCampaignId === campaignB && e.toCampaignId === campaignC);
+            expect(bcEdge).toBeDefined();
+            expect(bcEdge!.userCount).toBe(1);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should rebuild path edges after fixEventSequence (Requirements 5.2)', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          async (email) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const campaignC = createTestCampaign(db, merchantId, 'Campaign C');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // Add events in order: A -> B -> C
+            service.addUserEvent(projectId, email, campaignA, baseTime);
+            service.addUserEvent(projectId, email, campaignB, new Date(baseTime.getTime() + 1000));
+            service.addUserEvent(projectId, email, campaignC, new Date(baseTime.getTime() + 2000));
+            
+            // Build initial path edges
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify initial edges
+            const initialEdges = service.getProjectPathEdges(projectId);
+            expect(initialEdges.length).toBe(2);
+            
+            // Manually corrupt the seq numbers to simulate inconsistency
+            db.run(
+              `UPDATE project_user_events SET seq = 10 WHERE project_id = ? AND campaign_id = ?`,
+              [projectId, campaignB]
+            );
+            
+            // Validate should detect the issue
+            const validation = service.validateEventSequence(projectId);
+            expect(validation.isValid).toBe(false);
+            
+            // Fix the sequence
+            const fixResult = service.fixEventSequence(projectId);
+            expect(fixResult.usersFixed).toBe(1);
+            expect(fixResult.pathEdgesRebuilt).toBe(true);
+            
+            // Verify path edges are correctly rebuilt
+            const fixedEdges = service.getProjectPathEdges(projectId);
+            expect(fixedEdges.length).toBe(2);
+            
+            // Verify A -> B edge
+            const abEdge = fixedEdges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignB);
+            expect(abEdge).toBeDefined();
+            expect(abEdge!.userCount).toBe(1);
+            
+            // Verify B -> C edge
+            const bcEdge = fixedEdges.find(e => e.fromCampaignId === campaignB && e.toCampaignId === campaignC);
+            expect(bcEdge).toBeDefined();
+            expect(bcEdge!.userCount).toBe(1);
+            
+            // Validate sequence is now correct
+            const validationAfterFix = service.validateEventSequence(projectId);
+            expect(validationAfterFix.isValid).toBe(true);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should handle multiple users with different paths correctly', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.tuple(emailArb, emailArb).filter(([a, b]) => a !== b),
+          async ([email1, email2]) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisService(db);
+            
+            // Create test data
+            const merchantId = createTestMerchant(db, 'test.com');
+            const campaignA = createTestCampaign(db, merchantId, 'Campaign A');
+            const campaignB = createTestCampaign(db, merchantId, 'Campaign B');
+            const campaignC = createTestCampaign(db, merchantId, 'Campaign C');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            const baseTime = new Date('2024-06-01T10:00:00Z');
+            
+            // User 1: A -> B -> C
+            service.addUserEvent(projectId, email1, campaignA, baseTime);
+            service.addUserEvent(projectId, email1, campaignB, new Date(baseTime.getTime() + 1000));
+            service.addUserEvent(projectId, email1, campaignC, new Date(baseTime.getTime() + 2000));
+            
+            // User 2: A -> C (different path, skipping B)
+            service.addUserEvent(projectId, email2, campaignA, baseTime);
+            service.addUserEvent(projectId, email2, campaignC, new Date(baseTime.getTime() + 1000));
+            
+            // Build path edges
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify edges
+            const edges = service.getProjectPathEdges(projectId);
+            
+            // A -> B edge (only user 1)
+            const abEdge = edges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignB);
+            expect(abEdge).toBeDefined();
+            expect(abEdge!.userCount).toBe(1);
+            
+            // B -> C edge (only user 1)
+            const bcEdge = edges.find(e => e.fromCampaignId === campaignB && e.toCampaignId === campaignC);
+            expect(bcEdge).toBeDefined();
+            expect(bcEdge!.userCount).toBe(1);
+            
+            // A -> C edge (only user 2)
+            const acEdge = edges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignC);
+            expect(acEdge).toBeDefined();
+            expect(acEdge!.userCount).toBe(1);
+            
+            // Now insert B for user 2 between A and C
+            service.addUserEvent(projectId, email2, campaignB, new Date(baseTime.getTime() + 500));
+            
+            // Rebuild path edges
+            service.buildPathEdgesFromEvents(projectId);
+            
+            // Verify updated edges
+            const updatedEdges = service.getProjectPathEdges(projectId);
+            
+            // A -> B edge (now both users)
+            const updatedAbEdge = updatedEdges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignB);
+            expect(updatedAbEdge).toBeDefined();
+            expect(updatedAbEdge!.userCount).toBe(2);
+            
+            // B -> C edge (now both users)
+            const updatedBcEdge = updatedEdges.find(e => e.fromCampaignId === campaignB && e.toCampaignId === campaignC);
+            expect(updatedBcEdge).toBeDefined();
+            expect(updatedBcEdge!.userCount).toBe(2);
+            
+            // A -> C edge should no longer exist
+            const updatedAcEdge = updatedEdges.find(e => e.fromCampaignId === campaignA && e.toCampaignId === campaignC);
+            expect(updatedAcEdge).toBeUndefined();
+            
+            db.close();
           }
         ),
         { numRuns: 100 }

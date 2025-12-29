@@ -320,7 +320,7 @@ export class ProjectPathAnalysisService {
   // ============================================
 
   /**
-   * Add a user event to a project (auto-calculates seq)
+   * Add a user event to a project (calculates seq based on received_at time order)
    * 
    * @param projectId - Project ID
    * @param recipient - Recipient email
@@ -348,9 +348,22 @@ export class ProjectPathAnalysisService {
       return { seq: existing.seq, isNew: false };
     }
     
-    // Get the max seq for this user in this project
-    const maxSeq = this.getMaxSeq(projectId, recipient);
-    const newSeq = maxSeq + 1;
+    // Calculate the correct seq based on received_at time order
+    // Count how many events this user has with received_at <= this event's received_at
+    const seqStmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM project_user_events
+      WHERE project_id = ? AND recipient = ? AND received_at <= ?
+    `);
+    const seqResult = seqStmt.get(projectId, recipient, receivedAt.toISOString()) as { count: number };
+    const newSeq = seqResult.count + 1;
+    
+    // Check if we need to shift existing events with later received_at
+    const shiftStmt = this.db.prepare(`
+      UPDATE project_user_events
+      SET seq = seq + 1
+      WHERE project_id = ? AND recipient = ? AND received_at > ?
+    `);
+    shiftStmt.run(projectId, recipient, receivedAt.toISOString());
     
     const stmt = this.db.prepare(`
       INSERT INTO project_user_events (project_id, recipient, campaign_id, seq, received_at)
@@ -786,6 +799,7 @@ export class ProjectPathAnalysisService {
     );
 
     // Phase 2: Build events for all subsequent emails
+    // Requirements 2.1, 2.2: Group emails by user first, then sort each user's emails by received_at
     onProgress?.({
       phase: 'building_events',
       progress: 40,
@@ -799,36 +813,51 @@ export class ProjectPathAnalysisService {
     // Get all campaign emails for these recipients within worker scope
     const allEmails = this.getAllCampaignEmails(projectInfo.merchantId, projectInfo.workerNames);
     
-    // Filter to only new user emails and sort by received_at
-    const newUserEmails = allEmails
-      .filter(email => newUserRecipients.has(email.recipient))
-      .sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
-
-    // Process emails to build event stream (create new batch processor for different type)
-    const emailBatchProcessor = new BatchProcessor<CampaignEmailRow>();
-    await emailBatchProcessor.processBatch(
-      newUserEmails,
-      (email) => {
+    // Group emails by recipient first (Requirements 2.1)
+    const emailsByRecipient = new Map<string, CampaignEmailRow[]>();
+    for (const email of allEmails) {
+      if (!newUserRecipients.has(email.recipient)) {
+        continue;
+      }
+      if (!emailsByRecipient.has(email.recipient)) {
+        emailsByRecipient.set(email.recipient, []);
+      }
+      emailsByRecipient.get(email.recipient)!.push(email);
+    }
+    
+    // Sort each user's emails by received_at time (Requirements 2.2)
+    for (const [, emails] of emailsByRecipient) {
+      emails.sort((a, b) => new Date(a.received_at).getTime() - new Date(b.received_at).getTime());
+    }
+    
+    // Process each user's emails in time order
+    const recipientEntries2 = Array.from(emailsByRecipient.entries());
+    let processedRecipients = 0;
+    const totalRecipients = recipientEntries2.length;
+    
+    for (const [recipient, emails] of recipientEntries2) {
+      // Process this user's emails in time order
+      for (const email of emails) {
         // Skip if this is a Root campaign email (already processed as seq=1)
         if (rootCampaignIds.includes(email.campaign_id)) {
-          return;
+          continue;
         }
         
-        // Add event (will auto-calculate seq)
-        const result = this.addUserEvent(projectId, email.recipient, email.campaign_id, new Date(email.received_at));
+        // Add event (will auto-calculate seq, skip duplicates per Requirements 2.3)
+        const result = this.addUserEvent(projectId, recipient, email.campaign_id, new Date(email.received_at));
         if (result.isNew && result.seq > 1) {
           eventsCreated++;
         }
-      },
-      (progress: BatchProgress) => {
-        onProgress?.({
-          phase: 'building_events',
-          progress: 40 + Math.round(progress.percentage * 0.40), // 40-80%
-          message: `构建事件流中... (${progress.processed}/${progress.total})`,
-          details: progress,
-        });
       }
-    );
+      
+      processedRecipients++;
+      onProgress?.({
+        phase: 'building_events',
+        progress: 40 + Math.round((processedRecipients / totalRecipients) * 40), // 40-80%
+        message: `构建事件流中... (${processedRecipients}/${totalRecipients} 用户)`,
+        details: { processed: processedRecipients, total: totalRecipients },
+      });
+    }
 
     // Phase 3: Build path edges
     onProgress?.({
@@ -1523,6 +1552,165 @@ export class ProjectPathAnalysisService {
     const row = stmt.get(campaignId) as { tag: number | null } | undefined;
     return row?.tag ?? 0;
   }
+
+  // ============================================
+  // Event Sequence Validation Methods (Requirements 6.1, 6.2, 6.3)
+  // ============================================
+
+  /**
+   * Validate event sequence for a project
+   * Checks that each user's seq numbers are consecutive starting from 1
+   * and that seq order matches received_at time order
+   * 
+   * @param projectId - Project ID
+   * @returns Validation result with issues found
+   * 
+   * Requirements: 6.1, 6.2
+   */
+  validateEventSequence(projectId: string): EventSequenceValidationResult {
+    const issues: EventSequenceValidationResult['issues'] = [];
+    
+    // Get all distinct recipients for this project
+    const recipientsStmt = this.db.prepare(`
+      SELECT DISTINCT recipient FROM project_user_events WHERE project_id = ?
+    `);
+    const recipientRows = recipientsStmt.all(projectId) as { recipient: string }[];
+    const totalUsers = recipientRows.length;
+    
+    const usersWithIssuesSet = new Set<string>();
+    
+    for (const { recipient } of recipientRows) {
+      // Get all events for this user ordered by seq
+      const events = this.getUserEvents(projectId, recipient);
+      
+      if (events.length === 0) continue;
+      
+      // Check 1: seq numbers should start from 1 and be consecutive
+      for (let i = 0; i < events.length; i++) {
+        const expectedSeq = i + 1;
+        if (events[i].seq !== expectedSeq) {
+          usersWithIssuesSet.add(recipient);
+          if (events[i].seq > expectedSeq) {
+            issues.push({
+              recipient,
+              issueType: 'gap',
+              details: `Gap in seq: expected ${expectedSeq}, got ${events[i].seq}`,
+            });
+          } else {
+            issues.push({
+              recipient,
+              issueType: 'duplicate',
+              details: `Duplicate or out-of-order seq: expected ${expectedSeq}, got ${events[i].seq}`,
+            });
+          }
+          break; // Only report first issue per user for this check
+        }
+      }
+      
+      // Check 2: seq order should match received_at time order
+      for (let i = 0; i < events.length - 1; i++) {
+        const currentTime = events[i].receivedAt.getTime();
+        const nextTime = events[i + 1].receivedAt.getTime();
+        
+        if (currentTime > nextTime) {
+          usersWithIssuesSet.add(recipient);
+          issues.push({
+            recipient,
+            issueType: 'order',
+            details: `Time order mismatch: seq ${events[i].seq} (${events[i].receivedAt.toISOString()}) > seq ${events[i + 1].seq} (${events[i + 1].receivedAt.toISOString()})`,
+          });
+          break; // Only report first issue per user for this check
+        }
+      }
+    }
+    
+    return {
+      isValid: issues.length === 0,
+      totalUsers,
+      usersWithIssues: usersWithIssuesSet.size,
+      issues,
+    };
+  }
+
+  /**
+   * Fix event sequence for a project
+   * Reassigns seq numbers based on received_at time order
+   * and rebuilds path edges after fixing
+   * 
+   * @param projectId - Project ID
+   * @returns Fix result with counts of fixed users and events
+   * 
+   * Requirements: 6.3
+   */
+  fixEventSequence(projectId: string): EventSequenceFixResult {
+    let usersFixed = 0;
+    let eventsReordered = 0;
+    
+    // Get all distinct recipients for this project
+    const recipientsStmt = this.db.prepare(`
+      SELECT DISTINCT recipient FROM project_user_events WHERE project_id = ?
+    `);
+    const recipientRows = recipientsStmt.all(projectId) as { recipient: string }[];
+    
+    for (const { recipient } of recipientRows) {
+      // Get all events for this user ordered by received_at time
+      const eventsStmt = this.db.prepare(`
+        SELECT id, campaign_id, seq, received_at
+        FROM project_user_events
+        WHERE project_id = ? AND recipient = ?
+        ORDER BY received_at ASC, id ASC
+      `);
+      const events = eventsStmt.all(projectId, recipient) as Array<{
+        id: number;
+        campaign_id: string;
+        seq: number;
+        received_at: string;
+      }>;
+      
+      if (events.length === 0) continue;
+      
+      let userNeedsFixing = false;
+      
+      // Check if this user needs fixing
+      for (let i = 0; i < events.length; i++) {
+        const expectedSeq = i + 1;
+        if (events[i].seq !== expectedSeq) {
+          userNeedsFixing = true;
+          break;
+        }
+      }
+      
+      if (userNeedsFixing) {
+        usersFixed++;
+        
+        // Update seq numbers based on time order
+        const updateStmt = this.db.prepare(`
+          UPDATE project_user_events SET seq = ? WHERE id = ?
+        `);
+        
+        for (let i = 0; i < events.length; i++) {
+          const newSeq = i + 1;
+          if (events[i].seq !== newSeq) {
+            updateStmt.run(newSeq, events[i].id);
+            eventsReordered++;
+          }
+        }
+      }
+    }
+    
+    // Rebuild path edges if any fixes were made
+    let pathEdgesRebuilt = false;
+    if (usersFixed > 0) {
+      this.buildPathEdgesFromEvents(projectId);
+      pathEdgesRebuilt = true;
+    }
+    
+    return {
+      usersFixed,
+      eventsReordered,
+      pathEdgesRebuilt,
+    };
+  }
 }
 
 /**
@@ -1589,4 +1777,29 @@ export interface ValuableStats {
   highValueCampaignCount: number;   // 高价值活动数量 (tag=2)
   valuableUserReach: number;        // 到达有价值活动的用户数
   valuableConversionRate: number;   // 有价值转化率 (%)
+}
+
+/**
+ * Event Sequence Validation Result - 事件序列验证结果
+ * Requirements: 6.1, 6.2
+ */
+export interface EventSequenceValidationResult {
+  isValid: boolean;
+  totalUsers: number;
+  usersWithIssues: number;
+  issues: Array<{
+    recipient: string;
+    issueType: 'gap' | 'order' | 'duplicate';
+    details: string;
+  }>;
+}
+
+/**
+ * Event Sequence Fix Result - 事件序列修复结果
+ * Requirements: 6.3
+ */
+export interface EventSequenceFixResult {
+  usersFixed: number;
+  eventsReordered: number;
+  pathEdgesRebuilt: boolean;
 }

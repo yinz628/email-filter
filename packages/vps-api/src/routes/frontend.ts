@@ -13,8 +13,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <title>Email Filter 管理面板</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { overflow-x: hidden; width: 100%; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; font-size: 14px; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 16px; overflow-x: hidden; }
     .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 16px 24px; margin-bottom: 16px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
     .header h1 { font-size: 20px; font-weight: 600; }
     .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; background: white; padding: 8px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }

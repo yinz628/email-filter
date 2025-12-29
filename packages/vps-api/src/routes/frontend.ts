@@ -78,17 +78,121 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .tag { background: #e9ecef; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 3px; display: inline-block; }
     .text-muted { color: #999; font-size: 12px; }
     .text-truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+    
+    /* ========== Mobile Responsive Styles ========== */
     @media (max-width: 768px) {
-      .container { padding: 12px; }
-      .header { padding: 12px 16px; }
-      .header h1 { font-size: 16px; }
-      .tabs { gap: 4px; padding: 6px; }
-      .tab { padding: 6px 12px; font-size: 12px; }
-      .card { padding: 12px; }
-      .form-row { grid-template-columns: 1fr; }
-      .actions { flex-wrap: wrap; }
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      body { font-size: 13px; }
+      .container { padding: 8px; }
+      .header { padding: 10px 12px; flex-direction: column; gap: 10px; text-align: center; }
+      .header h1 { font-size: 15px; }
+      .user-info { flex-wrap: wrap; justify-content: center; gap: 8px; }
+      .user-info .username { font-size: 12px; }
+      .btn-logout { padding: 4px 10px; font-size: 11px; }
+      
+      /* Tabs - horizontal scroll on mobile */
+      .tabs { 
+        gap: 4px; 
+        padding: 6px; 
+        overflow-x: auto; 
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+      }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab { 
+        padding: 6px 10px; 
+        font-size: 11px; 
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      
+      /* Cards */
+      .card { padding: 10px; margin-bottom: 10px; }
+      .card h2 { font-size: 14px; margin-bottom: 10px; padding-bottom: 6px; }
+      
+      /* Forms */
+      .form-row { grid-template-columns: 1fr; gap: 8px; }
+      .form-group { margin-bottom: 10px; }
+      .form-group label { font-size: 12px; margin-bottom: 3px; }
+      .form-group input, .form-group select { padding: 8px; font-size: 14px; }
+      
+      /* Buttons */
+      .btn { padding: 6px 10px; font-size: 12px; }
+      .btn-sm { padding: 4px 8px; font-size: 11px; }
+      .actions { flex-wrap: wrap; gap: 4px; }
+      
+      /* Tables - make scrollable */
+      .table-wrapper { 
+        margin: 0 -10px; 
+        padding: 0; 
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      table { min-width: 600px; font-size: 12px; }
+      th, td { padding: 6px 8px; }
+      .text-truncate { max-width: 120px; }
+      
+      /* Stats */
+      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .stat-card { padding: 12px; }
+      .stat-value { font-size: 22px; }
+      .stat-label { font-size: 11px; }
+      
+      /* Modals */
+      .modal-content { 
+        width: 95%; 
+        max-width: none; 
+        margin: 10px;
+        padding: 15px;
+        max-height: 90vh;
+      }
+      .modal-header h3 { font-size: 14px; }
+      
+      /* Filter bar */
+      .filter-bar { flex-direction: column; align-items: stretch; }
+      .filter-bar select, .filter-bar input { width: 100%; }
+      
+      /* Login page */
+      .login-container { margin: 40px auto; padding: 15px; }
+      .login-card { padding: 20px; }
+      .login-card h2 { font-size: 20px; }
+      .login-card .logo { font-size: 36px; }
+      
+      /* Project tabs */
+      .project-tab { padding: 8px 12px; font-size: 12px; }
+      
+      /* Path analysis */
+      .path-node { padding: 10px; }
+      .path-node-title { font-size: 13px; }
+      .path-node-stats { font-size: 11px; }
+      
+      /* Hide less important columns on mobile */
+      .hide-mobile { display: none !important; }
     }
+    
+    /* Extra small devices */
+    @media (max-width: 480px) {
+      .container { padding: 6px; }
+      .header h1 { font-size: 14px; }
+      .tab { padding: 5px 8px; font-size: 10px; }
+      .card { padding: 8px; }
+      .card h2 { font-size: 13px; }
+      .btn { padding: 5px 8px; font-size: 11px; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .stat-value { font-size: 18px; }
+      table { min-width: 500px; font-size: 11px; }
+      th, td { padding: 5px 6px; }
+      .modal-content { padding: 12px; }
+    }
+    
+    /* Touch-friendly improvements */
+    @media (hover: none) and (pointer: coarse) {
+      .btn, .tab, .project-tab { min-height: 40px; }
+      .form-group input, .form-group select { min-height: 44px; }
+      tr.clickable-row { min-height: 48px; }
+      .modal-close { width: 36px; height: 36px; font-size: 20px; }
+    }
+    
     /* Project Detail Tabs Styles */
     .project-tab { padding: 10px 20px; border: none; background: transparent; cursor: pointer; font-size: 14px; font-weight: 500; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
     .project-tab:hover { color: #4a90d9; background: #f8f9fa; }
@@ -192,12 +296,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="margin-bottom:10px;">
           <button class="btn btn-sm btn-secondary" onclick="checkAllWorkersHealth()">🔄 检测所有 Worker 状态</button>
         </div>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>名称</th>
-              <th>Worker URL</th>
-              <th>默认转发地址</th>
+              <th class="hide-mobile">Worker URL</th>
+              <th class="hide-mobile">默认转发地址</th>
               <th>在线状态</th>
               <th>启用</th>
               <th>操作</th>
@@ -205,6 +310,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </thead>
           <tbody id="workers-table"></tbody>
         </table>
+        </div>
       </div>
     </div>
 
@@ -304,18 +410,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-danger btn-sm" onclick="cleanupExpiredDynamicRules()">清理过期规则</button>
         </div>
         <p style="color:#666;margin-bottom:15px">以下规则由系统根据邮件频率自动生成，超过过期时间未命中将自动删除</p>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>规则内容</th>
-              <th>创建时间</th>
-              <th>最后命中</th>
+              <th class="hide-mobile">创建时间</th>
+              <th class="hide-mobile">最后命中</th>
               <th>状态</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="dynamic-rules-table"></tbody>
         </table>
+        </div>
       </div>
     </div>
 
@@ -366,22 +474,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-sm btn-danger" id="batch-delete-btn" onclick="batchDeleteLogs()" style="display:none;">删除选中</button>
           <button class="btn btn-sm btn-danger" id="search-delete-btn" onclick="deleteBySearch()" style="display:none;">删除搜索结果</button>
         </div>
-        <div style="flex:1;overflow-y:auto;">
+        <div style="flex:1;overflow-y:auto;overflow-x:auto;">
+          <div class="table-wrapper" style="margin:0;">
           <table>
             <thead style="position:sticky;top:0;background:#f8f9fa;">
               <tr>
                 <th style="width:40px;"><input type="checkbox" id="log-select-all" onchange="toggleSelectAllLogs()"></th>
                 <th style="width:140px;">时间</th>
-                <th style="width:80px;">Worker</th>
+                <th style="width:80px;" class="hide-mobile">Worker</th>
                 <th style="width:70px;">类型</th>
                 <th style="width:180px;">主题</th>
-                <th style="width:160px;">发件人</th>
-                <th style="width:160px;">收件人</th>
-                <th>命中规则</th>
+                <th style="width:160px;" class="hide-mobile">发件人</th>
+                <th style="width:160px;" class="hide-mobile">收件人</th>
+                <th class="hide-mobile">命中规则</th>
               </tr>
             </thead>
             <tbody id="logs-table"></tbody>
           </table>
+          </div>
         </div>
         <div id="log-pagination" style="display:flex;justify-content:center;align-items:center;gap:10px;padding:15px 0;border-top:1px solid #eee;margin-top:10px;">
           <button class="btn btn-sm btn-secondary" onclick="prevLogPage()" id="log-prev-btn" disabled>上一页</button>
@@ -437,18 +547,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <p style="color:#666;margin-bottom:15px">自动统计拦截数量最多的规则（最多显示5条）</p>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th style="width:50px;">排名</th>
               <th>规则内容</th>
               <th style="width:100px;">拦截次数</th>
-              <th style="width:200px;">实例分布</th>
-              <th style="width:160px;">最后拦截</th>
+              <th style="width:200px;" class="hide-mobile">实例分布</th>
+              <th style="width:160px;" class="hide-mobile">最后拦截</th>
             </tr>
           </thead>
           <tbody id="trending-rules-table"></tbody>
         </table>
+        </div>
       </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
@@ -456,20 +568,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-primary" onclick="showModal('add-watch-modal')">+ 添加监控</button>
         </div>
         <p style="color:#666;margin-bottom:15px">监控规则仅统计命中次数，不影响邮件过滤</p>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>名称</th>
-              <th>匹配字段</th>
-              <th>匹配模式</th>
+              <th class="hide-mobile">匹配字段</th>
+              <th class="hide-mobile">匹配模式</th>
               <th>规则内容</th>
               <th>命中次数</th>
-              <th>最后命中</th>
+              <th class="hide-mobile">最后命中</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="watch-rules-table"></tbody>
         </table>
+        </div>
       </div>
     </div>
 
@@ -515,25 +629,27 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div id="merchants-empty-data" style="display:none;color:#999;">暂无商户数据。</div>
           <div id="merchants-load-error" style="display:none;color:#e74c3c;">加载商户列表失败。</div>
         </div>
+        <div class="table-wrapper">
         <table id="merchants-table-container" style="display:none;">
           <thead>
             <tr>
               <th style="width:40px;"><input type="checkbox" id="merchants-select-all" onchange="toggleSelectAllMerchants(this.checked)" title="全选/取消全选"></th>
               <th>商户域名</th>
-              <th id="worker-column-header">Worker 实例</th>
-              <th>营销活动数</th>
-              <th>邮件总数</th>
-              <th>已有项目</th>
+              <th id="worker-column-header" class="hide-mobile">Worker 实例</th>
+              <th>活动数</th>
+              <th>邮件数</th>
+              <th class="hide-mobile">已有项目</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="merchants-table"></tbody>
         </table>
+        </div>
       </div>
 
       <!-- 区域3: 项目列表区 (Project List Card) -->
       <div class="card" id="campaign-projects-section">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;flex-wrap:wrap;gap:10px;">
           <h2 style="margin:0;border:none;padding:0;">📁 分析项目</h2>
           <div style="display:flex;gap:10px;align-items:center;">
             <select id="project-status-filter" onchange="loadProjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
@@ -547,19 +663,21 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div id="projects-empty" style="text-align:center;color:#999;padding:40px;">
           暂无分析项目。请先选择实例，然后从商户列表创建项目。
         </div>
+        <div class="table-wrapper">
         <table id="projects-table-container" style="display:none;">
           <thead>
             <tr>
               <th>项目名称</th>
-              <th>商户域名</th>
-              <th>Worker</th>
+              <th class="hide-mobile">商户域名</th>
+              <th class="hide-mobile">Worker</th>
               <th>状态</th>
-              <th>创建时间</th>
+              <th class="hide-mobile">创建时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="projects-table"></tbody>
         </table>
+        </div>
       </div>
 
       <!-- 区域4: 项目详情区 (Project Details with Tab Navigation) - 默认隐藏 -->
@@ -577,14 +695,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         
         <!-- 标签页导航 -->
-        <div class="project-detail-tabs" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #eee;padding-bottom:0;">
-          <button class="project-tab active" id="tab-root" onclick="switchProjectTab('root')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">
+        <div class="project-detail-tabs" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #eee;padding-bottom:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+          <button class="project-tab active" id="tab-root" onclick="switchProjectTab('root')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;white-space:nowrap;flex-shrink:0;">
             🎯 Root确认
           </button>
-          <button class="project-tab" id="tab-campaigns" onclick="switchProjectTab('campaigns')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">
+          <button class="project-tab" id="tab-campaigns" onclick="switchProjectTab('campaigns')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;white-space:nowrap;flex-shrink:0;">
             📧 营销活动
           </button>
-          <button class="project-tab" id="tab-path" onclick="switchProjectTab('path')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">
+          <button class="project-tab" id="tab-path" onclick="switchProjectTab('path')" style="padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;white-space:nowrap;flex-shrink:0;">
             🔀 路径分析
           </button>
         </div>
@@ -838,16 +956,17 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <div class="card-body" id="rules-card-body" style="margin-top:15px;">
           <p style="color:#666;margin-bottom:15px">监控重点邮件信号的健康状态。当信号异常时自动告警。</p>
+          <div class="table-wrapper">
           <table>
             <thead>
               <tr>
                 <th>商户</th>
                 <th>规则名称</th>
-                <th>标签</th>
-                <th>作用范围</th>
-                <th>主题匹配</th>
-                <th>预期间隔</th>
-                <th>死亡阈值</th>
+                <th class="hide-mobile">标签</th>
+                <th class="hide-mobile">作用范围</th>
+                <th class="hide-mobile">主题匹配</th>
+                <th class="hide-mobile">预期间隔</th>
+                <th class="hide-mobile">死亡阈值</th>
                 <th>状态</th>
                 <th>启用</th>
                 <th>操作</th>
@@ -855,6 +974,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </thead>
             <tbody id="monitoring-rules-table"></tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -889,20 +1009,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <div class="card-body" id="status-card-body" style="margin-top:15px;">
           <p style="color:#666;margin-bottom:15px">实时显示所有监控信号的健康状态。状态按 DEAD > WEAK > ACTIVE 排序。</p>
+          <div class="table-wrapper">
           <table>
             <thead>
               <tr>
                 <th>状态</th>
                 <th>商户 / 规则</th>
                 <th>最后出现</th>
-                <th>间隔</th>
-                <th>24h</th>
-                <th>12h</th>
-                <th>1h</th>
+                <th class="hide-mobile">间隔</th>
+                <th class="hide-mobile">24h</th>
+                <th class="hide-mobile">12h</th>
+                <th class="hide-mobile">1h</th>
               </tr>
             </thead>
             <tbody id="monitoring-status-table"></tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -1151,18 +1273,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-success" onclick="createBackup()" id="create-backup-btn">+ 创建备份</button>
           <button class="btn btn-warning" onclick="showModal('restore-modal')">📥 恢复数据库</button>
         </div>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>文件名</th>
               <th>大小</th>
-              <th>创建时间</th>
-              <th>类型</th>
+              <th class="hide-mobile">创建时间</th>
+              <th class="hide-mobile">类型</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="backups-table"></tbody>
         </table>
+        </div>
       </div>
     </div>
 
@@ -1172,18 +1296,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <h2>👥 用户管理</h2>
         <p style="color:#666;margin-bottom:15px">管理系统用户账户。只有管理员可以访问此页面。</p>
         <button class="btn btn-primary" onclick="showModal('add-user-modal')" style="margin-bottom:15px">+ 添加用户</button>
+        <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>用户名</th>
               <th>角色</th>
-              <th>创建时间</th>
-              <th>更新时间</th>
+              <th class="hide-mobile">创建时间</th>
+              <th class="hide-mobile">更新时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="users-table"></tbody>
         </table>
+        </div>
       </div>
     </div>
   </div>

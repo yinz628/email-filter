@@ -296,7 +296,7 @@ class ProjectPathAnalysisService {
 #### 2.4 层级计算算法 (buildLevelStats)
 
 ```
-输入: rootCampaigns, pathEdges, totalNewUsers
+输入: rootCampaigns, pathEdges, totalNewUsers, campaignTags
 输出: CampaignLevelStat[]
 
 步骤:
@@ -311,9 +311,43 @@ class ProjectPathAnalysisService {
          edge.to.level = campaign.level + 1
          queue.push(edge.to)
 4. 计算用户数和覆盖率
-5. 按level和userCount排序
+5. 按level排序，同一level内按价值优先排序:
+   - tag=2 (高价值) 排最前
+   - tag=1 (有价值) 排第二
+   - 其他按userCount降序
 6. 返回结果
 ```
+
+#### 2.5 有价值活动统计算法 (calculateValuableStats)
+
+**新增功能 (Requirements 9.1-9.6)**
+
+```
+输入: projectId, levelStats, userEvents
+输出: ValuableStats
+
+步骤:
+1. 获取所有有价值活动 (tag=1 或 tag=2)
+2. 统计有价值活动数量:
+   - valuableCampaignCount = count(tag=1 or tag=2)
+   - highValueCampaignCount = count(tag=2)
+3. 计算有价值活动触达用户:
+   - 遍历所有用户事件
+   - 统计到达过任意有价值活动的用户数
+   - valuableUserReach = distinct users who reached valuable campaigns
+4. 计算转化率:
+   - valuableConversionRate = valuableUserReach / totalNewUsers * 100
+5. 返回统计结果
+```
+
+**数据结构:**
+```typescript
+interface ValuableStats {
+  valuableCampaignCount: number;    // 有价值活动数量 (tag=1 or tag=2)
+  highValueCampaignCount: number;   // 高价值活动数量 (tag=2)
+  valuableUserReach: number;        // 到达有价值活动的用户数
+  valuableConversionRate: number;   // 有价值转化率 (%)
+}
 
 ## Data Models
 
@@ -410,6 +444,22 @@ interface AnalysisResult {
   edgesUpdated: number;
   duration: number;
 }
+
+interface ValuableStats {
+  valuableCampaignCount: number;    // 有价值活动数量 (tag=1 or tag=2)
+  highValueCampaignCount: number;   // 高价值活动数量 (tag=2)
+  valuableUserReach: number;        // 到达有价值活动的用户数
+  valuableConversionRate: number;   // 有价值转化率 (%)
+}
+
+interface PathAnalysisResult {
+  rootCampaigns: ProjectRootCampaign[];
+  userStats: ProjectUserStats;
+  levelStats: CampaignLevelStat[];
+  transitions: PathTransition[];
+  valuableStats: ValuableStats;     // 新增：有价值活动统计
+  lastAnalysisTime: Date | null;
+}
 ```
 
 ## Correctness Properties
@@ -460,6 +510,18 @@ interface AnalysisResult {
 *For any* re-analysis operation, all project analysis data (new_users, events, edges) should be cleared before processing.
 **Validates: Requirements 8.2**
 
+### Property 12: Valuable Campaign Priority Sorting
+*For any* level stats result, within the same level, campaigns should be sorted with tag=2 first, then tag=1, then others by userCount descending.
+**Validates: Requirements 9.1**
+
+### Property 13: Valuable User Reach Accuracy
+*For any* project, valuableUserReach should equal the count of distinct users who have at least one event with a campaign where tag=1 or tag=2.
+**Validates: Requirements 9.3, 9.4**
+
+### Property 14: Valuable Conversion Rate Calculation
+*For any* project with totalNewUsers > 0, valuableConversionRate should equal (valuableUserReach / totalNewUsers) * 100.
+**Validates: Requirements 9.5**
+
 ## Error Handling
 
 1. **Project Not Found**: Return 404 with error message
@@ -487,6 +549,9 @@ Using fast-check library:
 - **Property 9**: Test analysis mode selection with various last_analysis_time values
 - **Property 10**: Verify timestamp updates after analysis
 - **Property 11**: Verify data is cleared during re-analysis
+- **Property 12**: Verify valuable campaigns are sorted first within each level
+- **Property 13**: Verify valuableUserReach counts distinct users reaching valuable campaigns
+- **Property 14**: Verify valuableConversionRate calculation accuracy
 
 ### Integration Tests
 - Test full analysis flow end-to-end

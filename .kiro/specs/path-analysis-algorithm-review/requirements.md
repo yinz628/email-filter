@@ -177,3 +177,16 @@ flowchart TD
 5. WHEN re-analysis runs THEN the System SHALL rebuild activity_path_edge
 6. WHEN re-analysis completes THEN the System SHALL display updated statistics
 
+### Requirement 9: 有价值活动优先计算
+
+**User Story:** As a data analyst, I want the system to prioritize valuable campaigns in path analysis, so that I can focus on high-value conversion paths.
+
+#### Acceptance Criteria
+
+1. WHEN calculating level stats THEN the System SHALL sort campaigns with tag=2 (高价值) first, then tag=1 (有价值), then others
+2. WHEN displaying path transitions THEN the System SHALL highlight paths leading to valuable campaigns
+3. WHEN generating analysis results THEN the System SHALL include valuable campaign statistics (valuableCampaignCount, valuableUserReach)
+4. WHEN calculating valuable user reach THEN the System SHALL count distinct users who reached any valuable campaign (tag=1 or tag=2)
+5. WHEN displaying level stats THEN the System SHALL show valuable campaign conversion rate (valuableUserReach / totalNewUsers)
+6. WHEN a path leads to a high-value campaign (tag=2) THEN the System SHALL mark it as a priority path
+

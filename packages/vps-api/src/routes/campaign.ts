@@ -207,17 +207,22 @@ interface CampaignLevelStat {
   userCount: number;
   coverage: number;
   isRoot: boolean;
+  tag?: number;           // Campaign tag (0-4), Requirements 9.1
+  isValuable?: boolean;   // true if tag=1 or tag=2, Requirements 9.1
 }
 
 function buildLevelStats(
   rootCampaigns: ProjectRootCampaign[],
   pathEdges: ProjectPathEdge[],
-  totalNewUsers: number
+  totalNewUsers: number,
+  projectId?: string,
+  pathService?: ProjectPathAnalysisService
 ): CampaignLevelStat[] {
   const levelStats: CampaignLevelStat[] = [];
   const campaignLevels = new Map<string, number>();
   const campaignSubjects = new Map<string, string>();
   const campaignUserCounts = new Map<string, number>();
+  const campaignTags = new Map<string, { tag: number; isValuable: boolean }>();
   const rootCampaignIds = new Set<string>();
 
   // Root campaigns are level 1
@@ -295,10 +300,19 @@ function buildLevelStats(
     }
   }
 
+  // Get campaign tags if pathService is provided (Requirements 9.1)
+  if (projectId && pathService) {
+    const projectTags = pathService.getProjectCampaignTags(projectId);
+    for (const tag of projectTags) {
+      campaignTags.set(tag.campaignId, { tag: tag.tag, isValuable: tag.isValuable });
+    }
+  }
+
   // Build level stats array with coverage calculation
   for (const [campaignId, level] of campaignLevels) {
     const userCount = campaignUserCounts.get(campaignId) || 0;
     const coverage = totalNewUsers > 0 ? (userCount / totalNewUsers) * 100 : 0;
+    const tagInfo = campaignTags.get(campaignId);
     
     levelStats.push({
       campaignId,
@@ -307,12 +321,26 @@ function buildLevelStats(
       userCount,
       coverage,
       isRoot: rootCampaignIds.has(campaignId),
+      tag: tagInfo?.tag,
+      isValuable: tagInfo?.isValuable,
     });
   }
 
-  // Sort by level, then by user count descending
+  // Sort by level, then by tag priority (tag=2 first, tag=1 second), then by user count descending
+  // Requirements 9.1: Valuable campaigns should be sorted first within each level
   levelStats.sort((a, b) => {
+    // First sort by level
     if (a.level !== b.level) return a.level - b.level;
+    
+    // Within same level, sort by tag priority (tag=2 > tag=1 > others)
+    const aTag = a.tag ?? 0;
+    const bTag = b.tag ?? 0;
+    const aTagPriority = aTag === 2 ? 0 : (aTag === 1 ? 1 : 2);
+    const bTagPriority = bTag === 2 ? 0 : (bTag === 1 ? 1 : 2);
+    
+    if (aTagPriority !== bTagPriority) return aTagPriority - bTagPriority;
+    
+    // Finally sort by user count descending
     return b.userCount - a.userCount;
   });
 
@@ -2095,7 +2123,10 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
       }));
 
       // Build level stats from root campaigns and path edges
-      const levelStats = buildLevelStats(rootCampaigns, pathEdges, userStats.totalNewUsers);
+      const levelStats = buildLevelStats(rootCampaigns, pathEdges, userStats.totalNewUsers, request.params.id, pathService);
+
+      // Calculate valuable stats (Requirements 9.3, 9.4, 9.5)
+      const valuableStats = pathService.calculateValuableStats(request.params.id);
 
       return reply.send({
         projectId: request.params.id,
@@ -2103,6 +2134,7 @@ export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
         levelStats,
         transitions,
         rootCampaigns,
+        valuableStats,
         lastAnalysisTime: lastAnalysisTime?.toISOString() || null,
       });
     } catch (error) {

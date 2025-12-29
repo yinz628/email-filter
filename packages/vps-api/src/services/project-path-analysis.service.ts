@@ -1415,6 +1415,114 @@ export class ProjectPathAnalysisService {
       };
     });
   }
+
+  // ============================================
+  // Valuable Stats Methods (Requirements 9.1-9.6)
+  // ============================================
+
+  /**
+   * Calculate valuable campaign statistics for a project
+   * 
+   * @param projectId - Project ID
+   * @returns ValuableStats with counts and conversion rate
+   * 
+   * Requirements: 9.3, 9.4, 9.5
+   */
+  calculateValuableStats(projectId: string): ValuableStats {
+    // Get project info
+    const projectInfo = this.getProjectInfo(projectId);
+    if (!projectInfo) {
+      return {
+        valuableCampaignCount: 0,
+        highValueCampaignCount: 0,
+        valuableUserReach: 0,
+        valuableConversionRate: 0,
+      };
+    }
+
+    // Get all project campaign tags
+    const projectTags = this.getProjectCampaignTags(projectId);
+    const projectTagsMap = new Map<string, number>();
+    for (const tag of projectTags) {
+      projectTagsMap.set(tag.campaignId, tag.tag);
+    }
+
+    // Get all campaigns for this merchant with their tags
+    const campaignsStmt = this.db.prepare(`
+      SELECT c.id, c.tag
+      FROM campaigns c
+      WHERE c.merchant_id = ?
+    `);
+    const campaigns = campaignsStmt.all(projectInfo.merchantId) as { id: string; tag: number | null }[];
+
+    // Count valuable campaigns (using project-level tag if exists, otherwise campaign-level)
+    let valuableCampaignCount = 0;
+    let highValueCampaignCount = 0;
+    const valuableCampaignIds = new Set<string>();
+
+    for (const campaign of campaigns) {
+      const effectiveTag = projectTagsMap.has(campaign.id) 
+        ? projectTagsMap.get(campaign.id)! 
+        : (campaign.tag ?? 0);
+      
+      if (effectiveTag === 1 || effectiveTag === 2) {
+        valuableCampaignCount++;
+        valuableCampaignIds.add(campaign.id);
+      }
+      if (effectiveTag === 2) {
+        highValueCampaignCount++;
+      }
+    }
+
+    // Get total new users
+    const userStats = this.getProjectUserStats(projectId);
+    const totalNewUsers = userStats.totalNewUsers;
+
+    // Calculate valuable user reach - count distinct users who reached any valuable campaign
+    let valuableUserReach = 0;
+    if (valuableCampaignIds.size > 0 && totalNewUsers > 0) {
+      const placeholders = Array.from(valuableCampaignIds).map(() => '?').join(',');
+      const reachStmt = this.db.prepare(`
+        SELECT COUNT(DISTINCT recipient) as reach_count
+        FROM project_user_events
+        WHERE project_id = ? AND campaign_id IN (${placeholders})
+      `);
+      const reachResult = reachStmt.get(projectId, ...valuableCampaignIds) as { reach_count: number };
+      valuableUserReach = reachResult.reach_count;
+    }
+
+    // Calculate conversion rate
+    const valuableConversionRate = totalNewUsers > 0 
+      ? (valuableUserReach / totalNewUsers) * 100 
+      : 0;
+
+    return {
+      valuableCampaignCount,
+      highValueCampaignCount,
+      valuableUserReach,
+      valuableConversionRate: Math.round(valuableConversionRate * 100) / 100, // Round to 2 decimal places
+    };
+  }
+
+  /**
+   * Get campaign tag for sorting (project-level tag takes precedence)
+   * 
+   * @param projectId - Project ID
+   * @param campaignId - Campaign ID
+   * @returns Effective tag value (0-4)
+   */
+  getEffectiveCampaignTag(projectId: string, campaignId: string): number {
+    // Check project-level tag first
+    const projectTag = this.getProjectCampaignTag(projectId, campaignId);
+    if (projectTag) {
+      return projectTag.tag;
+    }
+
+    // Fall back to campaign-level tag
+    const stmt = this.db.prepare('SELECT tag FROM campaigns WHERE id = ?');
+    const row = stmt.get(campaignId) as { tag: number | null } | undefined;
+    return row?.tag ?? 0;
+  }
 }
 
 /**
@@ -1470,4 +1578,15 @@ interface CampaignRow {
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Valuable Stats - 有价值活动统计
+ * Requirements: 9.3, 9.4, 9.5
+ */
+export interface ValuableStats {
+  valuableCampaignCount: number;    // 有价值活动数量 (tag=1 or tag=2)
+  highValueCampaignCount: number;   // 高价值活动数量 (tag=2)
+  valuableUserReach: number;        // 到达有价值活动的用户数
+  valuableConversionRate: number;   // 有价值转化率 (%)
 }

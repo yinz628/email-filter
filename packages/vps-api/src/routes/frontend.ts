@@ -4836,6 +4836,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#9c27b0;">' + (data.lastAnalysisTime ? new Date(data.lastAnalysisTime).toLocaleString('zh-CN') : '未分析') + '</div><div style="font-size:11px;color:#666;">上次分析</div></div>';
       html += '</div></div>';
       
+      // Valuable Stats Section (Requirements 9.3, 9.5)
+      if (data.valuableStats) {
+        const vs = data.valuableStats;
+        html += '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:15px;margin-bottom:15px;">';
+        html += '<h4 style="margin:0 0 10px 0;font-size:13px;color:#2e7d32;">⭐ 有价值活动统计</h4>';
+        html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#27ae60;">' + (vs.valuableCampaignCount || 0) + '</div><div style="font-size:11px;color:#666;">有价值活动</div></div>';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#ffc107;">' + (vs.highValueCampaignCount || 0) + '</div><div style="font-size:11px;color:#666;">高价值活动</div></div>';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#2e7d32;">' + (vs.valuableUserReach || 0) + '</div><div style="font-size:11px;color:#666;">触达用户数</div></div>';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:bold;color:#1565c0;">' + (vs.valuableConversionRate || 0).toFixed(1) + '%</div><div style="font-size:11px;color:#666;">有价值转化率</div></div>';
+        html += '</div></div>';
+      }
+      
       // Root Campaigns Section
       if (data.rootCampaigns && data.rootCampaigns.length > 0) {
         html += '<div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:8px;padding:15px;margin-bottom:15px;">';
@@ -4900,6 +4913,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const transitionMap = {};
         const allTargets = new Set();
         
+        // First pass: build the transition map
         data.transitions.forEach(t => {
           if (!transitionMap[t.fromCampaignId]) {
             transitionMap[t.fromCampaignId] = {
@@ -4920,6 +4934,31 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           allTargets.add(t.toCampaignId);
         });
         
+        // Second pass: mark paths leading to valuable campaigns (Requirements 9.2, 9.6)
+        // A path is "priority" if it leads to a high-value campaign (tag=2)
+        function markPriorityPaths(campaignId, visited = new Set()) {
+          if (visited.has(campaignId)) return false;
+          visited.add(campaignId);
+          
+          const node = transitionMap[campaignId];
+          if (!node) return false;
+          
+          let leadsToValuable = false;
+          for (const child of node.children) {
+            // Check if child is valuable
+            if (child.tag === 2 || child.tag === 1 || child.isValuable) {
+              child.isPriorityPath = true;
+              leadsToValuable = true;
+            }
+            // Recursively check if child leads to valuable
+            if (markPriorityPaths(child.campaignId, new Set(visited))) {
+              child.isPriorityPath = true;
+              leadsToValuable = true;
+            }
+          }
+          return leadsToValuable;
+        }
+        
         // Find root nodes (nodes that are not targets of any transition)
         const rootNodes = Object.keys(transitionMap).filter(id => !allTargets.has(id));
         
@@ -4929,6 +4968,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             .sort((a, b) => b[1].children.length - a[1].children.length);
           if (sortedNodes.length > 0) rootNodes.push(sortedNodes[0][0]);
         }
+        
+        // Mark priority paths from each root
+        rootNodes.forEach(rootId => markPriorityPaths(rootId));
         
         // Track visited nodes to prevent infinite loops
         const visited = new Set();
@@ -4941,16 +4983,42 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           const node = transitionMap[campaignId];
           let nodeHtml = '';
           
-          node.children.sort((a, b) => b.userCount - a.userCount).forEach((child, idx, arr) => {
+          // Sort: priority paths first, then by userCount
+          node.children.sort((a, b) => {
+            // Priority paths first
+            if (a.isPriorityPath && !b.isPriorityPath) return -1;
+            if (!a.isPriorityPath && b.isPriorityPath) return 1;
+            // Then by tag (tag=2 > tag=1 > others)
+            const aTagPriority = a.tag === 2 ? 0 : (a.tag === 1 ? 1 : 2);
+            const bTagPriority = b.tag === 2 ? 0 : (b.tag === 1 ? 1 : 2);
+            if (aTagPriority !== bTagPriority) return aTagPriority - bTagPriority;
+            // Finally by userCount
+            return b.userCount - a.userCount;
+          });
+          
+          node.children.forEach((child, idx, arr) => {
             const isLast = idx === arr.length - 1;
             const prefix = depth > 0 ? '│'.repeat(depth - 1) + (isLast ? '└' : '├') : '';
             const ratio = child.ratio || 0;
-            const bgColor = ratio >= 50 ? '#c8e6c9' : (ratio >= 20 ? '#fff9c4' : 'transparent');
+            // Enhanced background color: priority paths get special treatment
+            let bgColor = 'transparent';
+            if (child.tag === 2) {
+              bgColor = '#fff8e1'; // Gold background for high-value
+            } else if (child.tag === 1 || child.isValuable) {
+              bgColor = '#e8f5e9'; // Green background for valuable
+            } else if (child.isPriorityPath) {
+              bgColor = '#f3e5f5'; // Purple background for paths leading to valuable
+            } else if (ratio >= 50) {
+              bgColor = '#c8e6c9';
+            } else if (ratio >= 20) {
+              bgColor = '#fff9c4';
+            }
             const tagMarker = getTreeTagMarker(child.tag, child.isValuable);
+            const priorityMarker = child.isPriorityPath && !child.isValuable && child.tag !== 1 && child.tag !== 2 ? ' <span style="color:#9c27b0;font-size:10px;">→⭐</span>' : '';
             
             nodeHtml += '<div style="padding:3px 0;font-size:12px;font-family:monospace;background:' + bgColor + ';border-radius:3px;margin:2px 0;">';
             nodeHtml += '<span style="color:#999;">' + prefix + '→ </span>';
-            nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>' + tagMarker;
+            nodeHtml += '<span style="color:#333;">' + escapeHtml(child.subject.substring(0, 35)) + '</span>' + tagMarker + priorityMarker;
             nodeHtml += '<span style="color:#2e7d32;font-weight:bold;margin-left:8px;">' + child.userCount + '人</span>';
             if (ratio > 0) {
               nodeHtml += '<span style="color:#666;margin-left:5px;">(' + ratio.toFixed(1) + '%)</span>';
@@ -4989,7 +5057,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           }
         });
         
-        html += '<p style="color:#888;font-size:10px;margin-top:8px;margin-bottom:0;">💡 绿色背景=主路径(≥50%) | 黄色背景=次级路径(≥20%) | <span style="color:#27ae60;">★</span>=有价值 | <span style="color:#ffc107;">★★</span>=高价值</p>';
+        html += '<p style="color:#888;font-size:10px;margin-top:8px;margin-bottom:0;">💡 <span style="background:#fff8e1;padding:1px 4px;border-radius:2px;">金色</span>=高价值 | <span style="background:#e8f5e9;padding:1px 4px;border-radius:2px;">绿色</span>=有价值 | <span style="background:#f3e5f5;padding:1px 4px;border-radius:2px;">紫色</span>=通往有价值 | <span style="color:#27ae60;">★</span>=有价值 | <span style="color:#ffc107;">★★</span>=高价值 | <span style="color:#9c27b0;">→⭐</span>=优先路径</p>';
       } else {
         html += '<div style="text-align:center;color:#999;padding:20px;">暂无转移数据。请先运行分析。</div>';
       }

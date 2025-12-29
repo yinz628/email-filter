@@ -2119,3 +2119,915 @@ describe('ProjectPathAnalysisService - Analysis Time Properties', () => {
     });
   });
 });
+
+
+// ============================================
+// Extended Test Service for Valuable Stats Testing
+// ============================================
+
+/**
+ * Extended test service that includes valuable stats methods for testing
+ */
+class TestProjectPathAnalysisServiceWithValuableStats extends TestProjectPathAnalysisServiceWithAnalysis {
+  constructor(db: SqlJsDatabase) {
+    super(db);
+  }
+
+  /**
+   * Set campaign tag for a project
+   */
+  setProjectCampaignTag(
+    projectId: string,
+    campaignId: string,
+    tag: number,
+    note?: string
+  ): void {
+    const now = new Date().toISOString();
+    
+    // Check if exists
+    const existing = this.db.exec(
+      `SELECT id FROM project_campaign_tags WHERE project_id = ? AND campaign_id = ?`,
+      [projectId, campaignId]
+    );
+    
+    if (existing.length > 0 && existing[0].values.length > 0) {
+      this.db.run(
+        `UPDATE project_campaign_tags SET tag = ?, tag_note = ?, updated_at = ?
+         WHERE project_id = ? AND campaign_id = ?`,
+        [tag, note ?? null, now, projectId, campaignId]
+      );
+    } else {
+      this.db.run(
+        `INSERT INTO project_campaign_tags (project_id, campaign_id, tag, tag_note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [projectId, campaignId, tag, note ?? null, now, now]
+      );
+    }
+  }
+
+  /**
+   * Get all campaign tags for a project
+   */
+  getProjectCampaignTags(projectId: string): Array<{
+    campaignId: string;
+    tag: number;
+    isValuable: boolean;
+  }> {
+    const result = this.db.exec(
+      `SELECT campaign_id, tag FROM project_campaign_tags WHERE project_id = ?`,
+      [projectId]
+    );
+    
+    if (result.length === 0) return [];
+    
+    return result[0].values.map(row => ({
+      campaignId: row[0] as string,
+      tag: row[1] as number,
+      isValuable: (row[1] as number) === 1 || (row[1] as number) === 2,
+    }));
+  }
+
+  /**
+   * Calculate valuable stats for a project
+   * 
+   * **Feature: path-analysis-algorithm-review, Property 13: Valuable User Reach Accuracy**
+   * **Feature: path-analysis-algorithm-review, Property 14: Valuable Conversion Rate Calculation**
+   * **Validates: Requirements 9.3, 9.4, 9.5**
+   * 
+   * Note: In tests, we only use project-level tags (project_campaign_tags table)
+   * since the campaigns table doesn't have a tag column in the test schema.
+   */
+  calculateValuableStats(projectId: string): {
+    valuableCampaignCount: number;
+    highValueCampaignCount: number;
+    valuableUserReach: number;
+    valuableConversionRate: number;
+  } {
+    // Get project info
+    const projectInfo = this.getProjectInfo(projectId);
+    if (!projectInfo) {
+      return {
+        valuableCampaignCount: 0,
+        highValueCampaignCount: 0,
+        valuableUserReach: 0,
+        valuableConversionRate: 0,
+      };
+    }
+
+    // Get all project campaign tags (in tests, we only use project-level tags)
+    const projectTags = this.getProjectCampaignTags(projectId);
+    
+    // Count valuable campaigns from project tags
+    let valuableCampaignCount = 0;
+    let highValueCampaignCount = 0;
+    const valuableCampaignIds = new Set<string>();
+
+    for (const tag of projectTags) {
+      if (tag.tag === 1 || tag.tag === 2) {
+        valuableCampaignCount++;
+        valuableCampaignIds.add(tag.campaignId);
+      }
+      if (tag.tag === 2) {
+        highValueCampaignCount++;
+      }
+    }
+
+    // Get total new users
+    const userStats = this.getProjectUserStats(projectId);
+    const totalNewUsers = userStats.totalNewUsers;
+
+    // Calculate valuable user reach - count distinct users who reached any valuable campaign
+    let valuableUserReach = 0;
+    if (valuableCampaignIds.size > 0 && totalNewUsers > 0) {
+      const placeholders = Array.from(valuableCampaignIds).map(id => `'${id}'`).join(',');
+      const reachResult = this.db.exec(
+        `SELECT COUNT(DISTINCT recipient) as reach_count
+         FROM project_user_events
+         WHERE project_id = '${projectId}' AND campaign_id IN (${placeholders})`
+      );
+      if (reachResult.length > 0 && reachResult[0].values.length > 0) {
+        valuableUserReach = reachResult[0].values[0][0] as number;
+      }
+    }
+
+    // Calculate conversion rate
+    const valuableConversionRate = totalNewUsers > 0 
+      ? (valuableUserReach / totalNewUsers) * 100 
+      : 0;
+
+    return {
+      valuableCampaignCount,
+      highValueCampaignCount,
+      valuableUserReach,
+      valuableConversionRate: Math.round(valuableConversionRate * 100) / 100, // Round to 2 decimal places
+    };
+  }
+}
+
+describe('ProjectPathAnalysisService - Valuable Stats Properties', () => {
+  /**
+   * **Feature: path-analysis-algorithm-review, Property 13: Valuable User Reach Accuracy**
+   * **Validates: Requirements 9.3, 9.4**
+   * 
+   * For any project, valuableUserReach should equal the count of distinct users who have
+   * at least one event with a campaign where tag=1 or tag=2.
+   */
+  describe('Property 13: Valuable User Reach Accuracy', () => {
+    it('should count distinct users who reached valuable campaigns (tag=1 or tag=2)', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 2, maxLength: 8 }),
+          fc.integer({ min: 0, max: 2 }), // Number of users who reach valuable campaigns
+          async (emails, valuableReachCount) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length < 2) return;
+            
+            // Ensure valuableReachCount doesn't exceed available users
+            const actualValuableReachCount = Math.min(valuableReachCount, uniqueEmails.length);
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const valuableCampaign = createTestCampaign(db, merchantId, 'Valuable Campaign');
+            const normalCampaign = createTestCampaign(db, merchantId, 'Normal Campaign');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Set valuable campaign tag (tag=1)
+            service.setProjectCampaignTag(projectId, valuableCampaign, 1);
+            
+            const now = new Date();
+            
+            // Add users - some reach valuable campaign, some don't
+            for (let i = 0; i < uniqueEmails.length; i++) {
+              const email = uniqueEmails[i];
+              
+              // All users get Root campaign
+              service.addProjectNewUser(projectId, email, rootCampaign);
+              service.addUserEvent(projectId, email, rootCampaign, now);
+              
+              if (i < actualValuableReachCount) {
+                // These users reach the valuable campaign
+                service.addUserEvent(projectId, email, valuableCampaign, new Date(now.getTime() + 1000));
+              } else {
+                // These users only reach normal campaign
+                service.addUserEvent(projectId, email, normalCampaign, new Date(now.getTime() + 1000));
+              }
+            }
+            
+            // Calculate valuable stats
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Property assertion: valuableUserReach should equal the count of users who reached valuable campaigns
+            expect(stats.valuableUserReach).toBe(actualValuableReachCount);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should count users who reached high-value campaigns (tag=2)', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 3, maxLength: 6 }),
+          async (emails) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length < 3) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const highValueCampaign = createTestCampaign(db, merchantId, 'High Value Campaign');
+            const valuableCampaign = createTestCampaign(db, merchantId, 'Valuable Campaign');
+            const normalCampaign = createTestCampaign(db, merchantId, 'Normal Campaign');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Set campaign tags
+            service.setProjectCampaignTag(projectId, highValueCampaign, 2); // High value
+            service.setProjectCampaignTag(projectId, valuableCampaign, 1);  // Valuable
+            
+            const now = new Date();
+            
+            // User 0: reaches high-value campaign
+            service.addProjectNewUser(projectId, uniqueEmails[0], rootCampaign);
+            service.addUserEvent(projectId, uniqueEmails[0], rootCampaign, now);
+            service.addUserEvent(projectId, uniqueEmails[0], highValueCampaign, new Date(now.getTime() + 1000));
+            
+            // User 1: reaches valuable campaign (tag=1)
+            service.addProjectNewUser(projectId, uniqueEmails[1], rootCampaign);
+            service.addUserEvent(projectId, uniqueEmails[1], rootCampaign, now);
+            service.addUserEvent(projectId, uniqueEmails[1], valuableCampaign, new Date(now.getTime() + 1000));
+            
+            // User 2: reaches only normal campaign
+            service.addProjectNewUser(projectId, uniqueEmails[2], rootCampaign);
+            service.addUserEvent(projectId, uniqueEmails[2], rootCampaign, now);
+            service.addUserEvent(projectId, uniqueEmails[2], normalCampaign, new Date(now.getTime() + 1000));
+            
+            // Calculate valuable stats
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Property assertion: valuableUserReach should count users who reached tag=1 OR tag=2
+            expect(stats.valuableUserReach).toBe(2); // User 0 and User 1
+            expect(stats.highValueCampaignCount).toBe(1); // Only highValueCampaign
+            expect(stats.valuableCampaignCount).toBe(2); // highValueCampaign + valuableCampaign
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should count each user only once even if they reached multiple valuable campaigns', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          emailArb,
+          async (email) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const valuable1 = createTestCampaign(db, merchantId, 'Valuable 1');
+            const valuable2 = createTestCampaign(db, merchantId, 'Valuable 2');
+            const highValue = createTestCampaign(db, merchantId, 'High Value');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Set campaign tags
+            service.setProjectCampaignTag(projectId, valuable1, 1);
+            service.setProjectCampaignTag(projectId, valuable2, 1);
+            service.setProjectCampaignTag(projectId, highValue, 2);
+            
+            const now = new Date();
+            
+            // Single user reaches ALL valuable campaigns
+            service.addProjectNewUser(projectId, email, rootCampaign);
+            service.addUserEvent(projectId, email, rootCampaign, now);
+            service.addUserEvent(projectId, email, valuable1, new Date(now.getTime() + 1000));
+            service.addUserEvent(projectId, email, valuable2, new Date(now.getTime() + 2000));
+            service.addUserEvent(projectId, email, highValue, new Date(now.getTime() + 3000));
+            
+            // Calculate valuable stats
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Property assertion: user should be counted only once
+            expect(stats.valuableUserReach).toBe(1);
+            expect(stats.valuableCampaignCount).toBe(3); // valuable1 + valuable2 + highValue
+            expect(stats.highValueCampaignCount).toBe(1); // Only highValue
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should return 0 valuableUserReach when no valuable campaigns exist', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(emailArb, { minLength: 1, maxLength: 5 }),
+          async (emails) => {
+            const uniqueEmails = [...new Set(emails)];
+            if (uniqueEmails.length === 0) return;
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns (no valuable tags)
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const normalCampaign = createTestCampaign(db, merchantId, 'Normal Campaign');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            const now = new Date();
+            
+            // Add users
+            for (const email of uniqueEmails) {
+              service.addProjectNewUser(projectId, email, rootCampaign);
+              service.addUserEvent(projectId, email, rootCampaign, now);
+              service.addUserEvent(projectId, email, normalCampaign, new Date(now.getTime() + 1000));
+            }
+            
+            // Calculate valuable stats
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Property assertion: no valuable campaigns means 0 reach
+            expect(stats.valuableCampaignCount).toBe(0);
+            expect(stats.highValueCampaignCount).toBe(0);
+            expect(stats.valuableUserReach).toBe(0);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: path-analysis-algorithm-review, Property 14: Valuable Conversion Rate Calculation**
+   * **Validates: Requirements 9.5**
+   * 
+   * For any project with totalNewUsers > 0, valuableConversionRate should equal
+   * (valuableUserReach / totalNewUsers) * 100.
+   */
+  describe('Property 14: Valuable Conversion Rate Calculation', () => {
+    it('should calculate conversion rate as (valuableUserReach / totalNewUsers) * 100', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 1, max: 10 }), // Total users
+          fc.integer({ min: 0, max: 10 }), // Users who reach valuable campaigns
+          async (totalUsers, valuableUsers) => {
+            // Ensure valuableUsers doesn't exceed totalUsers
+            const actualValuableUsers = Math.min(valuableUsers, totalUsers);
+            
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const valuableCampaign = createTestCampaign(db, merchantId, 'Valuable Campaign');
+            const normalCampaign = createTestCampaign(db, merchantId, 'Normal Campaign');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Set valuable campaign tag
+            service.setProjectCampaignTag(projectId, valuableCampaign, 1);
+            
+            const now = new Date();
+            
+            // Add users
+            for (let i = 0; i < totalUsers; i++) {
+              const email = `user${i}@test.com`;
+              
+              service.addProjectNewUser(projectId, email, rootCampaign);
+              service.addUserEvent(projectId, email, rootCampaign, now);
+              
+              if (i < actualValuableUsers) {
+                service.addUserEvent(projectId, email, valuableCampaign, new Date(now.getTime() + 1000));
+              } else {
+                service.addUserEvent(projectId, email, normalCampaign, new Date(now.getTime() + 1000));
+              }
+            }
+            
+            // Calculate valuable stats
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Calculate expected conversion rate
+            const expectedRate = (actualValuableUsers / totalUsers) * 100;
+            const expectedRateRounded = Math.round(expectedRate * 100) / 100;
+            
+            // Property assertion: conversion rate should match formula
+            expect(stats.valuableUserReach).toBe(actualValuableUsers);
+            expect(stats.valuableConversionRate).toBe(expectedRateRounded);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should return 0 conversion rate when totalNewUsers is 0', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.constant(null),
+          async () => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns but don't add any users
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const valuableCampaign = createTestCampaign(db, merchantId, 'Valuable Campaign');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Set valuable campaign tag
+            service.setProjectCampaignTag(projectId, valuableCampaign, 1);
+            
+            // Calculate valuable stats (no users)
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Property assertion: 0 users means 0 conversion rate (avoid division by zero)
+            expect(stats.valuableUserReach).toBe(0);
+            expect(stats.valuableConversionRate).toBe(0);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 20 }
+      );
+    });
+
+    it('should return 100% conversion rate when all users reach valuable campaigns', async () => {
+      const SQL = await initSqlJs();
+      
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 1, max: 10 }),
+          async (totalUsers) => {
+            const db = new SQL.Database();
+            const schemaPath = join(__dirname, '../db/schema.sql');
+            const schema = readFileSync(schemaPath, 'utf-8');
+            db.run(schema);
+            
+            const service = new TestProjectPathAnalysisServiceWithValuableStats(db);
+            
+            const merchantId = createTestMerchant(db, 'test.com');
+            const projectId = createTestProject(db, merchantId, 'Test Project');
+            
+            // Create campaigns
+            const rootCampaign = createTestCampaign(db, merchantId, 'Root Campaign');
+            const valuableCampaign = createTestCampaign(db, merchantId, 'Valuable Campaign');
+            
+            // Set Root campaign
+            service.setProjectRootCampaign(projectId, rootCampaign, true);
+            
+            // Set valuable campaign tag
+            service.setProjectCampaignTag(projectId, valuableCampaign, 1);
+            
+            const now = new Date();
+            
+            // All users reach valuable campaign
+            for (let i = 0; i < totalUsers; i++) {
+              const email = `user${i}@test.com`;
+              
+              service.addProjectNewUser(projectId, email, rootCampaign);
+              service.addUserEvent(projectId, email, rootCampaign, now);
+              service.addUserEvent(projectId, email, valuableCampaign, new Date(now.getTime() + 1000));
+            }
+            
+            // Calculate valuable stats
+            const stats = service.calculateValuableStats(projectId);
+            
+            // Property assertion: all users reaching valuable = 100% conversion
+            expect(stats.valuableUserReach).toBe(totalUsers);
+            expect(stats.valuableConversionRate).toBe(100);
+            
+            db.close();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});
+
+
+// ============================================
+// Level Stats Sorting Tests (Property 12)
+// ============================================
+
+/**
+ * Interface for CampaignLevelStat used in buildLevelStats
+ */
+interface CampaignLevelStat {
+  campaignId: string;
+  subject: string;
+  level: number;
+  userCount: number;
+  coverage: number;
+  isRoot: boolean;
+  tag?: number;
+  isValuable?: boolean;
+}
+
+/**
+ * Simplified buildLevelStats function for testing
+ * This mirrors the sorting logic from packages/vps-api/src/routes/campaign.ts
+ * 
+ * **Feature: path-analysis-algorithm-review, Property 12: Valuable Campaign Priority Sorting**
+ * **Validates: Requirements 9.1**
+ */
+function buildLevelStatsForTest(
+  levelStats: CampaignLevelStat[]
+): CampaignLevelStat[] {
+  // Sort by level, then by tag priority (tag=2 first, tag=1 second), then by user count descending
+  // Requirements 9.1: Valuable campaigns should be sorted first within each level
+  return [...levelStats].sort((a, b) => {
+    // First sort by level
+    if (a.level !== b.level) return a.level - b.level;
+    
+    // Within same level, sort by tag priority (tag=2 > tag=1 > others)
+    const aTag = a.tag ?? 0;
+    const bTag = b.tag ?? 0;
+    const aTagPriority = aTag === 2 ? 0 : (aTag === 1 ? 1 : 2);
+    const bTagPriority = bTag === 2 ? 0 : (bTag === 1 ? 1 : 2);
+    
+    if (aTagPriority !== bTagPriority) return aTagPriority - bTagPriority;
+    
+    // Finally sort by user count descending
+    return b.userCount - a.userCount;
+  });
+}
+
+/**
+ * Generate arbitrary CampaignLevelStat for testing
+ */
+const campaignLevelStatArb = fc.record({
+  campaignId: fc.uuid(),
+  subject: fc.string({ minLength: 1, maxLength: 50 }),
+  level: fc.integer({ min: 1, max: 5 }),
+  userCount: fc.integer({ min: 0, max: 1000 }),
+  coverage: fc.float({ min: 0, max: 100 }),
+  isRoot: fc.boolean(),
+  tag: fc.option(fc.integer({ min: 0, max: 4 }), { nil: undefined }),
+  isValuable: fc.option(fc.boolean(), { nil: undefined }),
+});
+
+describe('ProjectPathAnalysisService - Level Stats Sorting Properties', () => {
+  /**
+   * **Feature: path-analysis-algorithm-review, Property 12: Valuable Campaign Priority Sorting**
+   * **Validates: Requirements 9.1**
+   * 
+   * For any level stats result, within the same level, campaigns should be sorted with
+   * tag=2 first, then tag=1, then others by userCount descending.
+   */
+  describe('Property 12: Valuable Campaign Priority Sorting', () => {
+    it('should sort tag=2 (高价值) campaigns before tag=1 (有价值) within same level', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 5 }), // level
+          fc.integer({ min: 0, max: 100 }), // userCount for tag=2
+          fc.integer({ min: 0, max: 100 }), // userCount for tag=1
+          (level, userCount2, userCount1) => {
+            const stats: CampaignLevelStat[] = [
+              {
+                campaignId: 'campaign-1',
+                subject: 'Valuable Campaign',
+                level,
+                userCount: userCount1,
+                coverage: 50,
+                isRoot: false,
+                tag: 1, // 有价值
+                isValuable: true,
+              },
+              {
+                campaignId: 'campaign-2',
+                subject: 'High Value Campaign',
+                level,
+                userCount: userCount2,
+                coverage: 50,
+                isRoot: false,
+                tag: 2, // 高价值
+                isValuable: true,
+              },
+            ];
+            
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Property assertion: tag=2 should come before tag=1 regardless of userCount
+            expect(sorted[0].tag).toBe(2);
+            expect(sorted[1].tag).toBe(1);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should sort tag=1 (有价值) campaigns before normal campaigns within same level', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 5 }), // level
+          fc.integer({ min: 0, max: 100 }), // userCount for tag=1
+          fc.integer({ min: 0, max: 100 }), // userCount for normal
+          (level, userCount1, userCountNormal) => {
+            const stats: CampaignLevelStat[] = [
+              {
+                campaignId: 'campaign-normal',
+                subject: 'Normal Campaign',
+                level,
+                userCount: userCountNormal,
+                coverage: 50,
+                isRoot: false,
+                tag: 0, // 普通
+                isValuable: false,
+              },
+              {
+                campaignId: 'campaign-valuable',
+                subject: 'Valuable Campaign',
+                level,
+                userCount: userCount1,
+                coverage: 50,
+                isRoot: false,
+                tag: 1, // 有价值
+                isValuable: true,
+              },
+            ];
+            
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Property assertion: tag=1 should come before tag=0 regardless of userCount
+            expect(sorted[0].tag).toBe(1);
+            expect(sorted[1].tag).toBe(0);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should sort by userCount descending within same tag priority', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 5 }), // level
+          fc.integer({ min: 0, max: 4 }), // tag (same for both)
+          fc.integer({ min: 0, max: 100 }), // userCount1
+          fc.integer({ min: 0, max: 100 }), // userCount2
+          (level, tag, userCount1, userCount2) => {
+            // Skip if userCounts are equal (order is undefined)
+            if (userCount1 === userCount2) return;
+            
+            const stats: CampaignLevelStat[] = [
+              {
+                campaignId: 'campaign-1',
+                subject: 'Campaign 1',
+                level,
+                userCount: userCount1,
+                coverage: 50,
+                isRoot: false,
+                tag,
+                isValuable: tag === 1 || tag === 2,
+              },
+              {
+                campaignId: 'campaign-2',
+                subject: 'Campaign 2',
+                level,
+                userCount: userCount2,
+                coverage: 50,
+                isRoot: false,
+                tag,
+                isValuable: tag === 1 || tag === 2,
+              },
+            ];
+            
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Property assertion: higher userCount should come first
+            expect(sorted[0].userCount).toBeGreaterThan(sorted[1].userCount);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should maintain level ordering as primary sort', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 3 }), // level1
+          fc.integer({ min: 4, max: 6 }), // level2 (always higher)
+          (level1, level2) => {
+            const stats: CampaignLevelStat[] = [
+              {
+                campaignId: 'campaign-high-level',
+                subject: 'High Level Campaign',
+                level: level2,
+                userCount: 1000, // High user count
+                coverage: 100,
+                isRoot: false,
+                tag: 2, // High value
+                isValuable: true,
+              },
+              {
+                campaignId: 'campaign-low-level',
+                subject: 'Low Level Campaign',
+                level: level1,
+                userCount: 1, // Low user count
+                coverage: 1,
+                isRoot: false,
+                tag: 0, // Normal
+                isValuable: false,
+              },
+            ];
+            
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Property assertion: lower level should come first regardless of tag or userCount
+            expect(sorted[0].level).toBe(level1);
+            expect(sorted[1].level).toBe(level2);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should correctly sort mixed campaigns across multiple levels', () => {
+      fc.assert(
+        fc.property(
+          fc.array(campaignLevelStatArb, { minLength: 2, maxLength: 20 }),
+          (stats) => {
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Verify sorting invariants
+            for (let i = 0; i < sorted.length - 1; i++) {
+              const current = sorted[i];
+              const next = sorted[i + 1];
+              
+              // Level should be non-decreasing
+              expect(current.level).toBeLessThanOrEqual(next.level);
+              
+              // If same level, check tag priority
+              if (current.level === next.level) {
+                const currentTag = current.tag ?? 0;
+                const nextTag = next.tag ?? 0;
+                const currentPriority = currentTag === 2 ? 0 : (currentTag === 1 ? 1 : 2);
+                const nextPriority = nextTag === 2 ? 0 : (nextTag === 1 ? 1 : 2);
+                
+                // Tag priority should be non-decreasing (lower priority number = higher priority)
+                expect(currentPriority).toBeLessThanOrEqual(nextPriority);
+                
+                // If same tag priority, userCount should be non-increasing
+                if (currentPriority === nextPriority) {
+                  expect(current.userCount).toBeGreaterThanOrEqual(next.userCount);
+                }
+              }
+            }
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should handle campaigns with undefined tags as tag=0', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 5 }), // level
+          fc.integer({ min: 0, max: 100 }), // userCount
+          (level, userCount) => {
+            const stats: CampaignLevelStat[] = [
+              {
+                campaignId: 'campaign-undefined-tag',
+                subject: 'Undefined Tag Campaign',
+                level,
+                userCount,
+                coverage: 50,
+                isRoot: false,
+                // tag is undefined
+              },
+              {
+                campaignId: 'campaign-valuable',
+                subject: 'Valuable Campaign',
+                level,
+                userCount,
+                coverage: 50,
+                isRoot: false,
+                tag: 1,
+                isValuable: true,
+              },
+            ];
+            
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Property assertion: tag=1 should come before undefined tag
+            expect(sorted[0].tag).toBe(1);
+            expect(sorted[1].tag).toBeUndefined();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should preserve all campaigns after sorting (no data loss)', () => {
+      fc.assert(
+        fc.property(
+          fc.array(campaignLevelStatArb, { minLength: 0, maxLength: 50 }),
+          (stats) => {
+            const sorted = buildLevelStatsForTest(stats);
+            
+            // Property assertion: same number of items
+            expect(sorted.length).toBe(stats.length);
+            
+            // Property assertion: all campaign IDs are preserved
+            const originalIds = new Set(stats.map(s => s.campaignId));
+            const sortedIds = new Set(sorted.map(s => s.campaignId));
+            expect(sortedIds).toEqual(originalIds);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should be idempotent - sorting twice gives same result', () => {
+      fc.assert(
+        fc.property(
+          fc.array(campaignLevelStatArb, { minLength: 0, maxLength: 20 }),
+          (stats) => {
+            const sorted1 = buildLevelStatsForTest(stats);
+            const sorted2 = buildLevelStatsForTest(sorted1);
+            
+            // Property assertion: sorting twice should give same result
+            expect(sorted2.map(s => s.campaignId)).toEqual(sorted1.map(s => s.campaignId));
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+});

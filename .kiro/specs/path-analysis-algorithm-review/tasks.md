@@ -123,3 +123,113 @@
 
 
   - Ensure all tests pass, ask the user if questions arise.
+
+---
+
+## 有价值活动优先计算 (Requirements 9.1-9.6)
+
+- [x] 6. 实现有价值活动统计
+
+
+
+
+
+  - [x] 6.1 添加 ValuableStats 接口和计算方法
+
+
+
+
+    - 在 `project-path-analysis.service.ts` 中添加 `ValuableStats` 接口
+    - 实现 `calculateValuableStats()` 方法
+    - 统计 valuableCampaignCount, highValueCampaignCount
+    - 计算 valuableUserReach (到达有价值活动的用户数)
+    - 计算 valuableConversionRate (有价值转化率)
+    - _Requirements: 9.3, 9.4, 9.5_
+
+  - [x] 6.2 修改层级统计排序逻辑
+
+
+
+
+    - 修改 `buildLevelStats()` 或相关方法
+    - 同一层级内按价值优先排序: tag=2 > tag=1 > 其他(按userCount)
+    - _Requirements: 9.1_
+
+  - [x] 6.3 更新路径分析 API 返回值
+
+
+
+    - 在 `/api/campaign/projects/:id/path-analysis` 返回中添加 `valuableStats`
+    - 确保前端可以获取有价值活动统计数据
+    - _Requirements: 9.3_
+
+- [x] 7. 更新前端展示
+
+
+
+
+
+  - [x] 7.1 添加有价值活动统计卡片
+
+
+
+
+    - 在路径分析页面添加统计卡片
+    - 显示: 有价值活动数、高价值活动数、触达用户数、转化率
+    - _Requirements: 9.3, 9.5_
+
+  - [x] 7.2 优化层级展示排序
+
+
+
+    - 确保前端按后端返回的顺序显示
+    - 有价值活动在同层级内排在前面
+    - _Requirements: 9.1_
+
+  - [x] 7.3 高亮通往高价值活动的路径
+
+
+
+
+    - 在转移路径树中标记通往 tag=2 活动的路径
+    - 使用特殊颜色或图标标识优先路径
+    - _Requirements: 9.2, 9.6_
+
+- [x] 8. 添加有价值活动相关测试
+
+
+
+
+
+
+
+
+  - [x] 8.1 测试有价值活动统计计算
+
+
+
+
+    - 测试 valuableCampaignCount 计算
+    - 测试 valuableUserReach 计算
+    - 测试 valuableConversionRate 计算
+    - **Property 13: Valuable User Reach Accuracy**
+    - **Property 14: Valuable Conversion Rate Calculation**
+    - **Validates: Requirements 9.3, 9.4, 9.5**
+
+  - [x] 8.2 测试层级排序逻辑
+
+
+
+
+    - 测试同层级内 tag=2 排在 tag=1 前面
+    - 测试 tag=1 排在普通活动前面
+    - **Property 12: Valuable Campaign Priority Sorting**
+    - **Validates: Requirements 9.1**
+
+- [x] 9. Final Checkpoint - 确保所有测试通过
+
+
+
+
+
+  - Ensure all tests pass, ask the user if questions arise.

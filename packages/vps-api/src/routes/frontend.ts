@@ -13,16 +13,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <title>Email Filter 管理面板</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { overflow-x: hidden; width: 100%; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; font-size: 14px; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 16px; overflow-x: hidden; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
     .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 16px 24px; margin-bottom: 16px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
     .header h1 { font-size: 20px; font-weight: 600; }
     .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; background: white; padding: 8px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
     .tab { padding: 8px 16px; background: transparent; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; color: #666; transition: all 0.2s; }
     .tab:hover { background: #f0f2f5; color: #333; }
     .tab.active { background: #4a90d9; color: white; }
-    .card { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
     .card h2 { font-size: 16px; margin-bottom: 12px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 8px; font-weight: 600; }
     .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px; }
     .btn-primary { background: #4a90d9; color: white; }
@@ -42,7 +41,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; transition: border-color 0.2s; }
     .form-group input:focus, .form-group select:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.1); }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .table-wrapper { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+    .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
     th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
@@ -124,8 +123,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       /* Tables - make scrollable */
       .table-wrapper { 
-        margin: 0 -10px; 
-        padding: 0; 
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
       }

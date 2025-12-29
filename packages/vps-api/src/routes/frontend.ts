@@ -912,9 +912,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <thead>
               <tr>
                 <th style="width:30px;"><input type="checkbox" id="select-all-alerts" onchange="toggleSelectAllAlerts()"></th>
-                <th>时间</th>
+                <th style="width:140px;">时间</th>
                 <th class="hide-mobile">类型</th>
-                <th>规则</th>
+                <th style="min-width:250px;">规则</th>
                 <th style="white-space:nowrap;">状态变化</th>
                 <th style="white-space:nowrap;">间隔</th>
                 <th style="white-space:nowrap;">发送状态</th>
@@ -6970,7 +6970,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td>' + checkbox + '</td>' +
           '<td style="white-space:nowrap;font-size:12px;">' + time + '</td>' +
           '<td class="hide-mobile">' + typeIcon + ' ' + typeText + '</td>' +
-          '<td style="min-width:200px;" title="' + escapeHtml(a.rule?.name || a.message || a.ruleId || a.monitorId) + '">' + nameCol + '</td>' +
+          '<td title="' + escapeHtml(a.rule?.name || a.message || a.ruleId || a.monitorId) + '">' + nameCol + '</td>' +
           '<td style="white-space:nowrap;font-size:11px;">' + a.previousState + ' → ' + a.currentState + '</td>' +
           '<td style="white-space:nowrap;">' + infoCol + '</td>' +
           '<td>' + sentStatus + '</td>' +

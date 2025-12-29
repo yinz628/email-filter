@@ -146,7 +146,7 @@ importers:
         specifier: ^3.14.0
         version: 3.23.2
       sql.js:
-        specifier: ^1.10.0
+        specifier: ^1.13.0
         version: 1.13.0
       tsx:
         specifier: ^4.7.0

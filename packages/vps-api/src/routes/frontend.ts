@@ -166,6 +166,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       .path-node-title { font-size: 13px; }
       .path-node-stats { font-size: 11px; }
       
+      /* Monitoring page - card header controls */
+      .card-header { flex-wrap: wrap; gap: 8px; }
+      .card-header > div { flex-wrap: wrap; gap: 6px !important; }
+      .card-header select { font-size: 11px; padding: 4px 6px; }
+      .card-header label { font-size: 11px; }
+      .card-header .btn-sm { font-size: 10px; padding: 4px 6px; }
+      
       /* Hide less important columns on mobile */
       .hide-mobile { display: none !important; }
     }
@@ -902,12 +909,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <div class="card-body" id="alerts-card-body" style="margin-top:15px;">
+          <div class="table-wrapper">
           <table>
             <thead>
               <tr>
                 <th style="width:30px;"><input type="checkbox" id="select-all-alerts" onchange="toggleSelectAllAlerts()"></th>
                 <th>时间</th>
-                <th>类型</th>
+                <th class="hide-mobile">类型</th>
                 <th>规则</th>
                 <th style="white-space:nowrap;">状态变化</th>
                 <th style="white-space:nowrap;">间隔</th>
@@ -917,6 +925,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </thead>
             <tbody id="monitoring-alerts-table"></tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -6961,11 +6970,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         
         return '<tr>' +
           '<td>' + checkbox + '</td>' +
-          '<td>' + time + '</td>' +
-          '<td>' + typeIcon + ' ' + typeText + '</td>' +
-          '<td>' + nameCol + '</td>' +
-          '<td>' + a.previousState + ' → ' + a.currentState + '</td>' +
-          '<td>' + infoCol + '</td>' +
+          '<td style="white-space:nowrap;font-size:12px;">' + time + '</td>' +
+          '<td class="hide-mobile">' + typeIcon + ' ' + typeText + '</td>' +
+          '<td class="text-truncate" style="max-width:150px;" title="' + escapeHtml(a.rule?.name || a.message || a.ruleId || a.monitorId) + '">' + nameCol + '</td>' +
+          '<td style="white-space:nowrap;font-size:11px;">' + a.previousState + ' → ' + a.currentState + '</td>' +
+          '<td style="white-space:nowrap;">' + infoCol + '</td>' +
           '<td>' + sentStatus + '</td>' +
           '<td>' + deleteBtn + '</td>' +
         '</tr>';

@@ -32,10 +32,19 @@ function validateDynamicConfig(body: unknown): { valid: boolean; error?: string;
 
   if (data.timeWindowMinutes !== undefined) {
     const value = Number(data.timeWindowMinutes);
-    if (isNaN(value) || value < 1) {
-      return { valid: false, error: 'timeWindowMinutes must be a positive number' };
+    if (isNaN(value) || value < 5 || value > 120) {
+      return { valid: false, error: 'timeWindowMinutes must be between 5 and 120' };
     }
     config.timeWindowMinutes = value;
+  }
+
+  // Requirements 4.4: timeSpanThresholdMinutes must be between 1 and 30 minutes
+  if (data.timeSpanThresholdMinutes !== undefined) {
+    const value = Number(data.timeSpanThresholdMinutes);
+    if (isNaN(value) || value < 1 || value > 30) {
+      return { valid: false, error: 'timeSpanThresholdMinutes must be between 1 and 30' };
+    }
+    config.timeSpanThresholdMinutes = value;
   }
 
   if (data.thresholdCount !== undefined) {

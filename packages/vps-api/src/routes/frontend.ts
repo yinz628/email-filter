@@ -361,7 +361,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     <div id="dynamic-tab" class="tab-content hidden">
       <div class="card">
         <h2>动态规则配置</h2>
-        <p style="color:#666;margin-bottom:15px">当同一主题的邮件在指定时间窗口内超过阈值时，自动创建黑名单规则</p>
+        <div style="background:#f8f9fa;border-left:4px solid #007bff;padding:12px 15px;margin-bottom:15px;border-radius:0 4px 4px 0;">
+          <p style="color:#333;margin:0 0 8px 0;font-weight:500;">检测逻辑：先数量后时间跨度</p>
+          <ol style="color:#666;margin:0;padding-left:20px;font-size:13px;line-height:1.6;">
+            <li><strong>数量检测</strong>：系统持续统计时间窗口内同主题邮件的数量</li>
+            <li><strong>时间跨度检测</strong>：当数量达到触发阈值时，计算第1封和第N封邮件的时间跨度</li>
+            <li><strong>规则创建</strong>：若时间跨度 ≤ 时间跨度阈值，则自动创建黑名单规则拦截该主题</li>
+          </ol>
+          <p style="color:#888;margin:8px 0 0 0;font-size:12px;">注：只对默认转发的邮件进行检测，已匹配白名单、黑名单或现有动态规则的邮件不参与检测</p>
+        </div>
         <div class="form-group">
           <label>启用动态规则</label>
           <select id="dynamic-enabled">
@@ -372,24 +380,34 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-row">
           <div class="form-group">
             <label>时间窗口（分钟）</label>
-            <input type="number" id="dynamic-time-window" min="1" value="60" placeholder="60">
+            <input type="number" id="dynamic-time-window" min="5" max="120" value="30" placeholder="30">
+            <p style="color:#888;font-size:12px;margin-top:5px">检测时间窗口，只统计此时间内的邮件（5-120分钟）</p>
           </div>
           <div class="form-group">
             <label>触发阈值（次数）</label>
-            <input type="number" id="dynamic-threshold" min="1" value="5" placeholder="5">
+            <input type="number" id="dynamic-threshold" min="1" value="30" placeholder="30">
+            <p style="color:#888;font-size:12px;margin-top:5px">同主题邮件数量达到此值时触发时间跨度检测</p>
           </div>
         </div>
         <div class="form-row">
+          <div class="form-group">
+            <label>时间跨度阈值（分钟）</label>
+            <input type="number" id="dynamic-time-span-threshold" min="1" max="30" value="3" placeholder="3">
+            <p style="color:#888;font-size:12px;margin-top:5px">第1封和第N封邮件的时间跨度小于等于此值时创建规则（1-30分钟）</p>
+          </div>
           <div class="form-group">
             <label>规则过期时间（小时）</label>
             <input type="number" id="dynamic-expiration" min="1" value="48" placeholder="48">
             <p style="color:#888;font-size:12px;margin-top:5px">从未命中的规则，创建后超过此时间将被清理</p>
           </div>
+        </div>
+        <div class="form-row">
           <div class="form-group">
             <label>最后命中阈值（小时）</label>
             <input type="number" id="dynamic-last-hit-threshold" min="1" value="72" placeholder="72">
             <p style="color:#888;font-size:12px;margin-top:5px">有命中记录的规则，最后命中超过此时间将被清理</p>
           </div>
+          <div class="form-group"></div>
         </div>
         <button class="btn btn-primary" onclick="saveDynamicConfig()">保存配置</button>
       </div>
@@ -2558,8 +2576,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const rulesData = await rulesRes.json();
         
         document.getElementById('dynamic-enabled').value = config.enabled ? 'true' : 'false';
-        document.getElementById('dynamic-time-window').value = config.timeWindowMinutes || 60;
-        document.getElementById('dynamic-threshold').value = config.thresholdCount || 5;
+        document.getElementById('dynamic-time-window').value = config.timeWindowMinutes || 30;
+        document.getElementById('dynamic-threshold').value = config.thresholdCount || 30;
+        document.getElementById('dynamic-time-span-threshold').value = config.timeSpanThresholdMinutes || 3;
         document.getElementById('dynamic-expiration').value = config.expirationHours || 48;
         document.getElementById('dynamic-last-hit-threshold').value = config.lastHitThresholdHours || 72;
         
@@ -2589,8 +2608,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     async function saveDynamicConfig() {
       const body = {
         enabled: document.getElementById('dynamic-enabled').value === 'true',
-        timeWindowMinutes: parseInt(document.getElementById('dynamic-time-window').value) || 60,
-        thresholdCount: parseInt(document.getElementById('dynamic-threshold').value) || 5,
+        timeWindowMinutes: parseInt(document.getElementById('dynamic-time-window').value) || 30,
+        thresholdCount: parseInt(document.getElementById('dynamic-threshold').value) || 30,
+        timeSpanThresholdMinutes: parseInt(document.getElementById('dynamic-time-span-threshold').value) || 3,
         expirationHours: parseInt(document.getElementById('dynamic-expiration').value) || 48,
         lastHitThresholdHours: parseInt(document.getElementById('dynamic-last-hit-threshold').value) || 72
       };

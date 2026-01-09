@@ -18,6 +18,7 @@ import type {
 import { DEFAULT_DYNAMIC_CONFIG } from '@email-filter/shared';
 import { RuleRepository } from '../db/rule-repository.js';
 import { getRuleCache } from './rule-cache.instance.js';
+import type { FilterResult } from './filter.service.js';
 
 /**
  * Subject tracker entry from database
@@ -49,6 +50,9 @@ export class DynamicRuleService {
 
   /**
    * Get the current dynamic configuration
+   * 
+   * Requirements 4.1, 6.1: Supports timeSpanThresholdMinutes configuration
+   * If not present in database, uses default value of 3 minutes
    */
   getConfig(): DynamicConfig {
     const stmt = this.db.prepare('SELECT key, value FROM dynamic_config');
@@ -70,6 +74,9 @@ export class DynamicRuleService {
         case 'thresholdCount':
           config.thresholdCount = parseInt(row.value, 10);
           break;
+        case 'timeSpanThresholdMinutes':
+          config.timeSpanThresholdMinutes = parseInt(row.value, 10);
+          break;
         case 'expirationHours':
           config.expirationHours = parseInt(row.value, 10);
           break;
@@ -84,7 +91,25 @@ export class DynamicRuleService {
 
 
   /**
+   * Check if an email should be tracked for dynamic rule detection
+   * 
+   * Requirements 3.1, 3.2, 3.3, 3.4:
+   * - Only track emails that are forwarded by default (no rule matched)
+   * - Do NOT track emails that match whitelist, blacklist, or existing dynamic rules
+   * 
+   * @param filterResult - The result from the filter engine
+   * @returns true if the email should be tracked, false otherwise
+   */
+  shouldTrack(filterResult: FilterResult): boolean {
+    // Only track emails that are forwarded by default (no rule matched)
+    // matchedCategory is undefined when no rule matched
+    return filterResult.matchedCategory === undefined;
+  }
+
+  /**
    * Update the dynamic configuration
+   * 
+   * Requirements 4.1: Supports saving timeSpanThresholdMinutes configuration
    */
   updateConfig(config: Partial<DynamicConfig>): DynamicConfig {
     const currentConfig = this.getConfig();
@@ -95,6 +120,7 @@ export class DynamicRuleService {
       ['enabled', String(newConfig.enabled)],
       ['timeWindowMinutes', String(newConfig.timeWindowMinutes)],
       ['thresholdCount', String(newConfig.thresholdCount)],
+      ['timeSpanThresholdMinutes', String(newConfig.timeSpanThresholdMinutes)],
       ['expirationHours', String(newConfig.expirationHours)],
       ['lastHitThresholdHours', String(newConfig.lastHitThresholdHours)],
     ];
@@ -181,9 +207,20 @@ export class DynamicRuleService {
   /**
    * Track an email subject for dynamic rule detection
    * 
+   * Implements "count first, then time span" detection logic:
+   * 1. First count emails with the same subject within the time window
+   * 2. When count reaches threshold, calculate time span between first and Nth email
+   * 3. If time span <= threshold, create rule
+   * 4. If time span > threshold, don't create rule but continue tracking
+   * 
+   * Requirements 1.1, 1.2, 1.3, 1.4, 2.1, 2.2:
+   * - Count emails first, then check time span
+   * - Only consider emails within the configured time window
+   * - Create rule only when time span is within threshold
+   * 
    * @param subject - The email subject to track
    * @param receivedAt - When the email was received
-   * @returns The created dynamic rule if threshold was exceeded, null otherwise
+   * @returns The created dynamic rule if threshold was exceeded and time span is within limit, null otherwise
    */
   trackSubject(subject: string, receivedAt: Date = new Date()): FilterRule | null {
     const config = this.getConfig();
@@ -203,10 +240,11 @@ export class DynamicRuleService {
     );
     insertStmt.run(subjectHash, subject, receivedAtStr);
 
-    // Check if threshold is exceeded within time window
+    // Requirements 2.1: Only consider emails within the configured time window
     const windowStart = new Date(receivedAt.getTime() - config.timeWindowMinutes * 60 * 1000);
     const windowStartStr = windowStart.toISOString();
 
+    // Requirements 1.1: First count the number of emails with the same subject
     const countStmt = this.db.prepare(
       `SELECT COUNT(*) as count FROM email_subject_tracker
        WHERE subject_hash = ? AND received_at >= ?`
@@ -214,39 +252,61 @@ export class DynamicRuleService {
     const countResult = countStmt.get(subjectHash, windowStartStr) as { count: number };
     const count = countResult?.count || 0;
 
-    // Requirements 6.1: If threshold exceeded, create dynamic rule
+    // Requirements 1.2: When count reaches threshold, calculate time span
     if (count >= config.thresholdCount) {
-      // Use normalized subject for rule pattern (removes common prefixes)
-      const normalizedSubject = this.normalizeSubject(subject);
+      // Get the first and Nth (threshold) email timestamps within the window
+      const timestampsStmt = this.db.prepare(
+        `SELECT received_at FROM email_subject_tracker
+         WHERE subject_hash = ? AND received_at >= ?
+         ORDER BY received_at ASC
+         LIMIT ?`
+      );
+      const timestamps = timestampsStmt.all(subjectHash, windowStartStr, config.thresholdCount) as { received_at: string }[];
       
-      // Check if a dynamic rule for this subject already exists
-      const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
-      if (existingRule) {
-        // Update lastHitAt for existing rule
-        this.ruleRepository.updateLastHit(existingRule.id);
-        return existingRule;
+      if (timestamps.length >= config.thresholdCount) {
+        const firstEmailTime = new Date(timestamps[0].received_at);
+        const nthEmailTime = new Date(timestamps[config.thresholdCount - 1].received_at);
+        
+        // Requirements 2.2: Calculate time span between first and Nth email
+        const timeSpanMinutes = (nthEmailTime.getTime() - firstEmailTime.getTime()) / (60 * 1000);
+        
+        // Requirements 1.3: Create rule only if time span <= threshold
+        // Requirements 1.4: Don't create rule if time span > threshold
+        if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
+          // Use normalized subject for rule pattern (removes common prefixes)
+          const normalizedSubject = this.normalizeSubject(subject);
+          
+          // Check if a dynamic rule for this subject already exists
+          const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
+          if (existingRule) {
+            // Update lastHitAt for existing rule
+            this.ruleRepository.updateLastHit(existingRule.id);
+            return existingRule;
+          }
+
+          // Create new dynamic rule with normalized subject
+          const ruleDto: CreateRuleDTO = {
+            category: 'dynamic',
+            matchType: 'subject',
+            matchMode: 'contains',
+            pattern: normalizedSubject,
+            enabled: true,
+          };
+
+          const newRule = this.ruleRepository.create(ruleDto);
+          
+          // Invalidate rule cache so the new rule takes effect immediately
+          // This is critical for dynamic rules to work in real-time
+          const ruleCache = getRuleCache();
+          ruleCache.invalidateAll();
+          
+          // Clean up old tracking records for this subject
+          this.cleanupSubjectTracker(subjectHash, windowStart);
+
+          return newRule;
+        }
+        // Time span exceeds threshold - continue tracking but don't create rule
       }
-
-      // Create new dynamic rule with normalized subject
-      const ruleDto: CreateRuleDTO = {
-        category: 'dynamic',
-        matchType: 'subject',
-        matchMode: 'contains',
-        pattern: normalizedSubject,
-        enabled: true,
-      };
-
-      const newRule = this.ruleRepository.create(ruleDto);
-      
-      // Invalidate rule cache so the new rule takes effect immediately
-      // This is critical for dynamic rules to work in real-time
-      const ruleCache = getRuleCache();
-      ruleCache.invalidateAll();
-      
-      // Clean up old tracking records for this subject
-      this.cleanupSubjectTracker(subjectHash, windowStart);
-
-      return newRule;
     }
 
     return null;

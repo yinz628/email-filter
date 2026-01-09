@@ -246,7 +246,8 @@ function matchesWatchRule(
 /**
  * Process dynamic rule tasks - tracks subjects for dynamic rule creation
  * 
- * Requirements: 2.1 - Enqueue dynamic rule tracking as async task
+ * Requirements 2.1 - Enqueue dynamic rule tracking as async task
+ * Requirements 3.1, 3.2, 3.3, 3.4 - Only track emails forwarded by default
  * 
  * @param tasks - Array of dynamic tasks to process
  * @param dynamicRuleService - Dynamic rule service for tracking
@@ -258,7 +259,14 @@ export async function processDynamicTasks(
   if (tasks.length === 0) return;
 
   for (const task of tasks) {
-    const { payload } = task.data;
+    const { payload, filterResult } = task.data;
+    
+    // Requirements 3.1, 3.2, 3.3, 3.4: Only track emails forwarded by default
+    // Skip emails that matched whitelist, blacklist, or existing dynamic rules
+    if (!dynamicRuleService.shouldTrack(filterResult)) {
+      continue;
+    }
+    
     const receivedAt = new Date(payload.timestamp);
     
     // Track subject for dynamic rule detection

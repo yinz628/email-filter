@@ -3,8 +3,9 @@
  */
 export interface DynamicConfig {
   enabled: boolean;
-  timeWindowMinutes: number;  // Detection time window, default 60 minutes
-  thresholdCount: number;     // Trigger threshold, default 50 emails
+  timeWindowMinutes: number;  // Detection time window, default 30 minutes
+  thresholdCount: number;     // Trigger threshold, default 30 emails
+  timeSpanThresholdMinutes: number; // Time span threshold between first and Nth email, default 3 minutes
   expirationHours: number;    // Expiration time for rules never hit, default 48 hours
   lastHitThresholdHours: number; // Cleanup threshold for last hit time, default 72 hours
 }
@@ -14,8 +15,9 @@ export interface DynamicConfig {
  */
 export const DEFAULT_DYNAMIC_CONFIG: DynamicConfig = {
   enabled: true,
-  timeWindowMinutes: 60,
-  thresholdCount: 50,
+  timeWindowMinutes: 30,
+  thresholdCount: 30,
+  timeSpanThresholdMinutes: 3,
   expirationHours: 48,
   lastHitThresholdHours: 72,
 };

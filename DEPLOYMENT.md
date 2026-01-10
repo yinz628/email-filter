@@ -632,10 +632,10 @@ openssl rand -hex 32
 清理
 
 # 1. 清理系统日志（最大的占用）
-sudo journalctl --vacuum-size=100M
-sudo find /var/log -name "*.gz" -delete
-sudo find /var/log -name "*.1" -delete
-sudo find /var/log -name "*.old" -delete
+journalctl --vacuum-size=100M
+find /var/log -name "*.gz" -delete
+find /var/log -name "*.1" -delete
+find /var/log -name "*.old" -delete
 
 # 2. 清理 pnpm 缓存
 pnpm store prune

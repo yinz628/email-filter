@@ -1260,9 +1260,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         
         <!-- Action Buttons -->
-        <div style="display:flex;gap:10px;align-items:center;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
           <button class="btn btn-primary" onclick="saveCleanupConfig()">保存设置</button>
           <button class="btn btn-warning" onclick="runManualCleanup()" id="cleanup-run-btn">立即清理</button>
+          <button class="btn btn-secondary" onclick="runVacuum()" id="vacuum-btn">🗜️ 压缩数据库</button>
           <span id="cleanup-status" style="font-size:13px;"></span>
         </div>
         
@@ -1270,6 +1271,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div id="cleanup-result" style="display:none;margin-top:15px;padding:15px;background:#d4edda;border-radius:6px;">
           <h4 style="font-size:14px;margin-bottom:10px;color:#155724;">✅ 清理完成</h4>
           <div id="cleanup-result-content" style="font-size:13px;color:#155724;"></div>
+        </div>
+        
+        <!-- Vacuum Result -->
+        <div id="vacuum-result" style="display:none;margin-top:15px;padding:15px;background:#cce5ff;border-radius:6px;">
+          <h4 style="font-size:14px;margin-bottom:10px;color:#004085;">🗜️ 压缩完成</h4>
+          <div id="vacuum-result-content" style="font-size:13px;color:#004085;"></div>
         </div>
       </div>
       <div class="card" id="legacy-settings-card" style="display:none;">
@@ -3316,6 +3323,55 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 清理失败</span>';
       } finally {
         runBtn.disabled = false;
+      }
+    }
+
+    /**
+     * Run database VACUUM to reclaim disk space
+     */
+    async function runVacuum() {
+      if (!apiToken) return;
+      
+      if (!confirm('确定要压缩数据库吗？此操作会重建数据库文件以释放磁盘空间。\\n\\n注意：对于大型数据库，此操作可能需要较长时间。')) {
+        return;
+      }
+      
+      const statusEl = document.getElementById('cleanup-status');
+      const vacuumBtn = document.getElementById('vacuum-btn');
+      const resultEl = document.getElementById('vacuum-result');
+      const resultContentEl = document.getElementById('vacuum-result-content');
+      
+      // Show progress indicator
+      statusEl.innerHTML = '<span style="color:#666;">⏳ 压缩中，请稍候...</span>';
+      vacuumBtn.disabled = true;
+      resultEl.style.display = 'none';
+      
+      try {
+        const res = await fetch('/api/admin/cleanup/vacuum', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        
+        if (data.success && data.result) {
+          const result = data.result;
+          resultContentEl.innerHTML = 
+            '<div>压缩前大小: ' + formatBytes(result.beforeSize) + '</div>' +
+            '<div>压缩后大小: ' + formatBytes(result.afterSize) + '</div>' +
+            '<div style="margin-top:8px;font-weight:600;">释放空间: ' + result.savedMB + ' MB，耗时 ' + result.durationMs + 'ms</div>';
+          resultEl.style.display = 'block';
+          statusEl.innerHTML = '<span style="color:#27ae60;">✅ 压缩完成</span>';
+          
+          // Refresh backup list to show updated sizes
+          await loadBackups();
+        } else {
+          statusEl.innerHTML = '<span style="color:#e74c3c;">❌ ' + escapeHtml(data.error || '压缩失败') + '</span>';
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 压缩失败</span>';
+      } finally {
+        vacuumBtn.disabled = false;
       }
     }
 

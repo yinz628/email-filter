@@ -214,4 +214,53 @@ export async function cleanupSettingsRoutes(fastify: FastifyInstance): Promise<v
       });
     }
   });
+
+  /**
+   * POST /api/admin/cleanup/vacuum
+   * Execute database VACUUM to reclaim disk space
+   * 
+   * SQLite doesn't automatically release disk space after deleting data.
+   * VACUUM rebuilds the database file, reclaiming unused space.
+   * 
+   * Note: This operation may take a while for large databases and
+   * temporarily requires additional disk space equal to the database size.
+   */
+  fastify.post('/vacuum', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const startTime = Date.now();
+      
+      // Get database file size before VACUUM
+      const beforeSize = db.prepare("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()").get() as { size: number };
+      
+      // Execute VACUUM
+      db.exec('VACUUM');
+      
+      // Execute ANALYZE to update statistics
+      db.exec('ANALYZE');
+      
+      // Get database file size after VACUUM
+      const afterSize = db.prepare("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()").get() as { size: number };
+      
+      const durationMs = Date.now() - startTime;
+      const savedBytes = beforeSize.size - afterSize.size;
+
+      return reply.send({
+        success: true,
+        result: {
+          beforeSize: beforeSize.size,
+          afterSize: afterSize.size,
+          savedBytes,
+          savedMB: (savedBytes / 1024 / 1024).toFixed(2),
+          durationMs,
+        },
+        message: `Database optimized. Saved ${(savedBytes / 1024 / 1024).toFixed(2)} MB in ${durationMs}ms.`,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error executing VACUUM');
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to optimize database',
+      });
+    }
+  });
 }

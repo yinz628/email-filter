@@ -61,6 +61,7 @@ async function start() {
       logger: {
         level: config.nodeEnv === 'production' ? 'info' : 'debug',
       },
+      bodyLimit: 52428800, // 50MB limit for backup restore
     });
 
     // Register CORS

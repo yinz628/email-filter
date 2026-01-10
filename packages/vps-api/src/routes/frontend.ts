@@ -2776,10 +2776,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const workerName = log.workerName || 'global';
         const workerDisplay = workerName === 'global' ? '<span class="tag" style="background:#e3f2fd;color:#1565c0;">全局</span>' : '<span class="tag">' + escapeHtml(workerName) + '</span>';
         const d = log.details || {};
-        const subject = d.subject || '-';
-        const from = d.from || '-';
-        const to = d.to || '-';
-        const rule = d.matchedRule || '-';
+        
+        // For admin_action and system logs, show message in subject column and details summary in other columns
+        let subject, from, to, rule;
+        if (log.category === 'admin_action' || log.category === 'system') {
+          subject = log.message || '-';
+          // Show relevant details based on log type
+          if (d.action) {
+            from = d.action + (d.entityType ? ' (' + d.entityType + ')' : '');
+          } else if (d.pattern) {
+            from = '规则: ' + d.pattern;
+          } else {
+            from = '-';
+          }
+          if (d.detectionLatencyMs !== undefined) {
+            to = '延迟: ' + d.detectionLatencyMs + 'ms';
+          } else if (d.entityId) {
+            to = 'ID: ' + d.entityId;
+          } else if (d.deletedCount !== undefined) {
+            to = '删除: ' + d.deletedCount + '条';
+          } else {
+            to = '-';
+          }
+          rule = d.emailsForwardedBeforeBlock !== undefined ? '转发: ' + d.emailsForwardedBeforeBlock + '封' : '-';
+        } else {
+          subject = d.subject || '-';
+          from = d.from || '-';
+          to = d.to || '-';
+          rule = d.matchedRule || '-';
+        }
+        
         return '<tr>' +
           '<td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="' + log.id + '" onchange="updateLogBatchDeleteBtn()"></td>' +
           '<td style="font-size:12px;color:#666;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + time + '</td>' +
@@ -2852,16 +2878,48 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const time = new Date(log.createdAt).toLocaleString('zh-CN');
       const workerName = log.workerName || 'global';
       const categoryNames = {email_forward:'转发',email_drop:'拦截',admin_action:'管理操作',system:'系统'};
+      
+      let detailContent = '';
+      if (log.category === 'admin_action' || log.category === 'system') {
+        // Show admin/system log specific details
+        detailContent = '<p><strong>详细信息:</strong></p><div style="background:#f5f5f5;padding:12px;border-radius:4px;font-size:13px;">';
+        for (const [key, value] of Object.entries(d)) {
+          const displayKey = {
+            action: '操作',
+            entityType: '实体类型',
+            entityId: '实体ID',
+            pattern: '规则模式',
+            ruleId: '规则ID',
+            detectionLatencyMs: '检测延迟(ms)',
+            emailsForwardedBeforeBlock: '拦截前转发数',
+            firstEmailTime: '首封邮件时间',
+            triggerEmailTime: '触发邮件时间',
+            deletedCount: '删除数量',
+            changes: '变更内容'
+          }[key] || key;
+          let displayValue = value;
+          if (typeof value === 'object') {
+            displayValue = JSON.stringify(value, null, 2);
+          }
+          detailContent += '<p><strong>' + escapeHtml(displayKey) + ':</strong> ' + escapeHtml(String(displayValue)) + '</p>';
+        }
+        detailContent += '</div>';
+      } else {
+        // Show email log specific details
+        detailContent = 
+          '<p><strong>主题:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.subject || '-') + '</p>' +
+          '<p><strong>发件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.from || '-') + '</p>' +
+          '<p><strong>收件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.to || '-') + '</p>' +
+          '<p><strong>命中规则:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.matchedRule || '-') + '</p>';
+      }
+      
       const content = 
         '<p><strong>时间:</strong> ' + time + '</p>' +
         '<p><strong>Worker 实例:</strong> ' + escapeHtml(workerName === 'global' ? '全局' : workerName) + '</p>' +
         '<p><strong>类型:</strong> ' + (categoryNames[log.category] || log.category) + '</p>' +
         '<p><strong>消息:</strong> ' + escapeHtml(log.message) + '</p>' +
         '<hr style="margin:10px 0;border:none;border-top:1px solid #eee">' +
-        '<p><strong>主题:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.subject || '-') + '</p>' +
-        '<p><strong>发件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.from || '-') + '</p>' +
-        '<p><strong>收件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.to || '-') + '</p>' +
-        '<p><strong>命中规则:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.matchedRule || '-') + '</p>';
+        detailContent;
       document.getElementById('log-detail-content').innerHTML = content;
       showModal('log-detail-modal');
     }

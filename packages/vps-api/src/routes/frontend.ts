@@ -3341,10 +3341,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const resultEl = document.getElementById('vacuum-result');
       const resultContentEl = document.getElementById('vacuum-result-content');
       
+      // Hide previous results
+      resultEl.style.display = 'none';
+      document.getElementById('cleanup-result').style.display = 'none';
+      
       // Show progress indicator
       statusEl.innerHTML = '<span style="color:#666;">⏳ 压缩中，请稍候...</span>';
       vacuumBtn.disabled = true;
-      resultEl.style.display = 'none';
       
       try {
         const res = await fetch('/api/admin/cleanup/vacuum', {
@@ -3363,13 +3366,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           resultEl.style.display = 'block';
           statusEl.innerHTML = '<span style="color:#27ae60;">✅ 压缩完成</span>';
           
-          // Refresh backup list to show updated sizes
-          await loadBackups();
+          // Refresh backup list to show updated sizes (don't await, non-blocking)
+          loadBackups().catch(() => {});
         } else {
           statusEl.innerHTML = '<span style="color:#e74c3c;">❌ ' + escapeHtml(data.error || '压缩失败') + '</span>';
         }
       } catch (e) {
-        statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 压缩失败</span>';
+        console.error('Vacuum error:', e);
+        statusEl.innerHTML = '<span style="color:#e74c3c;">❌ 压缩失败: ' + escapeHtml(e.message || '网络错误') + '</span>';
       } finally {
         vacuumBtn.disabled = false;
       }

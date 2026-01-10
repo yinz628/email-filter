@@ -318,6 +318,51 @@ function migrateCreateRatioAlerts(db: Database.Database): MigrationResult {
   return { name, status: 'applied', message: 'Table created successfully' };
 }
 
+/**
+ * Migration 20: Create users table for JWT authentication
+ */
+function migrateCreateUsersTable(db: Database.Database): MigrationResult {
+  const name = 'users';
+  if (tableExists(db, 'users')) {
+    return { name, status: 'skipped', message: 'Table already exists' };
+  }
+  db.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)');
+  return { name, status: 'applied', message: 'Table created successfully' };
+}
+
+/**
+ * Migration 21: Create user_settings table
+ */
+function migrateCreateUserSettingsTable(db: Database.Database): MigrationResult {
+  const name = 'user_settings';
+  if (tableExists(db, 'user_settings')) {
+    return { name, status: 'skipped', message: 'Table already exists' };
+  }
+  db.exec(`
+    CREATE TABLE user_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, key)
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_user_settings_user ON user_settings(user_id)');
+  return { name, status: 'applied', message: 'Table created successfully' };
+}
+
 // ============================================
 // Migration Runner
 // ============================================
@@ -342,6 +387,8 @@ const migrations: MigrationFn[] = [
   migrateAnalysisProjectsWorkerNames,
   migrateAnalysisProjectsLastAnalysisTime,
   migrateCreateRatioAlerts,
+  migrateCreateUsersTable,
+  migrateCreateUserSettingsTable,
 ];
 
 /**

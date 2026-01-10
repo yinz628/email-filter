@@ -497,6 +497,65 @@ function migrateProjectUserEventsTimeIndex(): MigrationResult {
   return { name, status: 'applied', message: 'Time index added for seq calculation optimization' };
 }
 
+/**
+ * Migration 21: Create users table for JWT authentication
+ * 
+ * This migration creates the users table if it doesn't exist.
+ * Required for JWT-based authentication system.
+ * 
+ * Requirements: user-auth-and-settings 1.1-1.5
+ */
+function migrateCreateUsersTable(): MigrationResult {
+  const name = 'users table';
+  
+  if (tableExists(db, 'users')) {
+    return { name, status: 'skipped', message: 'Table already exists' };
+  }
+  
+  db.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  db.exec('CREATE UNIQUE INDEX idx_users_username ON users(username)');
+  return { name, status: 'applied', message: 'Table created successfully' };
+}
+
+/**
+ * Migration 22: Create user_settings table
+ * 
+ * This migration creates the user_settings table if it doesn't exist.
+ * Required for storing user-specific settings.
+ * 
+ * Requirements: user-auth-and-settings 2.1-2.5
+ */
+function migrateCreateUserSettingsTable(): MigrationResult {
+  const name = 'user_settings table';
+  
+  if (tableExists(db, 'user_settings')) {
+    return { name, status: 'skipped', message: 'Table already exists' };
+  }
+  
+  db.exec(`
+    CREATE TABLE user_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, key)
+    )
+  `);
+  db.exec('CREATE INDEX idx_user_settings_user ON user_settings(user_id)');
+  return { name, status: 'applied', message: 'Table created successfully' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -522,6 +581,8 @@ const migrations = [
   migrateAnalysisProjectsLastAnalysisTime,
   migrateCreateRatioAlerts,
   migrateProjectUserEventsTimeIndex,
+  migrateCreateUsersTable,
+  migrateCreateUserSettingsTable,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

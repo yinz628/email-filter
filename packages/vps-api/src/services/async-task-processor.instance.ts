@@ -59,7 +59,8 @@ function initializeProcessor(): AsyncTaskProcessor {
     );
 
     // Register all task processors
-    const taskTypes: AsyncTaskType[] = ['stats', 'log', 'watch', 'dynamic', 'campaign', 'monitoring'];
+    // Note: 'dynamic' was removed - dynamic rule tracking is now in Phase 1 (synchronous)
+    const taskTypes: AsyncTaskType[] = ['stats', 'log', 'watch', 'campaign', 'monitoring'];
     for (const type of taskTypes) {
       asyncTaskProcessor.registerProcessor(type, processors[type]);
     }

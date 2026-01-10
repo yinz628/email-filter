@@ -11,6 +11,21 @@ import { v4 as uuidv4 } from 'uuid';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+/**
+ * Result of tracking a subject with metrics
+ * Used for synchronous dynamic rule creation in Phase 1
+ * 
+ * Requirements: 4.1, 4.2 - Detection metrics
+ */
+interface DynamicRuleCreationResult {
+  /** The created rule, or null if no rule was created */
+  rule: FilterRule | null;
+  /** Time in ms from first email to rule creation */
+  detectionLatencyMs?: number;
+  /** Number of emails forwarded before blocking started */
+  emailsForwardedBeforeBlock?: number;
+}
+
 // Arbitrary for generating valid email subjects
 const subjectArb = fc.string({ minLength: 1, maxLength: 100 })
   .filter((s) => s.trim().length > 0 && !s.includes('\n'));
@@ -395,6 +410,103 @@ class TestDynamicRuleService {
 
   getAllDynamicRules(): FilterRule[] {
     return this.ruleRepository.findAll({ category: 'dynamic' });
+  }
+
+  /**
+   * Track an email subject for dynamic rule detection with metrics
+   * 
+   * This is the synchronous version used in Phase 1 processing.
+   * Returns detection metrics along with the created rule.
+   * 
+   * Requirements 1.1, 1.3, 4.1, 4.2:
+   * - Synchronous rule creation affects current email
+   * - Returns detection latency and forwarded email count
+   */
+  trackSubjectWithMetrics(subject: string, receivedAt: Date = new Date()): DynamicRuleCreationResult {
+    const config = this.getConfig();
+    
+    if (!config.enabled) {
+      return { rule: null };
+    }
+
+    const subjectHash = this.hashSubject(subject);
+    const receivedAtStr = receivedAt.toISOString();
+
+    this.db.run(
+      `INSERT INTO email_subject_tracker (worker_id, subject_hash, subject, received_at)
+       VALUES (NULL, ?, ?, ?)`,
+      [subjectHash, subject, receivedAtStr]
+    );
+
+    const windowStart = new Date(receivedAt.getTime() - config.timeWindowMinutes * 60 * 1000);
+    const windowStartStr = windowStart.toISOString();
+
+    // First count the number of emails with the same subject
+    const countResult = this.db.exec(
+      `SELECT COUNT(*) as count FROM email_subject_tracker
+       WHERE subject_hash = ? AND received_at >= ?`,
+      [subjectHash, windowStartStr]
+    );
+    const count = countResult.length > 0 ? (countResult[0].values[0][0] as number) : 0;
+
+    // When count reaches threshold, calculate time span
+    if (count >= config.thresholdCount) {
+      // Get the first and Nth (threshold) email timestamps within the window
+      const timestampsResult = this.db.exec(
+        `SELECT received_at FROM email_subject_tracker
+         WHERE subject_hash = ? AND received_at >= ?
+         ORDER BY received_at ASC
+         LIMIT ?`,
+        [subjectHash, windowStartStr, config.thresholdCount]
+      );
+      
+      if (timestampsResult.length > 0 && timestampsResult[0].values.length >= config.thresholdCount) {
+        const timestamps = timestampsResult[0].values;
+        const firstEmailTime = new Date(timestamps[0][0] as string);
+        const nthEmailTime = new Date(timestamps[config.thresholdCount - 1][0] as string);
+        
+        // Calculate time span between first and Nth email
+        const timeSpanMinutes = (nthEmailTime.getTime() - firstEmailTime.getTime()) / (60 * 1000);
+        
+        // Create rule only if time span <= threshold
+        if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
+          const existingRule = this.findDynamicRuleBySubject(subject);
+          if (existingRule) {
+            this.ruleRepository.updateLastHit(existingRule.id);
+            return {
+              rule: existingRule,
+              detectionLatencyMs: 0,
+              emailsForwardedBeforeBlock: 0,
+            };
+          }
+
+          // Calculate detection metrics - Requirements 4.1, 4.2
+          const detectionLatencyMs = receivedAt.getTime() - firstEmailTime.getTime();
+          // Emails forwarded = count - 1 (current email will be blocked)
+          const emailsForwardedBeforeBlock = count - 1;
+
+          const ruleDto: CreateRuleDTO = {
+            category: 'dynamic',
+            matchType: 'subject',
+            matchMode: 'contains',
+            pattern: subject,
+            enabled: true,
+          };
+
+          const newRule = this.ruleRepository.create(ruleDto);
+          this.cleanupSubjectTracker(subjectHash, windowStart);
+
+          return {
+            rule: newRule,
+            detectionLatencyMs,
+            emailsForwardedBeforeBlock,
+          };
+        }
+        // Time span exceeds threshold - continue tracking but don't create rule
+      }
+    }
+
+    return { rule: null };
   }
 }
 
@@ -964,19 +1076,20 @@ describe('DynamicRuleService', () => {
         config.timeWindowMinutes = value;
       }
 
-      // Requirements 4.4: timeSpanThresholdMinutes must be between 1 and 30 minutes
+      // Requirements 3.2: timeSpanThresholdMinutes must be between 0.5 and 30 minutes
       if (data.timeSpanThresholdMinutes !== undefined) {
         const value = Number(data.timeSpanThresholdMinutes);
-        if (isNaN(value) || value < 1 || value > 30) {
-          return { valid: false, error: 'timeSpanThresholdMinutes must be between 1 and 30' };
+        if (isNaN(value) || value < 0.5 || value > 30) {
+          return { valid: false, error: 'timeSpanThresholdMinutes must be between 0.5 and 30' };
         }
         config.timeSpanThresholdMinutes = value;
       }
 
+      // Requirements 3.1: thresholdCount must be at least 5
       if (data.thresholdCount !== undefined) {
         const value = Number(data.thresholdCount);
-        if (isNaN(value) || value < 1) {
-          return { valid: false, error: 'thresholdCount must be a positive number' };
+        if (isNaN(value) || value < 5) {
+          return { valid: false, error: 'thresholdCount must be at least 5' };
         }
         config.thresholdCount = value;
       }
@@ -1042,10 +1155,11 @@ describe('DynamicRuleService', () => {
       );
     });
 
-    it('should accept timeSpanThresholdMinutes values between 1 and 30', () => {
+    it('should accept timeSpanThresholdMinutes values between 0.5 and 30', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: 1, max: 30 }),
+          // Generate values from 0.5 to 30 in 0.5 increments
+          fc.integer({ min: 1, max: 60 }).map(n => n * 0.5),
           (timeSpanThresholdMinutes) => {
             const result = validateDynamicConfig({ timeSpanThresholdMinutes });
             expect(result.valid).toBe(true);
@@ -1056,14 +1170,14 @@ describe('DynamicRuleService', () => {
       );
     });
 
-    it('should reject timeSpanThresholdMinutes values below 1', () => {
+    it('should reject timeSpanThresholdMinutes values below 0.5', () => {
       fc.assert(
         fc.property(
-          fc.integer({ min: -1000, max: 0 }),
+          fc.integer({ min: -1000, max: 0 }).map(n => n * 0.1),
           (timeSpanThresholdMinutes) => {
             const result = validateDynamicConfig({ timeSpanThresholdMinutes });
             expect(result.valid).toBe(false);
-            expect(result.error).toBe('timeSpanThresholdMinutes must be between 1 and 30');
+            expect(result.error).toBe('timeSpanThresholdMinutes must be between 0.5 and 30');
           }
         ),
         { numRuns: 100 }
@@ -1077,7 +1191,7 @@ describe('DynamicRuleService', () => {
           (timeSpanThresholdMinutes) => {
             const result = validateDynamicConfig({ timeSpanThresholdMinutes });
             expect(result.valid).toBe(false);
-            expect(result.error).toBe('timeSpanThresholdMinutes must be between 1 and 30');
+            expect(result.error).toBe('timeSpanThresholdMinutes must be between 0.5 and 30');
           }
         ),
         { numRuns: 100 }
@@ -1088,7 +1202,7 @@ describe('DynamicRuleService', () => {
       fc.assert(
         fc.property(
           fc.integer({ min: 5, max: 120 }),
-          fc.integer({ min: 1, max: 30 }),
+          fc.integer({ min: 1, max: 60 }).map(n => n * 0.5),
           (timeWindowMinutes, timeSpanThresholdMinutes) => {
             const result = validateDynamicConfig({ timeWindowMinutes, timeSpanThresholdMinutes });
             expect(result.valid).toBe(true);
@@ -1107,7 +1221,7 @@ describe('DynamicRuleService', () => {
             fc.integer({ min: -1000, max: 4 }),
             fc.integer({ min: 121, max: 10000 })
           ),
-          fc.integer({ min: 1, max: 30 }),
+          fc.integer({ min: 1, max: 60 }).map(n => n * 0.5),
           (timeWindowMinutes, timeSpanThresholdMinutes) => {
             const result = validateDynamicConfig({ timeWindowMinutes, timeSpanThresholdMinutes });
             expect(result.valid).toBe(false);
@@ -1144,6 +1258,61 @@ describe('DynamicRuleService', () => {
           }
         ),
         { numRuns: 10 }
+      );
+    });
+
+    /**
+     * **Feature: dynamic-rule-realtime, Property 3: Threshold configuration accepts valid low values**
+     * **Validates: Requirements 3.1**
+     * 
+     * For any threshold count value between 5 and 1000, the system SHALL accept and save the configuration.
+     */
+    it('Property 3: should accept thresholdCount values >= 5', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 5, max: 1000 }),
+          (thresholdCount) => {
+            const result = validateDynamicConfig({ thresholdCount });
+            expect(result.valid).toBe(true);
+            expect(result.data?.thresholdCount).toBe(thresholdCount);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should reject thresholdCount values below 5', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: -1000, max: 4 }),
+          (thresholdCount) => {
+            const result = validateDynamicConfig({ thresholdCount });
+            expect(result.valid).toBe(false);
+            expect(result.error).toBe('thresholdCount must be at least 5');
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    /**
+     * **Feature: dynamic-rule-realtime, Property 4: Time span configuration accepts valid low values**
+     * **Validates: Requirements 3.2**
+     * 
+     * For any time span threshold value between 0.5 and 30 minutes, the system SHALL accept and save the configuration.
+     */
+    it('Property 4: should accept timeSpanThresholdMinutes values as low as 0.5 (30 seconds)', () => {
+      fc.assert(
+        fc.property(
+          // Generate values from 0.5 to 30 in 0.5 increments
+          fc.integer({ min: 1, max: 60 }).map(n => n * 0.5),
+          (timeSpanThresholdMinutes) => {
+            const result = validateDynamicConfig({ timeSpanThresholdMinutes });
+            expect(result.valid).toBe(true);
+            expect(result.data?.timeSpanThresholdMinutes).toBe(timeSpanThresholdMinutes);
+          }
+        ),
+        { numRuns: 100 }
       );
     });
   });
@@ -2369,6 +2538,427 @@ describe('DynamicRuleService', () => {
           }
         ),
         { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: dynamic-rule-realtime, Property 1: Synchronous rule creation affects current email**
+   * **Validates: Requirements 1.1, 1.3**
+   * 
+   * For any sequence of emails with the same subject that triggers dynamic rule creation,
+   * the email that triggers the rule creation SHALL be blocked by that rule in the same request.
+   * 
+   * This property tests that:
+   * 1. When threshold is reached, a rule is created synchronously
+   * 2. The rule is immediately available for matching
+   * 3. Detection metrics (latency and forwarded count) are correctly calculated
+   */
+  describe('Property 1: Synchronous Rule Creation Affects Current Email', () => {
+    it('should create rule synchronously and return detection metrics when threshold is reached', () => {
+      fc.assert(
+        fc.property(
+          subjectArb,
+          fc.integer({ min: 2, max: 10 }), // threshold
+          fc.integer({ min: 1, max: 10 }), // timeSpanThresholdMinutes
+          (subject, threshold, timeSpanThreshold) => {
+            // Reset database
+            db.run('DELETE FROM email_subject_tracker');
+            db.run('DELETE FROM filter_rules');
+            db.run('DELETE FROM rule_stats');
+            
+            dynamicRuleService.updateConfig({
+              enabled: true,
+              timeWindowMinutes: 60,
+              thresholdCount: threshold,
+              timeSpanThresholdMinutes: timeSpanThreshold,
+              expirationHours: 48,
+            });
+            
+            const now = new Date();
+            
+            // Track (threshold - 1) emails - should not create rule yet
+            for (let i = 0; i < threshold - 1; i++) {
+              const result = dynamicRuleService.trackSubjectWithMetrics(subject, now);
+              expect(result.rule).toBeNull();
+              expect(result.detectionLatencyMs).toBeUndefined();
+              expect(result.emailsForwardedBeforeBlock).toBeUndefined();
+            }
+            
+            // Track the threshold-th email - should create rule with metrics
+            const finalResult = dynamicRuleService.trackSubjectWithMetrics(subject, now);
+            
+            // Rule should be created synchronously
+            expect(finalResult.rule).not.toBeNull();
+            expect(finalResult.rule?.category).toBe('dynamic');
+            expect(finalResult.rule?.matchType).toBe('subject');
+            expect(finalResult.rule?.pattern).toBe(subject);
+            expect(finalResult.rule?.enabled).toBe(true);
+            
+            // Detection metrics should be present
+            expect(finalResult.detectionLatencyMs).toBeDefined();
+            expect(finalResult.detectionLatencyMs).toBeGreaterThanOrEqual(0);
+            
+            // Emails forwarded before block = threshold - 1 (current email will be blocked)
+            expect(finalResult.emailsForwardedBeforeBlock).toBe(threshold - 1);
+            
+            // Rule should be immediately available in the database
+            const rules = dynamicRuleService.getAllDynamicRules();
+            expect(rules.length).toBe(1);
+            expect(rules[0].id).toBe(finalResult.rule!.id);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should calculate correct detection latency based on time span', () => {
+      fc.assert(
+        fc.property(
+          subjectArb,
+          fc.integer({ min: 2, max: 5 }), // threshold
+          fc.integer({ min: 100, max: 5000 }), // intervalMs between emails
+          (subject, threshold, intervalMs) => {
+            // Reset database
+            db.run('DELETE FROM email_subject_tracker');
+            db.run('DELETE FROM filter_rules');
+            db.run('DELETE FROM rule_stats');
+            
+            // Set time span threshold high enough to allow rule creation
+            const timeSpanThresholdMinutes = Math.ceil((threshold * intervalMs) / (60 * 1000)) + 1;
+            
+            dynamicRuleService.updateConfig({
+              enabled: true,
+              timeWindowMinutes: 60,
+              thresholdCount: threshold,
+              timeSpanThresholdMinutes,
+              expirationHours: 48,
+            });
+            
+            const baseTime = new Date();
+            let lastResult: DynamicRuleCreationResult = { rule: null };
+            
+            // Track emails with specified interval
+            for (let i = 0; i < threshold; i++) {
+              const emailTime = new Date(baseTime.getTime() + i * intervalMs);
+              lastResult = dynamicRuleService.trackSubjectWithMetrics(subject, emailTime);
+            }
+            
+            // Rule should be created
+            expect(lastResult.rule).not.toBeNull();
+            
+            // Detection latency should be approximately (threshold - 1) * intervalMs
+            const expectedLatencyMs = (threshold - 1) * intervalMs;
+            expect(lastResult.detectionLatencyMs).toBe(expectedLatencyMs);
+            
+            // Emails forwarded before block
+            expect(lastResult.emailsForwardedBeforeBlock).toBe(threshold - 1);
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+
+    it('should return existing rule with zero metrics when rule already exists', () => {
+      fc.assert(
+        fc.property(
+          subjectArb,
+          (subject) => {
+            // Reset database
+            db.run('DELETE FROM email_subject_tracker');
+            db.run('DELETE FROM filter_rules');
+            db.run('DELETE FROM rule_stats');
+            
+            dynamicRuleService.updateConfig({
+              enabled: true,
+              timeWindowMinutes: 60,
+              thresholdCount: 2,
+              timeSpanThresholdMinutes: 10,
+              expirationHours: 48,
+            });
+            
+            const now = new Date();
+            
+            // Create rule first
+            dynamicRuleService.trackSubjectWithMetrics(subject, now);
+            const firstResult = dynamicRuleService.trackSubjectWithMetrics(subject, now);
+            
+            expect(firstResult.rule).not.toBeNull();
+            const firstRuleId = firstResult.rule!.id;
+            
+            // Track again - should return existing rule with zero metrics
+            const laterTime = new Date(now.getTime() + 1000);
+            dynamicRuleService.trackSubjectWithMetrics(subject, laterTime);
+            const secondResult = dynamicRuleService.trackSubjectWithMetrics(subject, laterTime);
+            
+            // Should return the same rule
+            expect(secondResult.rule).not.toBeNull();
+            expect(secondResult.rule!.id).toBe(firstRuleId);
+            
+            // Metrics should be zero for existing rule
+            expect(secondResult.detectionLatencyMs).toBe(0);
+            expect(secondResult.emailsForwardedBeforeBlock).toBe(0);
+            
+            // Only one rule should exist
+            const rules = dynamicRuleService.getAllDynamicRules();
+            expect(rules.length).toBe(1);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  /**
+   * **Feature: dynamic-rule-realtime, Property 7: Dynamic rule creation creates system log**
+   * **Validates: Requirements 4.1, 4.2, 6.1**
+   * 
+   * For any automatically created dynamic rule, the system SHALL create a system log entry
+   * containing detection latency and forwarded email count.
+   * 
+   * This property tests that:
+   * 1. When a dynamic rule is created via trackSubjectWithMetrics, a system log is created
+   * 2. The log has category 'system'
+   * 3. The log contains detection latency and forwarded email count
+   */
+  describe('Property 7: Dynamic Rule Creation Creates System Log', () => {
+    /**
+     * Test-specific LogRepository that works with sql.js
+     */
+    class TestLogRepository {
+      constructor(private db: SqlJsDatabase) {}
+
+      findAll(filter?: { category?: string }): Array<{
+        id: number;
+        category: string;
+        level: string;
+        message: string;
+        details: Record<string, unknown> | null;
+        workerName: string;
+        createdAt: Date;
+      }> {
+        let query = 'SELECT * FROM system_logs WHERE 1=1';
+        const params: string[] = [];
+
+        if (filter?.category) {
+          query += ' AND category = ?';
+          params.push(filter.category);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const result = this.db.exec(query, params);
+        if (result.length === 0) {
+          return [];
+        }
+
+        return result[0].values.map(row => ({
+          id: row[0] as number,
+          category: row[1] as string,
+          level: row[2] as string,
+          message: row[3] as string,
+          details: row[4] ? JSON.parse(row[4] as string) : null,
+          workerName: row[5] as string || 'global',
+          createdAt: new Date(row[6] as string),
+        }));
+      }
+
+      create(category: string, message: string, details?: Record<string, unknown>, level: string = 'info', workerName: string = 'global') {
+        const now = new Date().toISOString();
+        const detailsJson = details ? JSON.stringify(details) : null;
+
+        this.db.run(
+          `INSERT INTO system_logs (category, level, message, details, worker_name, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [category, level, message, detailsJson, workerName, now]
+        );
+      }
+    }
+
+    /**
+     * Extended DynamicRuleService that creates system logs (mimics production behavior)
+     */
+    class TestDynamicRuleServiceWithLogging extends TestDynamicRuleService {
+      private logRepository: TestLogRepository;
+
+      constructor(db: SqlJsDatabase, ruleRepository: TestRuleRepository) {
+        super(db, ruleRepository);
+        this.logRepository = new TestLogRepository(db);
+      }
+
+      /**
+       * Track subject with metrics and create system log on rule creation
+       * This mimics the production behavior in dynamic-rule.service.ts
+       */
+      trackSubjectWithMetricsAndLog(subject: string, receivedAt: Date = new Date()): DynamicRuleCreationResult {
+        const result = this.trackSubjectWithMetrics(subject, receivedAt);
+        
+        // If a new rule was created (not an existing rule), create system log
+        if (result.rule && result.detectionLatencyMs !== undefined && result.detectionLatencyMs > 0) {
+          this.logRepository.create(
+            'system',
+            `动态规则已创建: ${result.rule.pattern}`,
+            {
+              ruleId: result.rule.id,
+              pattern: result.rule.pattern,
+              detectionLatencyMs: result.detectionLatencyMs,
+              emailsForwardedBeforeBlock: result.emailsForwardedBeforeBlock,
+              firstEmailTime: new Date(receivedAt.getTime() - result.detectionLatencyMs).toISOString(),
+              triggerEmailTime: receivedAt.toISOString(),
+            },
+            'info'
+          );
+        }
+        
+        return result;
+      }
+
+      getLogRepository(): TestLogRepository {
+        return this.logRepository;
+      }
+    }
+
+    it('should create system log with detection metrics when dynamic rule is created', () => {
+      fc.assert(
+        fc.property(
+          subjectArb,
+          fc.integer({ min: 2, max: 10 }), // threshold
+          fc.integer({ min: 100, max: 5000 }), // intervalMs between emails
+          (subject, threshold, intervalMs) => {
+            // Reset database
+            db.run('DELETE FROM email_subject_tracker');
+            db.run('DELETE FROM filter_rules');
+            db.run('DELETE FROM rule_stats');
+            db.run('DELETE FROM system_logs');
+            
+            // Set time span threshold high enough to allow rule creation
+            const timeSpanThresholdMinutes = Math.ceil((threshold * intervalMs) / (60 * 1000)) + 1;
+            
+            const serviceWithLogging = new TestDynamicRuleServiceWithLogging(db, ruleRepository);
+            serviceWithLogging.updateConfig({
+              enabled: true,
+              timeWindowMinutes: 60,
+              thresholdCount: threshold,
+              timeSpanThresholdMinutes,
+              expirationHours: 48,
+            });
+            
+            const baseTime = new Date();
+            
+            // Track emails with specified interval
+            for (let i = 0; i < threshold; i++) {
+              const emailTime = new Date(baseTime.getTime() + i * intervalMs);
+              serviceWithLogging.trackSubjectWithMetricsAndLog(subject, emailTime);
+            }
+            
+            // Verify system log was created
+            const logs = serviceWithLogging.getLogRepository().findAll({ category: 'system' });
+            
+            // Should have exactly one system log for the rule creation
+            expect(logs.length).toBe(1);
+            
+            const log = logs[0];
+            expect(log.category).toBe('system');
+            expect(log.level).toBe('info');
+            expect(log.message).toContain('动态规则已创建');
+            expect(log.message).toContain(subject);
+            
+            // Verify log details contain required metrics
+            expect(log.details).not.toBeNull();
+            expect(log.details!.ruleId).toBeDefined();
+            expect(log.details!.pattern).toBe(subject);
+            expect(log.details!.detectionLatencyMs).toBeDefined();
+            expect(log.details!.detectionLatencyMs).toBeGreaterThanOrEqual(0);
+            expect(log.details!.emailsForwardedBeforeBlock).toBe(threshold - 1);
+            expect(log.details!.firstEmailTime).toBeDefined();
+            expect(log.details!.triggerEmailTime).toBeDefined();
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+
+    it('should NOT create system log when rule already exists', () => {
+      fc.assert(
+        fc.property(
+          subjectArb,
+          (subject) => {
+            // Reset database
+            db.run('DELETE FROM email_subject_tracker');
+            db.run('DELETE FROM filter_rules');
+            db.run('DELETE FROM rule_stats');
+            db.run('DELETE FROM system_logs');
+            
+            const serviceWithLogging = new TestDynamicRuleServiceWithLogging(db, ruleRepository);
+            serviceWithLogging.updateConfig({
+              enabled: true,
+              timeWindowMinutes: 60,
+              thresholdCount: 2,
+              timeSpanThresholdMinutes: 10,
+              expirationHours: 48,
+            });
+            
+            const now = new Date();
+            
+            // Create rule first
+            serviceWithLogging.trackSubjectWithMetricsAndLog(subject, now);
+            serviceWithLogging.trackSubjectWithMetricsAndLog(subject, new Date(now.getTime() + 100));
+            
+            // Clear logs to test subsequent tracking
+            db.run('DELETE FROM system_logs');
+            
+            // Track again - should return existing rule without creating new log
+            const laterTime = new Date(now.getTime() + 1000);
+            serviceWithLogging.trackSubjectWithMetricsAndLog(subject, laterTime);
+            serviceWithLogging.trackSubjectWithMetricsAndLog(subject, new Date(laterTime.getTime() + 100));
+            
+            // Should NOT have created a new system log
+            const logs = serviceWithLogging.getLogRepository().findAll({ category: 'system' });
+            expect(logs.length).toBe(0);
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+
+    it('should NOT create system log when feature is disabled', () => {
+      fc.assert(
+        fc.property(
+          subjectArb,
+          fc.integer({ min: 2, max: 10 }),
+          (subject, emailCount) => {
+            // Reset database
+            db.run('DELETE FROM email_subject_tracker');
+            db.run('DELETE FROM filter_rules');
+            db.run('DELETE FROM rule_stats');
+            db.run('DELETE FROM system_logs');
+            
+            const serviceWithLogging = new TestDynamicRuleServiceWithLogging(db, ruleRepository);
+            serviceWithLogging.updateConfig({
+              enabled: false,
+              timeWindowMinutes: 60,
+              thresholdCount: 2,
+              timeSpanThresholdMinutes: 10,
+              expirationHours: 48,
+            });
+            
+            const now = new Date();
+            
+            // Track many emails - should not create rule or log
+            for (let i = 0; i < emailCount; i++) {
+              serviceWithLogging.trackSubjectWithMetricsAndLog(subject, now);
+            }
+            
+            // Should NOT have created any system logs
+            const logs = serviceWithLogging.getLogRepository().findAll({ category: 'system' });
+            expect(logs.length).toBe(0);
+            
+            // Should NOT have created any rules
+            const rules = serviceWithLogging.getAllDynamicRules();
+            expect(rules.length).toBe(0);
+          }
+        ),
+        { numRuns: 50 }
       );
     });
   });

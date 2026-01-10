@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { CreateRuleDTO, UpdateRuleDTO, RuleCategory } from '@email-filter/shared';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
+import { LogRepository } from '../db/log-repository.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getRuleCache } from '../services/rule-cache.instance.js';
@@ -241,6 +242,22 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
         ruleCache.invalidate(undefined);
       }
       
+      // Log admin action (Requirement 5.1)
+      const logRepository = new LogRepository(db);
+      logRepository.createAdminLog('创建规则', {
+        action: 'create',
+        entityType: 'rule',
+        entityId: rule.id,
+        rule: {
+          category: rule.category,
+          matchType: rule.matchType,
+          matchMode: rule.matchMode,
+          pattern: rule.pattern,
+          enabled: rule.enabled,
+          workerId: workerId || null,
+        },
+      }, workerId || 'global');
+      
       return reply.status(201).send(rule);
     } catch (error: any) {
       if (error.message === 'DUPLICATE_RULE') {
@@ -295,6 +312,30 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
         ruleCache.invalidate(undefined);
       }
 
+      // Log admin action (Requirement 5.2)
+      const logRepository = new LogRepository(db);
+      logRepository.createAdminLog('更新规则', {
+        action: 'update',
+        entityType: 'rule',
+        entityId: rule.id,
+        before: existingRule ? {
+          category: existingRule.category,
+          matchType: existingRule.matchType,
+          matchMode: existingRule.matchMode,
+          pattern: existingRule.pattern,
+          enabled: existingRule.enabled,
+          workerId: existingRule.workerId || null,
+        } : null,
+        after: {
+          category: rule.category,
+          matchType: rule.matchType,
+          matchMode: rule.matchMode,
+          pattern: rule.pattern,
+          enabled: rule.enabled,
+          workerId: rule.workerId || null,
+        },
+      }, rule.workerId || 'global');
+
       return reply.send(rule);
     } catch (error) {
       request.log.error(error, 'Error updating rule');
@@ -334,6 +375,22 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
         if (!rule.workerId) {
           ruleCache.invalidate(undefined);
         }
+        
+        // Log admin action (Requirement 5.3)
+        const logRepository = new LogRepository(db);
+        logRepository.createAdminLog('删除规则', {
+          action: 'delete',
+          entityType: 'rule',
+          entityId: rule.id,
+          deletedRule: {
+            category: rule.category,
+            matchType: rule.matchType,
+            matchMode: rule.matchMode,
+            pattern: rule.pattern,
+            enabled: rule.enabled,
+            workerId: rule.workerId || null,
+          },
+        }, rule.workerId || 'global');
       }
 
       return reply.status(204).send();

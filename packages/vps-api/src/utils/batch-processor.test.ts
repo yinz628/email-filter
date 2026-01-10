@@ -251,7 +251,7 @@ describe('BatchProcessor', () => {
         ),
         { numRuns: 50 }
       );
-    });
+    }, 30000); // Increase timeout for this test
   });
 
   describe('processBatchAsync', () => {

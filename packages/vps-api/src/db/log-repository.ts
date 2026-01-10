@@ -229,6 +229,36 @@ export class LogRepository {
   }
 
   /**
+   * Create an admin action log entry
+   * Used for logging administrator operations like rule/worker CRUD
+   * 
+   * @param action - Description of the admin action (e.g., "创建规则", "更新Worker")
+   * @param details - Additional details about the action
+   * @param workerName - Optional worker name context (defaults to 'global')
+   * @returns The created log entry
+   * 
+   * Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
+   */
+  createAdminLog(action: string, details: Record<string, unknown>, workerName: string = 'global'): SystemLog {
+    return this.create('admin_action', action, details, 'info', workerName);
+  }
+
+  /**
+   * Create a system log entry
+   * Used for logging system events like dynamic rule creation, cleanup operations
+   * 
+   * @param event - Description of the system event (e.g., "动态规则已创建", "数据清理完成")
+   * @param details - Additional details about the event
+   * @param workerName - Optional worker name context (defaults to 'global')
+   * @returns The created log entry
+   * 
+   * Requirements: 6.1, 6.2, 6.3
+   */
+  createSystemLog(event: string, details: Record<string, unknown>, workerName: string = 'global'): SystemLog {
+    return this.create('system', event, details, 'info', workerName);
+  }
+
+  /**
    * Get top blocked rules by count in recent time period
    * @param hours - Time period in hours (default: 24)
    * @param limit - Max number of results (default: 5)

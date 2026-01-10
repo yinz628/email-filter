@@ -1,10 +1,13 @@
 /**
  * Worker Instance Routes
  * Manages multiple Email Worker configurations
+ * 
+ * Requirements: 5.4, 5.5 - Admin action logging for Worker operations
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { WorkerRepository, type CreateWorkerInput, type UpdateWorkerInput } from '../db/worker-repository.js';
+import { LogRepository } from '../db/log-repository.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { config } from '../config.js';
@@ -21,6 +24,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.addHook('preHandler', authMiddleware);
 
   const getRepository = () => new WorkerRepository(getDatabase());
+  const getLogRepository = () => new LogRepository(getDatabase());
 
   /**
    * GET /api/workers
@@ -48,6 +52,8 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * POST /api/workers
    * Create a new worker instance
+   * 
+   * Requirements: 5.4 - Log admin action when creating a Worker
    */
   fastify.post<{ Body: CreateWorkerInput }>('/', async (request, reply) => {
     const { name, domain, defaultForwardTo, workerUrl } = request.body;
@@ -61,6 +67,21 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
 
     try {
       const worker = getRepository().create({ name, domain, defaultForwardTo, workerUrl });
+      
+      // Log admin action (Requirement 5.4)
+      getLogRepository().createAdminLog('创建Worker', {
+        action: 'create',
+        entityType: 'worker',
+        entityId: worker.id,
+        worker: {
+          name: worker.name,
+          domain: worker.domain,
+          defaultForwardTo: worker.defaultForwardTo,
+          workerUrl: worker.workerUrl,
+          enabled: worker.enabled,
+        },
+      }, worker.name);
+      
       return reply.status(201).send({ worker });
     } catch (error: any) {
       if (error.message?.includes('UNIQUE constraint failed')) {
@@ -76,13 +97,44 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * PUT /api/workers/:id
    * Update a worker instance
+   * 
+   * Requirements: 5.4 - Log admin action when updating a Worker
    */
   fastify.put<{ Params: WorkerParams; Body: UpdateWorkerInput }>('/:id', async (request, reply) => {
-    const worker = getRepository().update(request.params.id, request.body);
+    const repository = getRepository();
+    
+    // Get existing worker to log before/after changes
+    const existingWorker = repository.findById(request.params.id);
+    if (!existingWorker) {
+      return reply.status(404).send({ error: 'Worker not found' });
+    }
+    
+    const worker = repository.update(request.params.id, request.body);
     
     if (!worker) {
       return reply.status(404).send({ error: 'Worker not found' });
     }
+    
+    // Log admin action (Requirement 5.4)
+    getLogRepository().createAdminLog('更新Worker', {
+      action: 'update',
+      entityType: 'worker',
+      entityId: worker.id,
+      before: {
+        name: existingWorker.name,
+        domain: existingWorker.domain,
+        defaultForwardTo: existingWorker.defaultForwardTo,
+        workerUrl: existingWorker.workerUrl,
+        enabled: existingWorker.enabled,
+      },
+      after: {
+        name: worker.name,
+        domain: worker.domain,
+        defaultForwardTo: worker.defaultForwardTo,
+        workerUrl: worker.workerUrl,
+        enabled: worker.enabled,
+      },
+    }, worker.name);
     
     return { worker };
   });
@@ -90,13 +142,37 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * DELETE /api/workers/:id
    * Delete a worker instance (cascades to rules)
+   * 
+   * Requirements: 5.5 - Log admin action when deleting a Worker
    */
   fastify.delete<{ Params: WorkerParams }>('/:id', async (request, reply) => {
-    const deleted = getRepository().delete(request.params.id);
+    const repository = getRepository();
+    
+    // Get worker before deletion to log its details
+    const worker = repository.findById(request.params.id);
+    if (!worker) {
+      return reply.status(404).send({ error: 'Worker not found' });
+    }
+    
+    const deleted = repository.delete(request.params.id);
     
     if (!deleted) {
       return reply.status(404).send({ error: 'Worker not found' });
     }
+    
+    // Log admin action (Requirement 5.5)
+    getLogRepository().createAdminLog('删除Worker', {
+      action: 'delete',
+      entityType: 'worker',
+      entityId: worker.id,
+      deletedWorker: {
+        name: worker.name,
+        domain: worker.domain,
+        defaultForwardTo: worker.defaultForwardTo,
+        workerUrl: worker.workerUrl,
+        enabled: worker.enabled,
+      },
+    }, worker.name);
     
     return { success: true };
   });

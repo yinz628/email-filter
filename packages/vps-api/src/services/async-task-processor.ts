@@ -5,9 +5,10 @@
  * - Statistics updates
  * - Log recording
  * - Watch rule tracking
- * - Dynamic rule tracking
  * - Campaign analytics
  * - Signal monitoring
+ * 
+ * Note: Dynamic rule tracking was moved to Phase 1 (synchronous) for real-time detection
  * 
  * Requirements: 2.1, 2.2, 3.1, 3.2, 5.2
  */
@@ -22,7 +23,6 @@ export type AsyncTaskType =
   | 'stats' 
   | 'log' 
   | 'watch' 
-  | 'dynamic' 
   | 'campaign' 
   | 'monitoring';
 
@@ -93,12 +93,12 @@ const DEFAULT_CONFIG: AsyncTaskProcessorConfig = {
 
 /**
  * All task types that should be enqueued for Phase 2 processing
+ * Note: 'dynamic' was removed - dynamic rule tracking is now in Phase 1 (synchronous)
  */
 const ALL_TASK_TYPES: AsyncTaskType[] = [
   'stats',
   'log',
   'watch',
-  'dynamic',
   'campaign',
   'monitoring',
 ];

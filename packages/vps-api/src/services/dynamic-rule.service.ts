@@ -17,6 +17,7 @@ import type {
 } from '@email-filter/shared';
 import { DEFAULT_DYNAMIC_CONFIG } from '@email-filter/shared';
 import { RuleRepository } from '../db/rule-repository.js';
+import { LogRepository } from '../db/log-repository.js';
 import { getRuleCache } from './rule-cache.instance.js';
 import type { FilterResult } from './filter.service.js';
 
@@ -37,6 +38,21 @@ export interface SubjectCount {
   subjectHash: string;
   subject: string;
   count: number;
+}
+
+/**
+ * Result of tracking a subject with metrics
+ * Used for synchronous dynamic rule creation in Phase 1
+ * 
+ * Requirements: 4.1, 4.2 - Detection metrics
+ */
+export interface DynamicRuleCreationResult {
+  /** The created rule, or null if no rule was created */
+  rule: FilterRule | null;
+  /** Time in ms from first email to rule creation */
+  detectionLatencyMs?: number;
+  /** Number of emails forwarded before blocking started */
+  emailsForwardedBeforeBlock?: number;
 }
 
 /**
@@ -75,7 +91,7 @@ export class DynamicRuleService {
           config.thresholdCount = parseInt(row.value, 10);
           break;
         case 'timeSpanThresholdMinutes':
-          config.timeSpanThresholdMinutes = parseInt(row.value, 10);
+          config.timeSpanThresholdMinutes = parseFloat(row.value);
           break;
         case 'expirationHours':
           config.expirationHours = parseInt(row.value, 10);
@@ -312,6 +328,139 @@ export class DynamicRuleService {
     return null;
   }
 
+  /**
+   * Track an email subject for dynamic rule detection with metrics
+   * 
+   * This is the synchronous version used in Phase 1 processing.
+   * Returns detection metrics along with the created rule.
+   * 
+   * Requirements 1.1, 1.3, 4.1, 4.2:
+   * - Synchronous rule creation affects current email
+   * - Returns detection latency and forwarded email count
+   * 
+   * @param subject - The email subject to track
+   * @param receivedAt - When the email was received
+   * @returns DynamicRuleCreationResult with rule and metrics
+   */
+  trackSubjectWithMetrics(subject: string, receivedAt: Date = new Date()): DynamicRuleCreationResult {
+    const config = this.getConfig();
+    
+    // If dynamic rule feature is disabled, do not create new rules
+    if (!config.enabled) {
+      return { rule: null };
+    }
+
+    const subjectHash = this.hashSubject(subject);
+    const receivedAtStr = receivedAt.toISOString();
+
+    // Insert the subject tracking record
+    const insertStmt = this.db.prepare(
+      `INSERT INTO email_subject_tracker (subject_hash, subject, received_at)
+       VALUES (?, ?, ?)`
+    );
+    insertStmt.run(subjectHash, subject, receivedAtStr);
+
+    // Only consider emails within the configured time window
+    const windowStart = new Date(receivedAt.getTime() - config.timeWindowMinutes * 60 * 1000);
+    const windowStartStr = windowStart.toISOString();
+
+    // First count the number of emails with the same subject
+    const countStmt = this.db.prepare(
+      `SELECT COUNT(*) as count FROM email_subject_tracker
+       WHERE subject_hash = ? AND received_at >= ?`
+    );
+    const countResult = countStmt.get(subjectHash, windowStartStr) as { count: number };
+    const count = countResult?.count || 0;
+
+    // When count reaches threshold, calculate time span
+    if (count >= config.thresholdCount) {
+      // Get the first and Nth (threshold) email timestamps within the window
+      const timestampsStmt = this.db.prepare(
+        `SELECT received_at FROM email_subject_tracker
+         WHERE subject_hash = ? AND received_at >= ?
+         ORDER BY received_at ASC
+         LIMIT ?`
+      );
+      const timestamps = timestampsStmt.all(subjectHash, windowStartStr, config.thresholdCount) as { received_at: string }[];
+      
+      if (timestamps.length >= config.thresholdCount) {
+        const firstEmailTime = new Date(timestamps[0].received_at);
+        const nthEmailTime = new Date(timestamps[config.thresholdCount - 1].received_at);
+        
+        // Calculate time span between first and Nth email
+        const timeSpanMinutes = (nthEmailTime.getTime() - firstEmailTime.getTime()) / (60 * 1000);
+        
+        // Create rule only if time span <= threshold
+        if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
+          // Use normalized subject for rule pattern (removes common prefixes)
+          const normalizedSubject = this.normalizeSubject(subject);
+          
+          // Check if a dynamic rule for this subject already exists
+          const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
+          if (existingRule) {
+            // Update lastHitAt for existing rule
+            this.ruleRepository.updateLastHit(existingRule.id);
+            // Return existing rule with metrics (detection latency is 0 since rule already exists)
+            return {
+              rule: existingRule,
+              detectionLatencyMs: 0,
+              emailsForwardedBeforeBlock: 0,
+            };
+          }
+
+          // Calculate detection metrics - Requirements 4.1, 4.2
+          const detectionLatencyMs = receivedAt.getTime() - firstEmailTime.getTime();
+          // Emails forwarded = count - 1 (current email will be blocked)
+          const emailsForwardedBeforeBlock = count - 1;
+
+          // Create new dynamic rule with normalized subject
+          const ruleDto: CreateRuleDTO = {
+            category: 'dynamic',
+            matchType: 'subject',
+            matchMode: 'contains',
+            pattern: normalizedSubject,
+            enabled: true,
+          };
+
+          const newRule = this.ruleRepository.create(ruleDto);
+          
+          // Invalidate rule cache so the new rule takes effect immediately
+          // This is critical for dynamic rules to work in real-time
+          const ruleCache = getRuleCache();
+          ruleCache.invalidateAll();
+          
+          // Log system event for dynamic rule creation - Requirements 6.1
+          const logRepository = new LogRepository(this.db);
+          logRepository.create(
+            'system',
+            `动态规则已创建: ${normalizedSubject}`,
+            {
+              ruleId: newRule.id,
+              pattern: normalizedSubject,
+              detectionLatencyMs,
+              emailsForwardedBeforeBlock,
+              firstEmailTime: firstEmailTime.toISOString(),
+              triggerEmailTime: receivedAtStr,
+            },
+            'info'
+          );
+          
+          // Clean up old tracking records for this subject
+          this.cleanupSubjectTracker(subjectHash, windowStart);
+
+          return {
+            rule: newRule,
+            detectionLatencyMs,
+            emailsForwardedBeforeBlock,
+          };
+        }
+        // Time span exceeds threshold - continue tracking but don't create rule
+      }
+    }
+
+    return { rule: null };
+  }
+
 
   /**
    * Find an existing dynamic rule that matches a subject
@@ -470,12 +619,26 @@ export class DynamicRuleService {
 
     const expiredRules = this.findExpiredDynamicRules(config.expirationHours, config.lastHitThresholdHours);
     const deletedIds: string[] = [];
+    const deletedPatterns: string[] = [];
 
     for (const rule of expiredRules) {
       const deleted = this.ruleRepository.delete(rule.id);
       if (deleted) {
         deletedIds.push(rule.id);
+        deletedPatterns.push(rule.pattern);
       }
+    }
+
+    // Log system event when expired rules are cleaned up (Requirement 6.2)
+    if (deletedIds.length > 0) {
+      const logRepository = new LogRepository(this.db);
+      logRepository.createSystemLog('过期动态规则已清理', {
+        deletedCount: deletedIds.length,
+        deletedRuleIds: deletedIds,
+        deletedPatterns: deletedPatterns,
+        expirationHours: config.expirationHours,
+        lastHitThresholdHours: config.lastHitThresholdHours,
+      });
     }
 
     return deletedIds;

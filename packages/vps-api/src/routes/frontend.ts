@@ -385,15 +385,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
           <div class="form-group">
             <label>触发阈值（次数）</label>
-            <input type="number" id="dynamic-threshold" min="1" value="30" placeholder="30">
-            <p style="color:#888;font-size:12px;margin-top:5px">同主题邮件数量达到此值时触发时间跨度检测</p>
+            <input type="number" id="dynamic-threshold" min="5" value="30" placeholder="30">
+            <p style="color:#888;font-size:12px;margin-top:5px">同主题邮件数量达到此值时触发时间跨度检测（最小5次）</p>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>时间跨度阈值（分钟）</label>
-            <input type="number" id="dynamic-time-span-threshold" min="1" max="30" value="3" placeholder="3">
-            <p style="color:#888;font-size:12px;margin-top:5px">第1封和第N封邮件的时间跨度小于等于此值时创建规则（1-30分钟）</p>
+            <input type="number" id="dynamic-time-span-threshold" min="0.5" max="30" step="0.5" value="3" placeholder="3">
+            <p style="color:#888;font-size:12px;margin-top:5px">第1封和第N封邮件的时间跨度小于等于此值时创建规则（0.5-30分钟）</p>
           </div>
           <div class="form-group">
             <label>规则过期时间（小时）</label>
@@ -2296,7 +2296,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('rule-worker-filter').innerHTML = filterOptions;
       
       // Update logs worker filter
-      const logWorkerFilterOptions = '<option value="">全部实例</option><option value="global">全局</option>' +
+      const logWorkerFilterOptions = '<option value="">全部实例</option>' +
         workers.map(w => '<option value="' + escapeHtml(w.name) + '">' + escapeHtml(w.name) + '</option>').join('');
       const logWorkerFilter = document.getElementById('log-worker-filter');
       if (logWorkerFilter) logWorkerFilter.innerHTML = logWorkerFilterOptions;
@@ -2625,7 +2625,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         enabled: document.getElementById('dynamic-enabled').value === 'true',
         timeWindowMinutes: parseInt(document.getElementById('dynamic-time-window').value) || 30,
         thresholdCount: parseInt(document.getElementById('dynamic-threshold').value) || 30,
-        timeSpanThresholdMinutes: parseInt(document.getElementById('dynamic-time-span-threshold').value) || 3,
+        timeSpanThresholdMinutes: parseFloat(document.getElementById('dynamic-time-span-threshold').value) || 3,
         expirationHours: parseInt(document.getElementById('dynamic-expiration').value) || 48,
         lastHitThresholdHours: parseInt(document.getElementById('dynamic-last-hit-threshold').value) || 72
       };

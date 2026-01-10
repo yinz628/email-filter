@@ -56,7 +56,6 @@ const taskTypeArb: fc.Arbitrary<AsyncTaskType> = fc.constantFrom(
   'stats',
   'log',
   'watch',
-  'dynamic',
   'campaign',
   'monitoring'
 );
@@ -78,10 +77,11 @@ describe('AsyncTaskProcessor', () => {
    * **Validates: Requirements 2.1, 2.2**
    * 
    * *For any* webhook request completing Phase 1, all Phase 2 tasks should be enqueued.
-   * This means enqueueAll() should create exactly 6 tasks (one for each task type).
+   * This means enqueueAll() should create exactly 5 tasks (one for each task type).
+   * Note: 'dynamic' was removed - dynamic rule tracking is now in Phase 1 (synchronous)
    */
   describe('Property 2: Task Queue Consistency', () => {
-    it('enqueueAll creates exactly 6 tasks for all task types', () => {
+    it('enqueueAll creates exactly 5 tasks for all task types', () => {
       fc.assert(
         fc.property(asyncTaskDataArb, (data) => {
           // Reset processor for each test
@@ -90,9 +90,9 @@ describe('AsyncTaskProcessor', () => {
           // Enqueue all tasks for a webhook request
           processor.enqueueAll(data);
           
-          // Verify exactly 6 tasks are enqueued (one for each type)
+          // Verify exactly 5 tasks are enqueued (one for each type)
           const queueSize = processor.getQueueSize();
-          expect(queueSize).toBe(6);
+          expect(queueSize).toBe(5);
         }),
         { numRuns: 100 }
       );
@@ -114,12 +114,11 @@ describe('AsyncTaskProcessor', () => {
           
           processor.enqueueAll(data);
           
-          // Verify all 6 types are present
+          // Verify all 5 types are present (dynamic removed - now in Phase 1)
           const expectedTypes: AsyncTaskType[] = [
             'stats',
             'log',
             'watch',
-            'dynamic',
             'campaign',
             'monitoring',
           ];
@@ -166,8 +165,8 @@ describe('AsyncTaskProcessor', () => {
               processor.enqueueAll(data);
             }
             
-            // Each enqueueAll adds 6 tasks
-            const expectedSize = dataArray.length * 6;
+            // Each enqueueAll adds 5 tasks (dynamic removed - now in Phase 1)
+            const expectedSize = dataArray.length * 5;
             expect(processor.getQueueSize()).toBe(expectedSize);
           }
         ),
@@ -273,7 +272,8 @@ describe('AsyncTaskProcessor', () => {
           // Track calls per type
           const callsByType = new Map<AsyncTaskType, number>();
           
-          const types: AsyncTaskType[] = ['stats', 'log', 'watch', 'dynamic', 'campaign', 'monitoring'];
+          // Note: 'dynamic' removed - now in Phase 1
+          const types: AsyncTaskType[] = ['stats', 'log', 'watch', 'campaign', 'monitoring'];
           for (const type of types) {
             processor.registerProcessor(type, async (tasks) => {
               callsByType.set(type, (callsByType.get(type) || 0) + tasks.length);
@@ -477,7 +477,8 @@ describe('AsyncTaskProcessor', () => {
           const phase1Payload = { ...data.payload };
           
           // Register processors that always fail (simulating Phase 2 failures)
-          const taskTypes: AsyncTaskType[] = ['stats', 'log', 'watch', 'dynamic', 'campaign', 'monitoring'];
+          // Note: 'dynamic' removed - now in Phase 1
+          const taskTypes: AsyncTaskType[] = ['stats', 'log', 'watch', 'campaign', 'monitoring'];
           for (const type of taskTypes) {
             isolationProcessor.registerProcessor(type, async () => {
               throw new Error(`Simulated ${type} failure`);

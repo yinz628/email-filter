@@ -190,7 +190,7 @@ export class CleanupService {
 
     const durationMs = Date.now() - startTime;
 
-    return {
+    const result: FullCleanupResult = {
       hitLogs: hitLogsResult,
       alerts: alertsResult,
       systemLogs: systemLogsResult,
@@ -202,6 +202,26 @@ export class CleanupService {
       durationMs,
       executedAt,
     };
+
+    // Log system event when data cleanup runs (Requirement 6.3)
+    this.logRepository.createSystemLog('数据清理完成', {
+      hitLogsDeleted: hitLogsResult.deletedCount,
+      alertsDeleted: alertsResult.deletedCount,
+      systemLogsDeleted: systemLogsResult.deletedCount,
+      heartbeatLogsDeleted: heartbeatLogsResult.deletedCount,
+      subjectTrackerDeleted: subjectTrackerResult.deletedCount,
+      totalDeleted: result.totalDeleted,
+      durationMs: result.durationMs,
+      retentionConfig: {
+        hitLogRetentionHours,
+        alertRetentionDays,
+        systemLogsRetentionDays: 30,
+        heartbeatLogsRetentionDays: 30,
+        subjectTrackerRetentionHours: 24,
+      },
+    });
+
+    return result;
   }
 
   /**
@@ -222,7 +242,7 @@ export class CleanupService {
 
     const durationMs = Date.now() - startTime;
 
-    return {
+    const result: FullCleanupResult = {
       hitLogs: hitLogsResult,
       alerts: alertsResult,
       systemLogs: systemLogsResult,
@@ -234,5 +254,25 @@ export class CleanupService {
       durationMs,
       executedAt,
     };
+
+    // Log system event when data cleanup runs (Requirement 6.3)
+    this.logRepository.createSystemLog('数据清理完成', {
+      hitLogsDeleted: hitLogsResult.deletedCount,
+      alertsDeleted: alertsResult.deletedCount,
+      systemLogsDeleted: systemLogsResult.deletedCount,
+      heartbeatLogsDeleted: heartbeatLogsResult.deletedCount,
+      subjectTrackerDeleted: subjectTrackerResult.deletedCount,
+      totalDeleted: result.totalDeleted,
+      durationMs: result.durationMs,
+      retentionConfig: {
+        hitLogsRetentionHours: config.hitLogsRetentionHours,
+        alertsRetentionDays: config.alertsRetentionDays,
+        systemLogsRetentionDays: config.systemLogsRetentionDays,
+        heartbeatLogsRetentionDays: config.heartbeatLogsRetentionDays,
+        subjectTrackerRetentionHours: config.subjectTrackerRetentionHours,
+      },
+    });
+
+    return result;
   }
 }

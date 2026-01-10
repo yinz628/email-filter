@@ -2,13 +2,14 @@
  * Dynamic Rules Configuration Routes
  * Manage dynamic rule generation settings
  * 
- * Requirements: 6.4
+ * Requirements: 5.6, 6.4
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { DynamicConfig } from '@email-filter/shared';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { RuleRepository } from '../db/rule-repository.js';
+import { LogRepository } from '../db/log-repository.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -38,19 +39,20 @@ function validateDynamicConfig(body: unknown): { valid: boolean; error?: string;
     config.timeWindowMinutes = value;
   }
 
-  // Requirements 4.4: timeSpanThresholdMinutes must be between 1 and 30 minutes
+  // Requirements 3.2: timeSpanThresholdMinutes must be between 0.5 and 30 minutes
   if (data.timeSpanThresholdMinutes !== undefined) {
     const value = Number(data.timeSpanThresholdMinutes);
-    if (isNaN(value) || value < 1 || value > 30) {
-      return { valid: false, error: 'timeSpanThresholdMinutes must be between 1 and 30' };
+    if (isNaN(value) || value < 0.5 || value > 30) {
+      return { valid: false, error: 'timeSpanThresholdMinutes must be between 0.5 and 30' };
     }
     config.timeSpanThresholdMinutes = value;
   }
 
+  // Requirements 3.1: thresholdCount must be at least 5
   if (data.thresholdCount !== undefined) {
     const value = Number(data.thresholdCount);
-    if (isNaN(value) || value < 1) {
-      return { valid: false, error: 'thresholdCount must be a positive number' };
+    if (isNaN(value) || value < 5) {
+      return { valid: false, error: 'thresholdCount must be at least 5' };
     }
     config.thresholdCount = value;
   }
@@ -105,7 +107,7 @@ export async function dynamicRoutes(fastify: FastifyInstance): Promise<void> {
    * PUT /api/dynamic/config
    * Update dynamic rule configuration
    * 
-   * Requirements: 6.4
+   * Requirements: 5.6, 6.4
    */
   fastify.put('/config', async (request: FastifyRequest, reply: FastifyReply) => {
     const validation = validateDynamicConfig(request.body);
@@ -117,8 +119,36 @@ export async function dynamicRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const ruleRepository = new RuleRepository(db);
       const dynamicService = new DynamicRuleService(db, ruleRepository);
+      const logRepository = new LogRepository(db);
 
+      // Get current config before update for logging
+      const oldConfig = dynamicService.getConfig();
+      
       const updatedConfig = dynamicService.updateConfig(validation.data || {});
+      
+      // Log admin action (Requirement 5.6)
+      logRepository.createAdminLog('更新动态规则配置', {
+        action: 'update',
+        entityType: 'dynamic_config',
+        changes: validation.data,
+        oldConfig: {
+          enabled: oldConfig.enabled,
+          timeWindowMinutes: oldConfig.timeWindowMinutes,
+          thresholdCount: oldConfig.thresholdCount,
+          timeSpanThresholdMinutes: oldConfig.timeSpanThresholdMinutes,
+          expirationHours: oldConfig.expirationHours,
+          lastHitThresholdHours: oldConfig.lastHitThresholdHours,
+        },
+        newConfig: {
+          enabled: updatedConfig.enabled,
+          timeWindowMinutes: updatedConfig.timeWindowMinutes,
+          thresholdCount: updatedConfig.thresholdCount,
+          timeSpanThresholdMinutes: updatedConfig.timeSpanThresholdMinutes,
+          expirationHours: updatedConfig.expirationHours,
+          lastHitThresholdHours: updatedConfig.lastHitThresholdHours,
+        },
+      });
+      
       return reply.send(updatedConfig);
     } catch (error) {
       request.log.error(error, 'Error updating dynamic config');

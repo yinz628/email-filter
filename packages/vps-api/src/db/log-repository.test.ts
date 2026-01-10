@@ -88,6 +88,22 @@ class TestLogRepository {
     };
   }
 
+  /**
+   * Create an admin action log entry
+   * Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
+   */
+  createAdminLog(action: string, details: Record<string, unknown>, workerName: string = 'global'): SystemLog {
+    return this.create('admin_action', action, details, 'info', workerName);
+  }
+
+  /**
+   * Create a system log entry
+   * Requirements: 6.1, 6.2, 6.3
+   */
+  createSystemLog(event: string, details: Record<string, unknown>, workerName: string = 'global'): SystemLog {
+    return this.create('system', event, details, 'info', workerName);
+  }
+
   findById(id: number): SystemLog | null {
     const result = this.db.exec(
       'SELECT id, category, level, message, details, worker_name, created_at FROM system_logs WHERE id = ?',
@@ -335,6 +351,96 @@ describe('Log Repository Worker Instance Support', () => {
         ),
         { numRuns: 100 }
       );
+    });
+  });
+
+  /**
+   * **Feature: dynamic-rule-realtime, Property: Admin Log Helper**
+   * **Validates: Requirements 5.1, 6.1**
+   * 
+   * For any admin action log created via createAdminLog, the log should have category 'admin_action'.
+   */
+  describe('Admin and System Log Helper Methods', () => {
+    it('createAdminLog should create logs with admin_action category', () => {
+      fc.assert(
+        fc.property(
+          messageArb,
+          fc.dictionary(fc.string({ minLength: 1, maxLength: 10 }).filter(s => /^[a-zA-Z]/.test(s)), fc.string()),
+          workerNameArb,
+          (action, details, workerName) => {
+            const log = logRepository.createAdminLog(action, details, workerName);
+            
+            expect(log.category).toBe('admin_action');
+            expect(log.level).toBe('info');
+            expect(log.message).toBe(action);
+            expect(log.workerName).toBe(workerName);
+            
+            // Verify persistence
+            const retrieved = logRepository.findById(log.id);
+            expect(retrieved).not.toBeNull();
+            expect(retrieved!.category).toBe('admin_action');
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+
+    it('createAdminLog should default workerName to global', () => {
+      const log = logRepository.createAdminLog('Test action', { test: true });
+      expect(log.workerName).toBe('global');
+    });
+
+    it('createSystemLog should create logs with system category', () => {
+      fc.assert(
+        fc.property(
+          messageArb,
+          fc.dictionary(fc.string({ minLength: 1, maxLength: 10 }).filter(s => /^[a-zA-Z]/.test(s)), fc.string()),
+          workerNameArb,
+          (event, details, workerName) => {
+            const log = logRepository.createSystemLog(event, details, workerName);
+            
+            expect(log.category).toBe('system');
+            expect(log.level).toBe('info');
+            expect(log.message).toBe(event);
+            expect(log.workerName).toBe(workerName);
+            
+            // Verify persistence
+            const retrieved = logRepository.findById(log.id);
+            expect(retrieved).not.toBeNull();
+            expect(retrieved!.category).toBe('system');
+          }
+        ),
+        { numRuns: 50 }
+      );
+    });
+
+    it('createSystemLog should default workerName to global', () => {
+      const log = logRepository.createSystemLog('Test event', { test: true });
+      expect(log.workerName).toBe('global');
+    });
+
+    it('admin and system logs should be filterable by category', () => {
+      // Create some admin logs
+      logRepository.createAdminLog('Admin action 1', { action: 'create' });
+      logRepository.createAdminLog('Admin action 2', { action: 'update' });
+      
+      // Create some system logs
+      logRepository.createSystemLog('System event 1', { event: 'startup' });
+      logRepository.createSystemLog('System event 2', { event: 'cleanup' });
+      
+      // Filter by admin_action
+      const adminLogs = logRepository.findAll({ category: 'admin_action' });
+      expect(adminLogs.length).toBe(2);
+      for (const log of adminLogs) {
+        expect(log.category).toBe('admin_action');
+      }
+      
+      // Filter by system
+      const systemLogs = logRepository.findAll({ category: 'system' });
+      expect(systemLogs.length).toBe(2);
+      for (const log of systemLogs) {
+        expect(log.category).toBe('system');
+      }
     });
   });
 });

@@ -21,6 +21,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { getRuleCache } from '../services/rule-cache.instance.js';
 import { getAsyncTaskProcessor } from '../services/async-task-processor.instance.js';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
+import { getPerformanceMetrics } from '../services/performance-metrics.js';
 
 /**
  * Validate email webhook payload
@@ -186,6 +187,22 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       const phase1StartTime = Date.now();
       const phase1Result = processPhase1(payload);
       const phase1Duration = Date.now() - phase1StartTime;
+      
+      // Record Phase 1 duration in performance metrics (Requirement 8.1)
+      const performanceMetrics = getPerformanceMetrics();
+      const isSlow = performanceMetrics.recordPhase1Duration(phase1Duration);
+      
+      // Log warning if Phase 1 exceeds 100ms threshold (Requirement 8.2)
+      if (isSlow) {
+        request.log.warn({
+          phase: 'phase1',
+          durationMs: phase1Duration,
+          threshold: 100,
+          workerName: payload.workerName || 'default',
+          subject: payload.subject.substring(0, 50),
+          from: payload.from,
+        }, `Phase 1 exceeded 100ms threshold: ${phase1Duration}ms`);
+      }
       
       // Log Phase 1 processing time (Requirement 1.1)
       request.log.info({

@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { authMiddleware } from '../middleware/auth.js';
 import { getAsyncTaskProcessor } from '../services/async-task-processor.instance.js';
 import { getRuleCache } from '../services/rule-cache.instance.js';
+import { getPerformanceMetrics } from '../services/performance-metrics.js';
 
 /**
  * Register admin routes
@@ -89,6 +90,49 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       });
     } catch (error) {
       request.log.error(error, 'Error fetching rule cache stats');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/admin/metrics
+   * Get Phase 1 performance metrics
+   * 
+   * Returns average Phase 1 time, p95 Phase 1 time, requests per second
+   * 
+   * Requirement: 8.3
+   */
+  fastify.get('/metrics', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const metrics = getPerformanceMetrics();
+      const summary = metrics.getSummary();
+      const config = metrics.getConfig();
+
+      return reply.send({
+        status: 'ok',
+        phase1: {
+          averageMs: summary.averageDurationMs,
+          p95Ms: summary.p95DurationMs,
+          p99Ms: summary.p99DurationMs,
+          minMs: summary.minDurationMs,
+          maxMs: summary.maxDurationMs,
+        },
+        performance: {
+          totalRequests: summary.totalRequests,
+          slowRequestCount: summary.slowRequestCount,
+          targetMetPercent: summary.targetMetPercent,
+          requestsPerSecond: summary.requestsPerSecond,
+        },
+        config: {
+          maxSamples: config.maxSamples,
+          slowThresholdMs: config.slowThresholdMs,
+          rpsWindowMs: config.rpsWindowMs,
+          sampleCount: metrics.getSampleCount(),
+        },
+        timestamp: summary.timestamp,
+      });
+    } catch (error) {
+      request.log.error(error, 'Error fetching performance metrics');
       return reply.status(500).send({ error: 'Internal error' });
     }
   });

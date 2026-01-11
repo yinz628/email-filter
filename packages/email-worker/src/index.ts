@@ -29,11 +29,24 @@ export interface Env {
   MONITORING_CACHE?: KVNamespace;
 }
 
-/** Debug logger - only logs when DEBUG_LOGGING is enabled */
-function debugLog(env: Env, ...args: unknown[]): void {
+/** 
+ * Debug logger - only logs when DEBUG_LOGGING is enabled
+ * Optimized to skip string construction when disabled (Requirements: 9.4)
+ */
+function debugLog(env: Env, message: string | (() => string)): void {
   if (env.DEBUG_LOGGING === 'true') {
-    console.log(...args);
+    // Only evaluate the message if logging is enabled
+    const msg = typeof message === 'function' ? message() : message;
+    console.log(msg);
   }
+}
+
+/**
+ * Check if debug logging is enabled
+ * Use this to guard expensive debug operations
+ */
+function isDebugEnabled(env: Env): boolean {
+  return env.DEBUG_LOGGING === 'true';
 }
 
 /** Webhook payload sent to VPS API */
@@ -86,17 +99,84 @@ const MAX_SYNC_BATCH_SIZE = 50;
 const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
 /**
+ * Build minimal webhook payload by excluding null/undefined fields
+ * Optimized for minimal payload size (Requirements: 9.1, 9.2)
+ */
+export function buildMinimalPayload(
+  from: string,
+  to: string,
+  subject: string,
+  messageId: string,
+  workerName?: string
+): EmailWebhookPayload {
+  // Build payload with only defined fields
+  const payload: EmailWebhookPayload = {
+    from,
+    to,
+    subject,
+    messageId,
+    timestamp: Date.now(),
+  };
+  
+  // Only add workerName if it's defined and non-empty
+  if (workerName) {
+    payload.workerName = workerName;
+  }
+  
+  return payload;
+}
+
+/** Cached URL object to avoid repeated parsing (Requirements: 11.3) */
+let cachedApiUrl: { urlString: string; parsed: URL } | null = null;
+
+/**
+ * Get cached parsed URL object
+ * Avoids repeated URL parsing for the same URL string
+ * Requirements: 11.3 - Cache parsed URL for reuse
+ */
+export function getCachedUrl(urlString: string): URL {
+  if (cachedApiUrl && cachedApiUrl.urlString === urlString) {
+    return cachedApiUrl.parsed;
+  }
+  const parsed = new URL(urlString);
+  cachedApiUrl = { urlString, parsed };
+  return parsed;
+}
+
+/**
+ * Reset the URL cache (for testing purposes)
+ */
+export function resetUrlCache(): void {
+  cachedApiUrl = null;
+}
+
+/**
  * Extract sender email from the "from" header
  * Handles formats like "Name <email@example.com>" or plain "email@example.com"
+ * Optimized for performance using indexOf instead of regex (Requirements: 9.3)
  */
-function extractEmail(from: string): string {
-  const match = from.match(/<([^>]+)>/);
-  return match ? match[1] : from;
+export function extractEmail(from: string): string {
+  // Fast path: check for angle brackets using indexOf (faster than regex)
+  const startIdx = from.indexOf('<');
+  if (startIdx === -1) {
+    // No angle brackets, return as-is
+    return from;
+  }
+  
+  const endIdx = from.indexOf('>', startIdx + 1);
+  if (endIdx === -1) {
+    // Malformed, return original
+    return from;
+  }
+  
+  // Extract email between angle brackets
+  return from.substring(startIdx + 1, endIdx);
 }
 
 /**
  * Get the VPS API base URL for campaign tracking
  * Derives from VPS_API_URL by removing the /api/webhook/email path
+ * Requirements: 11.3 - Use cached URL to avoid repeated parsing
  */
 function getVpsApiBaseUrl(env: Env): string | null {
   if (env.VPS_API_BASE_URL) {
@@ -107,10 +187,10 @@ function getVpsApiBaseUrl(env: Env): string | null {
     return null;
   }
   
-  // Try to derive base URL from VPS_API_URL
+  // Try to derive base URL from VPS_API_URL using cached URL parsing
   // e.g., "https://example.com/api/webhook/email" -> "https://example.com"
   try {
-    const url = new URL(env.VPS_API_URL);
+    const url = getCachedUrl(env.VPS_API_URL);
     return `${url.protocol}//${url.host}`;
   } catch {
     return null;
@@ -158,6 +238,7 @@ async function cacheMonitoringHit(
  * This is fire-and-forget - errors are logged but don't block email flow
  * 
  * Requirements: 8.1, 8.2, 8.4
+ * Requirements: 11.1 - HTTP keep-alive headers
  */
 export async function trackMonitoringHit(
   payload: MonitoringHitPayload,
@@ -172,8 +253,11 @@ export async function trackMonitoringHit(
   const hitUrl = `${baseUrl}/api/monitoring/hit`;
 
   try {
-    debugLog(env, `[DEBUG] Sending monitoring hit: ${hitUrl}`);
-    debugLog(env, `[DEBUG] Monitoring payload: ${JSON.stringify(payload)}`);
+    // Use lazy evaluation for expensive JSON.stringify (Requirements: 9.4)
+    if (isDebugEnabled(env)) {
+      debugLog(env, `[DEBUG] Sending monitoring hit: ${hitUrl}`);
+      debugLog(env, () => `[DEBUG] Monitoring payload: ${JSON.stringify(payload)}`);
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
@@ -183,6 +267,7 @@ export async function trackMonitoringHit(
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+        'Connection': 'keep-alive', // Requirements: 11.1 - HTTP keep-alive
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -249,6 +334,7 @@ export async function syncCachedMonitoringHits(env: Env): Promise<{ synced: numb
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+            'Connection': 'keep-alive', // Requirements: 11.1 - HTTP keep-alive
           },
           body: JSON.stringify(cachedHit.payload),
           signal: controller.signal,
@@ -303,6 +389,7 @@ export async function syncCachedMonitoringHits(env: Env): Promise<{ synced: numb
  * This is fire-and-forget - errors are logged but don't block email flow
  * 
  * Requirements: 8.1, 8.3
+ * Requirements: 11.1 - HTTP keep-alive headers
  */
 export async function trackCampaignEmail(
   payload: CampaignTrackPayload,
@@ -317,8 +404,11 @@ export async function trackCampaignEmail(
   const trackUrl = `${baseUrl}/api/campaign/track`;
 
   try {
-    debugLog(env, `[DEBUG] Tracking campaign email: ${trackUrl}`);
-    debugLog(env, `[DEBUG] Campaign payload: ${JSON.stringify(payload)}`);
+    // Use lazy evaluation for expensive JSON.stringify (Requirements: 9.4)
+    if (isDebugEnabled(env)) {
+      debugLog(env, `[DEBUG] Tracking campaign email: ${trackUrl}`);
+      debugLog(env, () => `[DEBUG] Campaign payload: ${JSON.stringify(payload)}`);
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout (shorter than filter decision)
@@ -328,6 +418,7 @@ export async function trackCampaignEmail(
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+        'Connection': 'keep-alive', // Requirements: 11.1 - HTTP keep-alive
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -347,26 +438,40 @@ export async function trackCampaignEmail(
   }
 }
 
+/** API request timeout in milliseconds (Requirements: 10.1) */
+export const API_TIMEOUT_MS = 4000;
+
 /**
  * Call VPS API to get filter decision
  * Returns null if VPS is unreachable or returns an error
+ * 
+ * Requirements: 10.1 - Timeout set to 4 seconds
+ * Requirements: 10.3 - Immediate fallback on timeout
+ * Requirements: 10.4 - Log timeout events with API URL and duration
  */
 async function getFilterDecision(
   payload: EmailWebhookPayload,
   env: Env
 ): Promise<FilterDecision | null> {
+  const startTime = Date.now();
+  
   try {
-    debugLog(env, `[DEBUG] Calling VPS API: ${env.VPS_API_URL}`);
-    debugLog(env, `[DEBUG] Payload: ${JSON.stringify(payload)}`);
+    // Use lazy evaluation for expensive JSON.stringify (Requirements: 9.4)
+    if (isDebugEnabled(env)) {
+      debugLog(env, `[DEBUG] Calling VPS API: ${env.VPS_API_URL}`);
+      debugLog(env, () => `[DEBUG] Payload: ${JSON.stringify(payload)}`);
+    }
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    // Requirements: 10.1 - Timeout reduced from 5 seconds to 4 seconds
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     const response = await fetch(env.VPS_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${env.VPS_API_TOKEN}`,
+        'Connection': 'keep-alive', // Requirements: 11.1 - HTTP keep-alive
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -383,11 +488,21 @@ async function getFilterDecision(
     }
 
     const result = await response.json() as FilterDecision;
-    debugLog(env, `[DEBUG] Filter decision: ${JSON.stringify(result)}`);
+    if (isDebugEnabled(env)) {
+      debugLog(env, () => `[DEBUG] Filter decision: ${JSON.stringify(result)}`);
+    }
     return result;
-  } catch (error) {
-    // VPS unreachable - will fallback to direct forwarding
-    console.error('VPS API error:', error);
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    
+    // Requirements: 10.4 - Log timeout events with API URL and duration
+    if (error.name === 'AbortError') {
+      console.error(`[TIMEOUT] VPS API request timed out after ${duration}ms | URL: ${env.VPS_API_URL} | Timeout: ${API_TIMEOUT_MS}ms`);
+    } else {
+      // VPS unreachable - will fallback to direct forwarding
+      console.error(`[ERROR] VPS API error after ${duration}ms | URL: ${env.VPS_API_URL} | Error: ${error.message || error}`);
+    }
+    
     return null;
   }
 }
@@ -496,21 +611,17 @@ export default {
     const subject = message.headers.get('subject') || '';
     const messageId = message.headers.get('message-id') || crypto.randomUUID();
 
-    debugLog(env, `[DEBUG] ========== Email Received ==========`);
-    debugLog(env, `[DEBUG] From: ${from}`);
-    debugLog(env, `[DEBUG] To: ${to}`);
-    debugLog(env, `[DEBUG] Subject: ${subject}`);
-    debugLog(env, `[DEBUG] Message-ID: ${messageId}`);
+    // Use lazy evaluation for debug logs to skip string construction when disabled
+    if (isDebugEnabled(env)) {
+      debugLog(env, '[DEBUG] ========== Email Received ==========');
+      debugLog(env, `[DEBUG] From: ${from}`);
+      debugLog(env, `[DEBUG] To: ${to}`);
+      debugLog(env, `[DEBUG] Subject: ${subject}`);
+      debugLog(env, `[DEBUG] Message-ID: ${messageId}`);
+    }
 
-    // Build minimal webhook payload
-    const payload: EmailWebhookPayload = {
-      from,
-      to,
-      subject,
-      messageId,
-      timestamp: Date.now(),
-      workerName: env.WORKER_NAME,
-    };
+    // Build minimal webhook payload (Requirements: 9.1, 9.2)
+    const payload = buildMinimalPayload(from, to, subject, messageId, env.WORKER_NAME);
 
     // Campaign analytics and signal monitoring are now handled by VPS API
     // in the main webhook endpoint, eliminating redundant API calls

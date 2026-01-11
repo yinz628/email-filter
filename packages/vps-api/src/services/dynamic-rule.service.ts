@@ -7,6 +7,8 @@
  * - Automatically creates dynamic rules for spam detection
  * - Manages rule expiration and cleanup
  * - Updates lastHitAt timestamps when rules are matched
+ * 
+ * Requirements: 3.1, 3.2 - Uses prepared statements for better performance
  */
 
 import type { Database } from 'better-sqlite3';
@@ -19,6 +21,8 @@ import { DEFAULT_DYNAMIC_CONFIG } from '@email-filter/shared';
 import { RuleRepository } from '../db/rule-repository.js';
 import { LogRepository } from '../db/log-repository.js';
 import { getRuleCache } from './rule-cache.instance.js';
+import { getDynamicPatternCache } from './dynamic-pattern-cache.instance.js';
+import { getPreparedStatementManager } from '../db/prepared-statements.js';
 import type { FilterResult } from './filter.service.js';
 
 /**
@@ -69,9 +73,13 @@ export class DynamicRuleService {
    * 
    * Requirements 4.1, 6.1: Supports timeSpanThresholdMinutes configuration
    * If not present in database, uses default value of 3 minutes
+   * Requirements 3.1: Uses prepared statements for better performance
    */
   getConfig(): DynamicConfig {
-    const stmt = this.db.prepare('SELECT key, value FROM dynamic_config');
+    const stmtManager = getPreparedStatementManager();
+    const stmt = stmtManager.isInitialized()
+      ? stmtManager.get('GET_DYNAMIC_CONFIG')
+      : this.db.prepare('SELECT key, value FROM dynamic_config');
     const rows = stmt.all() as { key: string; value: string }[];
 
     if (rows.length === 0) {
@@ -126,6 +134,7 @@ export class DynamicRuleService {
    * Update the dynamic configuration
    * 
    * Requirements 4.1: Supports saving timeSpanThresholdMinutes configuration
+   * Requirements 3.1: Uses prepared statements for better performance
    */
   updateConfig(config: Partial<DynamicConfig>): DynamicConfig {
     const currentConfig = this.getConfig();
@@ -141,10 +150,13 @@ export class DynamicRuleService {
       ['lastHitThresholdHours', String(newConfig.lastHitThresholdHours)],
     ];
 
-    const upsertStmt = this.db.prepare(
-      `INSERT INTO dynamic_config (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-    );
+    const stmtManager = getPreparedStatementManager();
+    const upsertStmt = stmtManager.isInitialized()
+      ? stmtManager.get('UPSERT_DYNAMIC_CONFIG')
+      : this.db.prepare(
+          `INSERT INTO dynamic_config (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        );
 
     for (const [key, value] of entries) {
       upsertStmt.run(key, value);
@@ -204,20 +216,65 @@ export class DynamicRuleService {
   }
 
   /**
-   * Generate a hash for a subject string
+   * FNV-1a hash constants for 32-bit hash
+   * FNV-1a is a fast, non-cryptographic hash function
+   * Requirements: 3.3 - Use fast non-cryptographic hash function
+   */
+  private static readonly FNV_PRIME = 0x01000193;
+  private static readonly FNV_OFFSET_BASIS = 0x811c9dc5;
+
+  /**
+   * Generate a hash for a subject string using FNV-1a algorithm
    * Used for efficient grouping and lookup
+   * 
+   * Requirements: 3.3 - Use fast non-cryptographic hash function (FNV-1a)
+   * FNV-1a provides:
+   * - O(n) time complexity where n is string length
+   * - Good distribution for hash table lookups
+   * - Fast computation without cryptographic overhead
+   * 
+   * @param subject - The email subject to hash
+   * @returns Hexadecimal string representation of the hash
    */
   private hashSubject(subject: string): string {
     // Normalize subject before hashing to group similar subjects
     const normalized = this.normalizeSubject(subject).toLowerCase();
-    // Use a simple string hash
-    let hash = 0;
+    
+    // FNV-1a hash algorithm
+    let hash = DynamicRuleService.FNV_OFFSET_BASIS;
     for (let i = 0; i < normalized.length; i++) {
       const char = normalized.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+      // XOR the hash with the byte
+      hash ^= char;
+      // Multiply by the FNV prime
+      // Use Math.imul for proper 32-bit multiplication
+      hash = Math.imul(hash, DynamicRuleService.FNV_PRIME);
     }
-    return hash.toString(16);
+    
+    // Convert to unsigned 32-bit integer and then to hex string
+    return (hash >>> 0).toString(16);
+  }
+
+  /**
+   * Static method to compute FNV-1a hash for testing purposes
+   * Exposed for property-based testing of hash performance
+   * 
+   * Requirements: 3.3 - Hash calculation within 1ms for subjects up to 1000 chars
+   * 
+   * @param subject - The string to hash
+   * @returns Hexadecimal string representation of the hash
+   */
+  static computeFnv1aHash(subject: string): string {
+    const normalized = subject.toLowerCase().trim();
+    
+    let hash = DynamicRuleService.FNV_OFFSET_BASIS;
+    for (let i = 0; i < normalized.length; i++) {
+      const char = normalized.charCodeAt(i);
+      hash ^= char;
+      hash = Math.imul(hash, DynamicRuleService.FNV_PRIME);
+    }
+    
+    return (hash >>> 0).toString(16);
   }
 
   /**
@@ -234,6 +291,8 @@ export class DynamicRuleService {
    * - Only consider emails within the configured time window
    * - Create rule only when time span is within threshold
    * 
+   * Requirements 3.1, 3.2: Uses prepared statements for better performance
+   * 
    * @param subject - The email subject to track
    * @param receivedAt - When the email was received
    * @returns The created dynamic rule if threshold was exceeded and time span is within limit, null otherwise
@@ -249,34 +308,41 @@ export class DynamicRuleService {
     const subjectHash = this.hashSubject(subject);
     const receivedAtStr = receivedAt.toISOString();
 
-    // Insert the subject tracking record
-    const insertStmt = this.db.prepare(
-      `INSERT INTO email_subject_tracker (subject_hash, subject, received_at)
-       VALUES (?, ?, ?)`
-    );
+    // Requirements 3.1: Use prepared statement for insert
+    const stmtManager = getPreparedStatementManager();
+    const insertStmt = stmtManager.isInitialized() 
+      ? stmtManager.get('INSERT_SUBJECT_TRACKER')
+      : this.db.prepare(
+          `INSERT INTO email_subject_tracker (subject_hash, subject, received_at)
+           VALUES (?, ?, ?)`
+        );
     insertStmt.run(subjectHash, subject, receivedAtStr);
 
     // Requirements 2.1: Only consider emails within the configured time window
     const windowStart = new Date(receivedAt.getTime() - config.timeWindowMinutes * 60 * 1000);
     const windowStartStr = windowStart.toISOString();
 
-    // Requirements 1.1: First count the number of emails with the same subject
-    const countStmt = this.db.prepare(
-      `SELECT COUNT(*) as count FROM email_subject_tracker
-       WHERE subject_hash = ? AND received_at >= ?`
-    );
+    // Requirements 1.1, 3.1: First count the number of emails with the same subject using prepared statement
+    const countStmt = stmtManager.isInitialized()
+      ? stmtManager.get('COUNT_SUBJECTS')
+      : this.db.prepare(
+          `SELECT COUNT(*) as count FROM email_subject_tracker
+           WHERE subject_hash = ? AND received_at >= ?`
+        );
     const countResult = countStmt.get(subjectHash, windowStartStr) as { count: number };
     const count = countResult?.count || 0;
 
     // Requirements 1.2: When count reaches threshold, calculate time span
     if (count >= config.thresholdCount) {
-      // Get the first and Nth (threshold) email timestamps within the window
-      const timestampsStmt = this.db.prepare(
-        `SELECT received_at FROM email_subject_tracker
-         WHERE subject_hash = ? AND received_at >= ?
-         ORDER BY received_at ASC
-         LIMIT ?`
-      );
+      // Requirements 3.1: Use prepared statement for timestamps query
+      const timestampsStmt = stmtManager.isInitialized()
+        ? stmtManager.get('GET_TIMESTAMPS')
+        : this.db.prepare(
+            `SELECT received_at FROM email_subject_tracker
+             WHERE subject_hash = ? AND received_at >= ?
+             ORDER BY received_at ASC
+             LIMIT ?`
+          );
       const timestamps = timestampsStmt.all(subjectHash, windowStartStr, config.thresholdCount) as { received_at: string }[];
       
       if (timestamps.length >= config.thresholdCount) {
@@ -316,6 +382,10 @@ export class DynamicRuleService {
           const ruleCache = getRuleCache();
           ruleCache.invalidateAll();
           
+          // Requirements 4.2: Add pattern to in-memory cache immediately
+          const patternCache = getDynamicPatternCache();
+          patternCache.add(normalizedSubject);
+          
           // Clean up old tracking records for this subject
           this.cleanupSubjectTracker(subjectHash, windowStart);
 
@@ -338,6 +408,8 @@ export class DynamicRuleService {
    * - Synchronous rule creation affects current email
    * - Returns detection latency and forwarded email count
    * 
+   * Requirements 3.1, 3.2: Uses prepared statements for better performance
+   * 
    * @param subject - The email subject to track
    * @param receivedAt - When the email was received
    * @returns DynamicRuleCreationResult with rule and metrics
@@ -353,34 +425,41 @@ export class DynamicRuleService {
     const subjectHash = this.hashSubject(subject);
     const receivedAtStr = receivedAt.toISOString();
 
-    // Insert the subject tracking record
-    const insertStmt = this.db.prepare(
-      `INSERT INTO email_subject_tracker (subject_hash, subject, received_at)
-       VALUES (?, ?, ?)`
-    );
+    // Requirements 3.1: Use prepared statement for insert
+    const stmtManager = getPreparedStatementManager();
+    const insertStmt = stmtManager.isInitialized()
+      ? stmtManager.get('INSERT_SUBJECT_TRACKER')
+      : this.db.prepare(
+          `INSERT INTO email_subject_tracker (subject_hash, subject, received_at)
+           VALUES (?, ?, ?)`
+        );
     insertStmt.run(subjectHash, subject, receivedAtStr);
 
     // Only consider emails within the configured time window
     const windowStart = new Date(receivedAt.getTime() - config.timeWindowMinutes * 60 * 1000);
     const windowStartStr = windowStart.toISOString();
 
-    // First count the number of emails with the same subject
-    const countStmt = this.db.prepare(
-      `SELECT COUNT(*) as count FROM email_subject_tracker
-       WHERE subject_hash = ? AND received_at >= ?`
-    );
+    // Requirements 3.1: Use prepared statement for count query
+    const countStmt = stmtManager.isInitialized()
+      ? stmtManager.get('COUNT_SUBJECTS')
+      : this.db.prepare(
+          `SELECT COUNT(*) as count FROM email_subject_tracker
+           WHERE subject_hash = ? AND received_at >= ?`
+        );
     const countResult = countStmt.get(subjectHash, windowStartStr) as { count: number };
     const count = countResult?.count || 0;
 
     // When count reaches threshold, calculate time span
     if (count >= config.thresholdCount) {
-      // Get the first and Nth (threshold) email timestamps within the window
-      const timestampsStmt = this.db.prepare(
-        `SELECT received_at FROM email_subject_tracker
-         WHERE subject_hash = ? AND received_at >= ?
-         ORDER BY received_at ASC
-         LIMIT ?`
-      );
+      // Requirements 3.1: Use prepared statement for timestamps query
+      const timestampsStmt = stmtManager.isInitialized()
+        ? stmtManager.get('GET_TIMESTAMPS')
+        : this.db.prepare(
+            `SELECT received_at FROM email_subject_tracker
+             WHERE subject_hash = ? AND received_at >= ?
+             ORDER BY received_at ASC
+             LIMIT ?`
+          );
       const timestamps = timestampsStmt.all(subjectHash, windowStartStr, config.thresholdCount) as { received_at: string }[];
       
       if (timestamps.length >= config.thresholdCount) {
@@ -429,6 +508,10 @@ export class DynamicRuleService {
           const ruleCache = getRuleCache();
           ruleCache.invalidateAll();
           
+          // Requirements 4.2: Add pattern to in-memory cache immediately
+          const patternCache = getDynamicPatternCache();
+          patternCache.add(normalizedSubject);
+          
           // Log system event for dynamic rule creation - Requirements 6.1
           const logRepository = new LogRepository(this.db);
           logRepository.create(
@@ -465,16 +548,33 @@ export class DynamicRuleService {
   /**
    * Find an existing dynamic rule that matches a subject
    * Checks both:
-   * 1. Exact match (pattern === subject)
-   * 2. Contains match (subject contains pattern OR pattern contains subject)
+   * 1. In-memory pattern cache first (O(1) for exact match)
+   * 2. Exact match (pattern === subject)
+   * 3. Contains match (subject contains pattern OR pattern contains subject)
+   * 
+   * Requirements: 4.2, 4.3 - Check in-memory Set first
+   * Requirements: 3.1, 3.2 - Uses prepared statements for better performance
    */
   private findDynamicRuleBySubject(subject: string): FilterRule | null {
+    // Requirements 4.3: Check in-memory pattern cache first
+    const patternCache = getDynamicPatternCache();
+    
+    // Quick check: if no matching pattern in cache, no need to query DB
+    if (patternCache.isInitialized() && !patternCache.hasMatchingPattern(subject)) {
+      return null;
+    }
+    
+    // Requirements 3.1: Use prepared statements for database queries
+    const stmtManager = getPreparedStatementManager();
+    
     // First try exact match for better performance
-    const exactStmt = this.db.prepare(
-      `SELECT * FROM filter_rules 
-       WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
-       LIMIT 1`
-    );
+    const exactStmt = stmtManager.isInitialized()
+      ? stmtManager.get('FIND_DYNAMIC_RULE_EXACT')
+      : this.db.prepare(
+          `SELECT * FROM filter_rules 
+           WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
+           LIMIT 1`
+        );
     const exactResult = exactStmt.get(subject) as {
       id: string;
       category: string;
@@ -493,10 +593,12 @@ export class DynamicRuleService {
 
     // Check if any existing rule's pattern is contained in this subject
     // or if this subject is contained in any existing rule's pattern
-    const allDynamicStmt = this.db.prepare(
-      `SELECT * FROM filter_rules 
-       WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'`
-    );
+    const allDynamicStmt = stmtManager.isInitialized()
+      ? stmtManager.get('FIND_ALL_DYNAMIC_RULES')
+      : this.db.prepare(
+          `SELECT * FROM filter_rules 
+           WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'`
+        );
     const allRules = allDynamicStmt.all() as {
       id: string;
       category: string;
@@ -555,12 +657,16 @@ export class DynamicRuleService {
 
   /**
    * Clean up old subject tracking records for a specific subject
+   * Requirements: 3.1 - Uses prepared statements for better performance
    */
   private cleanupSubjectTracker(subjectHash: string, olderThan: Date): void {
-    const stmt = this.db.prepare(
-      `DELETE FROM email_subject_tracker
-       WHERE subject_hash = ? AND received_at < ?`
-    );
+    const stmtManager = getPreparedStatementManager();
+    const stmt = stmtManager.isInitialized()
+      ? stmtManager.get('CLEANUP_SUBJECT_TRACKER')
+      : this.db.prepare(
+          `DELETE FROM email_subject_tracker
+           WHERE subject_hash = ? AND received_at < ?`
+        );
     stmt.run(subjectHash, olderThan.toISOString());
   }
 
@@ -620,12 +726,17 @@ export class DynamicRuleService {
     const expiredRules = this.findExpiredDynamicRules(config.expirationHours, config.lastHitThresholdHours);
     const deletedIds: string[] = [];
     const deletedPatterns: string[] = [];
+    
+    // Get pattern cache for removing deleted patterns
+    const patternCache = getDynamicPatternCache();
 
     for (const rule of expiredRules) {
       const deleted = this.ruleRepository.delete(rule.id);
       if (deleted) {
         deletedIds.push(rule.id);
         deletedPatterns.push(rule.pattern);
+        // Remove pattern from cache when rule is deleted
+        patternCache.remove(rule.pattern);
       }
     }
 

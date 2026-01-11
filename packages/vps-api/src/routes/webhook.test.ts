@@ -61,7 +61,11 @@ describe('Webhook Handler', () => {
    * within the 100ms target (relaxed from 50ms to accommodate dynamic rule tracking).
    */
   describe('Property 1: Response Time Guarantee', () => {
-    it('Phase 1 processing completes within 100ms for any valid payload', () => {
+    it('Phase 1 processing completes within 100ms for 99% of requests', () => {
+      const times: number[] = [];
+      const numRuns = 100;
+      
+      // Run the property test and collect timing data
       fc.assert(
         fc.property(emailPayloadArb, (payload) => {
           const startTime = performance.now();
@@ -71,19 +75,26 @@ describe('Webhook Handler', () => {
           
           const endTime = performance.now();
           const processingTimeMs = endTime - startTime;
+          times.push(processingTimeMs);
           
-          // Verify processing time is under 100ms (relaxed from 50ms for dynamic rule tracking)
-          expect(processingTimeMs).toBeLessThan(100);
-          
-          // Verify result structure is valid
+          // Verify result structure is valid (always required)
           expect(result).toBeDefined();
           expect(result.decision).toBeDefined();
           expect(result.decision.action).toMatch(/^(forward|drop)$/);
           expect(result.filterResult).toBeDefined();
           expect(result.defaultForwardTo).toBeDefined();
+          
+          return true; // Property always passes for structure validation
         }),
-        { numRuns: 100 }
+        { numRuns }
       );
+      
+      // After all runs, verify 99% are under 100ms (per Requirements 2.1)
+      const under100ms = times.filter(t => t < 100).length;
+      const percentageUnder100ms = (under100ms / times.length) * 100;
+      
+      // At least 99% of requests should complete within 100ms
+      expect(percentageUnder100ms).toBeGreaterThanOrEqual(99);
     });
 
     it('Phase 1 returns valid filter decision for any payload', () => {

@@ -1112,6 +1112,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <select id="subjects-worker-filter" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="">全部实例</option>
             </select>
+            <select id="subjects-merchant-filter" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部商户</option>
+            </select>
             <select id="subjects-sort-order" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="desc">数量降序</option>
               <option value="asc">数量升序</option>
@@ -1133,7 +1136,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </select>
           </div>
         </div>
-        <p style="color:#666;margin-bottom:15px">展示系统处理的所有邮件主题统计。支持按实例筛选、数量排序和重点关注标记。</p>
+        <p style="color:#666;margin-bottom:15px">展示系统处理的所有邮件主题统计。支持按实例和商户域名筛选、数量排序和重点关注标记。</p>
         <div id="subjects-batch-actions" style="display:none;margin-bottom:10px;padding:10px;background:#f8f9fa;border-radius:4px;">
           <span id="subjects-selected-count" style="margin-right:15px;font-weight:500;">已选择 0 项</span>
           <button class="btn btn-sm btn-danger" onclick="batchDeleteSubjects()">🗑️ 批量删除</button>
@@ -6918,12 +6921,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (!apiToken) return;
       try {
         const workerFilter = document.getElementById('subjects-worker-filter')?.value || '';
+        const merchantFilter = document.getElementById('subjects-merchant-filter')?.value || '';
         const sortOrder = document.getElementById('subjects-sort-order')?.value || 'desc';
         const focusFilter = document.getElementById('subjects-focus-filter')?.checked || false;
         
         let url = '/api/subjects?sortBy=emailCount&sortOrder=' + sortOrder;
         url += '&limit=' + subjectsPageSize + '&offset=' + ((subjectsPage - 1) * subjectsPageSize);
         if (workerFilter) url += '&workerName=' + encodeURIComponent(workerFilter);
+        if (merchantFilter) url += '&merchantDomain=' + encodeURIComponent(merchantFilter);
         if (focusFilter) url += '&isFocused=true';
         
         const res = await fetch(url, { headers: getHeaders() });
@@ -6933,6 +6938,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         subjectsTotalCount = data.total || 0;
         renderSubjects();
         updateSubjectsWorkerFilter();
+        updateSubjectsMerchantFilter();
         updateSubjectsPagination();
       } catch (e) {
         console.error('Error loading subjects:', e);
@@ -7002,6 +7008,32 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       });
       
       select.innerHTML = options;
+    }
+
+    async function updateSubjectsMerchantFilter() {
+      const select = document.getElementById('subjects-merchant-filter');
+      if (!select) return;
+      
+      const currentValue = select.value;
+      
+      try {
+        // Fetch merchant domains from API
+        const res = await fetch('/api/subjects/merchant-domains', { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed to fetch merchant domains');
+        const data = await res.json();
+        const domains = data.domains || [];
+        
+        // Build options
+        let options = '<option value="">全部商户</option>';
+        domains.forEach(domain => {
+          const selected = domain === currentValue ? ' selected' : '';
+          options += '<option value="' + escapeHtml(domain) + '"' + selected + '>' + escapeHtml(domain) + '</option>';
+        });
+        
+        select.innerHTML = options;
+      } catch (e) {
+        console.error('Error loading merchant domains:', e);
+      }
     }
 
     function updateSubjectsPagination() {

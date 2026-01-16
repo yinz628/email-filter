@@ -58,6 +58,7 @@ export interface WorkerSubjectStat {
  */
 export interface SubjectStatsFilter {
   workerName?: string;
+  merchantDomain?: string;
   isFocused?: boolean;
   sortBy?: 'emailCount' | 'lastSeenAt' | 'firstSeenAt';
   sortOrder?: 'asc' | 'desc';

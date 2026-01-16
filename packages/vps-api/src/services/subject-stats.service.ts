@@ -120,6 +120,7 @@ export class SubjectStatsService {
   getSubjectStats(filter?: SubjectStatsFilter): SubjectStatsList {
     const {
       workerName,
+      merchantDomain,
       isFocused,
       sortBy = 'lastSeenAt',
       sortOrder = 'desc',
@@ -134,6 +135,11 @@ export class SubjectStatsService {
     if (workerName) {
       conditions.push('worker_name = ?');
       params.push(workerName);
+    }
+
+    if (merchantDomain) {
+      conditions.push('merchant_domain = ?');
+      params.push(merchantDomain);
     }
 
     if (isFocused !== undefined) {
@@ -521,5 +527,20 @@ export class SubjectStatsService {
     const result = stmt.run(cutoffDate.toISOString());
 
     return result.changes;
+  }
+
+  /**
+   * Get all unique merchant domains
+   * 
+   * @returns Array of unique merchant domain strings
+   */
+  getMerchantDomains(): string[] {
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT merchant_domain 
+      FROM subject_stats 
+      ORDER BY merchant_domain ASC
+    `);
+    const rows = stmt.all() as Array<{ merchant_domain: string }>;
+    return rows.map(row => row.merchant_domain);
   }
 }

@@ -21,6 +21,7 @@ interface SubjectParams {
 
 interface GetSubjectsQuery {
   workerName?: string;
+  merchantDomain?: string;
   isFocused?: string;
   sortBy?: string;
   sortOrder?: string;
@@ -111,12 +112,17 @@ export async function subjectRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new SubjectStatsService(db);
 
-      const { workerName, isFocused, sortBy, sortOrder, limit, offset } = request.query;
+      const { workerName, merchantDomain, isFocused, sortBy, sortOrder, limit, offset } = request.query;
       const filter: SubjectStatsFilter = {};
 
       // Worker name filter (Requirements: 3.2)
       if (workerName) {
         filter.workerName = workerName;
+      }
+
+      // Merchant domain filter
+      if (merchantDomain) {
+        filter.merchantDomain = merchantDomain;
       }
 
       // Focus filter (Requirements: 5.2)
@@ -151,6 +157,27 @@ export async function subjectRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send(result);
     } catch (error) {
       request.log.error(error, 'Error fetching subject stats');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
+
+  /**
+   * GET /api/subjects/merchant-domains
+   * Get list of all unique merchant domains
+   */
+  fastify.get('/merchant-domains', async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    try {
+      const db = getDatabase();
+      const service = new SubjectStatsService(db);
+
+      const domains = service.getMerchantDomains();
+
+      return reply.send({ domains });
+    } catch (error) {
+      request.log.error(error, 'Error fetching merchant domains');
       return reply.status(500).send({ error: 'Internal error' });
     }
   });

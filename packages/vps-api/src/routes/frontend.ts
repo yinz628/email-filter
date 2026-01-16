@@ -8281,33 +8281,49 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       }
       
-      // Apply logs auto-refresh setting
+      // Apply logs auto-refresh setting (only if not already set in localStorage)
       if (userSettings.logsAutoRefresh !== undefined) {
         const logsSelect = document.getElementById('setting-logs-auto-refresh');
         if (logsSelect) {
           logsSelect.value = userSettings.logsAutoRefresh ? 'true' : 'false';
         }
-        // Also apply to the actual auto-refresh checkbox
-        const logsCheckbox = document.getElementById('logs-auto-refresh');
-        if (logsCheckbox && userSettings.logsAutoRefresh) {
-          logsCheckbox.checked = true;
-          const interval = parseInt(document.getElementById('logs-refresh-interval')?.value || '60', 10) * 1000;
-          startAutoRefresh('logs', interval);
+        // Check if localStorage has a setting for this - localStorage takes priority
+        const localSettings = JSON.parse(localStorage.getItem('autoRefreshSettings') || '{}');
+        if (!localSettings.logs) {
+          // No local setting, apply server setting
+          const logsCheckbox = document.getElementById('logs-auto-refresh');
+          if (logsCheckbox) {
+            logsCheckbox.checked = userSettings.logsAutoRefresh;
+            if (userSettings.logsAutoRefresh) {
+              const interval = parseInt(document.getElementById('logs-refresh-interval')?.value || '60', 10) * 1000;
+              startAutoRefresh('logs', interval);
+            } else {
+              stopAutoRefresh('logs');
+            }
+          }
         }
       }
       
-      // Apply stats auto-refresh setting
+      // Apply stats auto-refresh setting (only if not already set in localStorage)
       if (userSettings.statsAutoRefresh !== undefined) {
         const statsSelect = document.getElementById('setting-stats-auto-refresh');
         if (statsSelect) {
           statsSelect.value = userSettings.statsAutoRefresh ? 'true' : 'false';
         }
-        // Also apply to the actual auto-refresh checkbox
-        const statsCheckbox = document.getElementById('stats-auto-refresh');
-        if (statsCheckbox && userSettings.statsAutoRefresh) {
-          statsCheckbox.checked = true;
-          const interval = parseInt(document.getElementById('stats-refresh-interval')?.value || '60', 10) * 1000;
-          startAutoRefresh('stats', interval);
+        // Check if localStorage has a setting for this - localStorage takes priority
+        const localSettings = JSON.parse(localStorage.getItem('autoRefreshSettings') || '{}');
+        if (!localSettings.stats) {
+          // No local setting, apply server setting
+          const statsCheckbox = document.getElementById('stats-auto-refresh');
+          if (statsCheckbox) {
+            statsCheckbox.checked = userSettings.statsAutoRefresh;
+            if (userSettings.statsAutoRefresh) {
+              const interval = parseInt(document.getElementById('stats-refresh-interval')?.value || '60', 10) * 1000;
+              startAutoRefresh('stats', interval);
+            } else {
+              stopAutoRefresh('stats');
+            }
+          }
         }
       }
     }

@@ -24,7 +24,8 @@ export type AsyncTaskType =
   | 'log' 
   | 'watch' 
   | 'campaign' 
-  | 'monitoring';
+  | 'monitoring'
+  | 'subject';
 
 /**
  * Data required for async task processing
@@ -101,6 +102,7 @@ const ALL_TASK_TYPES: AsyncTaskType[] = [
   'watch',
   'campaign',
   'monitoring',
+  'subject',
 ];
 
 /**

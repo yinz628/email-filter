@@ -77,11 +77,12 @@ describe('AsyncTaskProcessor', () => {
    * **Validates: Requirements 2.1, 2.2**
    * 
    * *For any* webhook request completing Phase 1, all Phase 2 tasks should be enqueued.
-   * This means enqueueAll() should create exactly 5 tasks (one for each task type).
+   * This means enqueueAll() should create exactly 6 tasks (one for each task type).
    * Note: 'dynamic' was removed - dynamic rule tracking is now in Phase 1 (synchronous)
+   * Note: 'subject' was added for email subject display feature
    */
   describe('Property 2: Task Queue Consistency', () => {
-    it('enqueueAll creates exactly 5 tasks for all task types', () => {
+    it('enqueueAll creates exactly 6 tasks for all task types', () => {
       fc.assert(
         fc.property(asyncTaskDataArb, (data) => {
           // Reset processor for each test
@@ -90,9 +91,9 @@ describe('AsyncTaskProcessor', () => {
           // Enqueue all tasks for a webhook request
           processor.enqueueAll(data);
           
-          // Verify exactly 5 tasks are enqueued (one for each type)
+          // Verify exactly 6 tasks are enqueued (one for each type)
           const queueSize = processor.getQueueSize();
-          expect(queueSize).toBe(5);
+          expect(queueSize).toBe(6);
         }),
         { numRuns: 100 }
       );
@@ -114,13 +115,14 @@ describe('AsyncTaskProcessor', () => {
           
           processor.enqueueAll(data);
           
-          // Verify all 5 types are present (dynamic removed - now in Phase 1)
+          // Verify all 6 types are present (dynamic removed - now in Phase 1, subject added)
           const expectedTypes: AsyncTaskType[] = [
             'stats',
             'log',
             'watch',
             'campaign',
             'monitoring',
+            'subject',
           ];
           
           for (const type of expectedTypes) {
@@ -165,8 +167,8 @@ describe('AsyncTaskProcessor', () => {
               processor.enqueueAll(data);
             }
             
-            // Each enqueueAll adds 5 tasks (dynamic removed - now in Phase 1)
-            const expectedSize = dataArray.length * 5;
+            // Each enqueueAll adds 6 tasks (dynamic removed - now in Phase 1, subject added)
+            const expectedSize = dataArray.length * 6;
             expect(processor.getQueueSize()).toBe(expectedSize);
           }
         ),

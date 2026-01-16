@@ -21,6 +21,7 @@ import type { RuleRepository } from '../db/rule-repository.js';
 import { DynamicRuleService } from './dynamic-rule.service.js';
 import { CampaignAnalyticsService } from './campaign-analytics.service.js';
 import { HitProcessor } from './monitoring/hit-processor.js';
+import { SubjectStatsService } from './subject-stats.service.js';
 import { matchesRuleWebhook } from '@email-filter/shared';
 
 /**
@@ -339,6 +340,37 @@ export async function processMonitoringTasks(
 }
 
 /**
+ * Process subject stats tasks - tracks email subjects for display
+ * 
+ * Requirements: 1.1, 1.2, 1.3, 1.4 - Track subject, sender, workerName from webhook payload
+ * 
+ * @param tasks - Array of subject tasks to process
+ * @param subjectStatsService - Subject stats service for tracking
+ */
+export async function processSubjectTasks(
+  tasks: PendingTask[],
+  subjectStatsService: SubjectStatsService
+): Promise<void> {
+  if (tasks.length === 0) return;
+
+  for (const task of tasks) {
+    const { payload } = task.data;
+    
+    try {
+      subjectStatsService.trackSubject({
+        subject: payload.subject,
+        sender: payload.from,
+        workerName: payload.workerName || 'global',
+        receivedAt: new Date(payload.timestamp).toISOString(),
+      });
+    } catch (error) {
+      // Log error but continue processing other tasks
+      console.error('[processSubjectTasks] Error tracking subject:', error);
+    }
+  }
+}
+
+/**
  * Factory function to create all task processors with dependencies
  * 
  * @param db - Database instance
@@ -358,6 +390,7 @@ export function createTaskProcessors(
   const dynamicRuleService = new DynamicRuleService(db, ruleRepository);
   const campaignAnalyticsService = new CampaignAnalyticsService(db);
   const hitProcessor = new HitProcessor(db);
+  const subjectStatsService = new SubjectStatsService(db);
 
   return {
     stats: (tasks: PendingTask[]) => processStatsTasks(tasks, statsRepository, ruleRepository),
@@ -366,5 +399,6 @@ export function createTaskProcessors(
     dynamic: (tasks: PendingTask[]) => processDynamicTasks(tasks, dynamicRuleService),
     campaign: (tasks: PendingTask[]) => processCampaignTasks(tasks, campaignAnalyticsService),
     monitoring: (tasks: PendingTask[]) => processMonitoringTasks(tasks, hitProcessor),
+    subject: (tasks: PendingTask[]) => processSubjectTasks(tasks, subjectStatsService),
   };
 }

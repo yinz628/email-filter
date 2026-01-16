@@ -30,3 +30,6 @@ export * from './monitoring.js';
 
 // Authentication and user types
 export * from './auth.js';
+
+// Subject stats types
+export * from './subject-stats.js';

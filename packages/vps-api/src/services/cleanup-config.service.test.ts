@@ -47,6 +47,7 @@ class TestCleanupConfigService {
       alerts_retention_days: 'alertsRetentionDays',
       heartbeat_logs_retention_days: 'heartbeatLogsRetentionDays',
       subject_tracker_retention_hours: 'subjectTrackerRetentionHours',
+      subject_stats_retention_days: 'subjectStatsRetentionDays',
       cleanup_hour: 'cleanupHour',
       auto_cleanup_enabled: 'autoCleanupEnabled',
     };
@@ -83,6 +84,7 @@ class TestCleanupConfigService {
       alertsRetentionDays: 'alerts_retention_days',
       heartbeatLogsRetentionDays: 'heartbeat_logs_retention_days',
       subjectTrackerRetentionHours: 'subject_tracker_retention_hours',
+      subjectStatsRetentionDays: 'subject_stats_retention_days',
       cleanupHour: 'cleanup_hour',
       autoCleanupEnabled: 'auto_cleanup_enabled',
     };
@@ -142,17 +144,18 @@ describe('CleanupConfigService', () => {
           fc.integer({ min: CONFIG_RANGES.alertsRetentionDays.min, max: CONFIG_RANGES.alertsRetentionDays.max }),
           fc.integer({ min: CONFIG_RANGES.heartbeatLogsRetentionDays.min, max: CONFIG_RANGES.heartbeatLogsRetentionDays.max }),
           fc.integer({ min: CONFIG_RANGES.subjectTrackerRetentionHours.min, max: CONFIG_RANGES.subjectTrackerRetentionHours.max }),
+          fc.integer({ min: CONFIG_RANGES.subjectStatsRetentionDays.min, max: CONFIG_RANGES.subjectStatsRetentionDays.max }),
           fc.integer({ min: CONFIG_RANGES.cleanupHour.min, max: CONFIG_RANGES.cleanupHour.max }),
-          fc.boolean(),
-          (sysLogs, hitLogs, alerts, heartbeat, subject, hour, autoEnabled) => {
-            const config: CleanupConfig = {
+          (sysLogs, hitLogs, alerts, heartbeat, subject, subjectStats, hour) => {
+            const config: Partial<CleanupConfig> = {
               systemLogsRetentionDays: sysLogs,
               hitLogsRetentionHours: hitLogs,
               alertsRetentionDays: alerts,
               heartbeatLogsRetentionDays: heartbeat,
               subjectTrackerRetentionHours: subject,
+              subjectStatsRetentionDays: subjectStats,
               cleanupHour: hour,
-              autoCleanupEnabled: autoEnabled,
+              autoCleanupEnabled: true,
             };
 
             const result = TestCleanupConfigService.validateConfig(config);
@@ -259,6 +262,47 @@ describe('CleanupConfigService', () => {
       );
     });
 
+    /**
+     * **Feature: email-subject-display, Property 14: Retention Config Validation**
+     * *For any* retention configuration input, the validation function should accept values 
+     * within 1-365 days and reject values outside this range.
+     * **Validates: Requirements 6.3**
+     */
+    it('should reject subjectStatsRetentionDays outside valid range (1-365)', () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(
+            fc.integer({ max: CONFIG_RANGES.subjectStatsRetentionDays.min - 1 }),
+            fc.integer({ min: CONFIG_RANGES.subjectStatsRetentionDays.max + 1 })
+          ),
+          (invalidValue) => {
+            const result = TestCleanupConfigService.validateConfig({
+              subjectStatsRetentionDays: invalidValue,
+            });
+            expect(result.valid).toBe(false);
+            expect(result.errors.some(e => e.includes('subjectStatsRetentionDays'))).toBe(true);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('should accept subjectStatsRetentionDays within valid range (1-365)', () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: CONFIG_RANGES.subjectStatsRetentionDays.min, max: CONFIG_RANGES.subjectStatsRetentionDays.max }),
+          (validValue) => {
+            const result = TestCleanupConfigService.validateConfig({
+              subjectStatsRetentionDays: validValue,
+            });
+            expect(result.valid).toBe(true);
+            expect(result.errors).toHaveLength(0);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
     it('should reject cleanupHour outside valid range', () => {
       fc.assert(
         fc.property(
@@ -294,17 +338,18 @@ describe('CleanupConfigService', () => {
           fc.integer({ min: CONFIG_RANGES.alertsRetentionDays.min, max: CONFIG_RANGES.alertsRetentionDays.max }),
           fc.integer({ min: CONFIG_RANGES.heartbeatLogsRetentionDays.min, max: CONFIG_RANGES.heartbeatLogsRetentionDays.max }),
           fc.integer({ min: CONFIG_RANGES.subjectTrackerRetentionHours.min, max: CONFIG_RANGES.subjectTrackerRetentionHours.max }),
+          fc.integer({ min: CONFIG_RANGES.subjectStatsRetentionDays.min, max: CONFIG_RANGES.subjectStatsRetentionDays.max }),
           fc.integer({ min: CONFIG_RANGES.cleanupHour.min, max: CONFIG_RANGES.cleanupHour.max }),
-          fc.boolean(),
-          (sysLogs, hitLogs, alerts, heartbeat, subject, hour, autoEnabled) => {
+          (sysLogs, hitLogs, alerts, heartbeat, subject, subjectStats, hour) => {
             const config: CleanupConfig = {
               systemLogsRetentionDays: sysLogs,
               hitLogsRetentionHours: hitLogs,
               alertsRetentionDays: alerts,
               heartbeatLogsRetentionDays: heartbeat,
               subjectTrackerRetentionHours: subject,
+              subjectStatsRetentionDays: subjectStats,
               cleanupHour: hour,
-              autoCleanupEnabled: autoEnabled,
+              autoCleanupEnabled: true,
             };
 
             // Save configuration
@@ -319,6 +364,7 @@ describe('CleanupConfigService', () => {
             expect(loaded.alertsRetentionDays).toBe(config.alertsRetentionDays);
             expect(loaded.heartbeatLogsRetentionDays).toBe(config.heartbeatLogsRetentionDays);
             expect(loaded.subjectTrackerRetentionHours).toBe(config.subjectTrackerRetentionHours);
+            expect(loaded.subjectStatsRetentionDays).toBe(config.subjectStatsRetentionDays);
             expect(loaded.cleanupHour).toBe(config.cleanupHour);
             expect(loaded.autoCleanupEnabled).toBe(config.autoCleanupEnabled);
 

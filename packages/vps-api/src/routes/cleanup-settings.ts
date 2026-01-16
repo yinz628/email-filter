@@ -22,6 +22,7 @@ interface UpdateConfigBody {
   alertsRetentionDays?: number;
   heartbeatLogsRetentionDays?: number;
   subjectTrackerRetentionHours?: number;
+  subjectStatsRetentionDays?: number;
   cleanupHour?: number;
   autoCleanupEnabled?: boolean;
 }
@@ -199,6 +200,10 @@ export async function cleanupSettingsRoutes(fastify: FastifyInstance): Promise<v
           subjectTracker: {
             deletedCount: result.subjectTracker.deletedCount,
             cutoffDate: result.subjectTracker.cutoffDate.toISOString(),
+          },
+          subjectStats: {
+            deletedCount: result.subjectStats.deletedCount,
+            cutoffDate: result.subjectStats.cutoffDate.toISOString(),
           },
           totalDeleted: result.totalDeleted,
           durationMs: result.durationMs,

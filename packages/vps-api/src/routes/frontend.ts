@@ -285,6 +285,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('logs')">日志</button>
       <button class="tab" onclick="showTab('stats')">统计信息</button>
       <button class="tab" onclick="showTab('campaign')">营销分析</button>
+      <button class="tab" onclick="showTab('subjects')">📧 邮件主题</button>
       <button class="tab" onclick="showTab('monitoring')">📡 信号监控</button>
       <button class="tab" onclick="showTab('settings')">设置</button>
       <button class="tab admin-only hidden" id="users-tab-btn" onclick="showTab('users')">👥 用户管理</button>
@@ -1094,6 +1095,67 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Subjects Tab -->
+    <div id="subjects-tab" class="tab-content hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">📧 邮件主题统计</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <select id="subjects-worker-filter" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部实例</option>
+            </select>
+            <select id="subjects-sort-order" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="desc">数量降序</option>
+              <option value="asc">数量升序</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="subjects-focus-filter" onchange="loadSubjects()">
+              <span>仅显示关注</span>
+            </label>
+            <button class="btn btn-secondary" onclick="loadSubjects()">🔄 刷新</button>
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+              <input type="checkbox" id="subjects-auto-refresh" onchange="toggleAutoRefresh('subjects')">
+              <span>自动刷新</span>
+            </label>
+            <select id="subjects-refresh-interval" onchange="updateAutoRefreshInterval('subjects')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
+              <option value="30">30秒</option>
+              <option value="60" selected>1分钟</option>
+              <option value="300">5分钟</option>
+            </select>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">展示系统处理的所有邮件主题统计。支持按实例筛选、数量排序和重点关注标记。</p>
+        <div id="subjects-batch-actions" style="display:none;margin-bottom:10px;padding:10px;background:#f8f9fa;border-radius:4px;">
+          <span id="subjects-selected-count" style="margin-right:15px;font-weight:500;">已选择 0 项</span>
+          <button class="btn btn-sm btn-danger" onclick="batchDeleteSubjects()">🗑️ 批量删除</button>
+        </div>
+        <div id="subjects-empty" style="text-align:center;color:#999;padding:40px;display:none;">
+          暂无邮件主题数据
+        </div>
+        <div class="table-wrapper">
+          <table id="subjects-table-container">
+            <thead>
+              <tr>
+                <th style="width:40px;"><input type="checkbox" id="subjects-select-all" onchange="toggleSelectAllSubjects(this.checked)" title="全选/取消全选"></th>
+                <th>邮件主题</th>
+                <th>商户域名</th>
+                <th>Worker 实例</th>
+                <th>邮件数量</th>
+                <th>关注</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="subjects-table"></tbody>
+          </table>
+        </div>
+        <div id="subjects-pagination" style="display:flex;justify-content:center;align-items:center;gap:10px;padding:15px 0;border-top:1px solid #eee;margin-top:10px;">
+          <button class="btn btn-sm btn-secondary" onclick="prevSubjectsPage()" id="subjects-prev-btn" disabled>上一页</button>
+          <span id="subjects-page-info" style="color:#666;font-size:13px;">第 1 页</span>
+          <button class="btn btn-sm btn-secondary" onclick="nextSubjectsPage()" id="subjects-next-btn">下一页</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content hidden">
       <div class="card">
@@ -1221,6 +1283,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <input type="number" id="cleanup-subject-tracker-hours" min="1" max="72" placeholder="24">
             </div>
             <div class="form-group">
+              <label>邮件主题统计保留天数 (1-365)</label>
+              <input type="number" id="cleanup-subject-stats-days" min="1" max="365" placeholder="30">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
               <label>清理执行时间 (0-23时)</label>
               <select id="cleanup-hour">
                 <option value="0">0:00</option>
@@ -1249,13 +1317,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 <option value="23">23:00</option>
               </select>
             </div>
-          </div>
-          <div class="form-group">
-            <label>自动清理</label>
-            <select id="cleanup-auto-enabled">
-              <option value="true">启用</option>
-              <option value="false">禁用</option>
-            </select>
+            <div class="form-group">
+              <label>自动清理</label>
+              <select id="cleanup-auto-enabled">
+                <option value="true">启用</option>
+                <option value="false">禁用</option>
+              </select>
+            </div>
           </div>
         </div>
         
@@ -2138,6 +2206,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'logs') loadLogs();
       if (name === 'stats') loadStats();
       if (name === 'campaign') loadCampaignAnalytics();
+      if (name === 'subjects') loadSubjects();
       if (name === 'monitoring') loadMonitoringData();
       if (name === 'settings') { loadSettings(); loadBackups(); }
       if (name === 'users') loadUsers();
@@ -3197,7 +3266,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       'hit_logs': '命中日志',
       'alerts': '告警记录',
       'heartbeat_logs': '心跳日志',
-      'email_subject_tracker': '主题追踪'
+      'email_subject_tracker': '主题追踪',
+      'subject_stats': '邮件主题统计'
     };
     
     /**
@@ -3218,6 +3288,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             document.getElementById('cleanup-alerts-days').value = config.alertsRetentionDays;
             document.getElementById('cleanup-heartbeat-days').value = config.heartbeatLogsRetentionDays;
             document.getElementById('cleanup-subject-tracker-hours').value = config.subjectTrackerRetentionHours;
+            document.getElementById('cleanup-subject-stats-days').value = config.subjectStatsRetentionDays;
             document.getElementById('cleanup-hour').value = config.cleanupHour;
             document.getElementById('cleanup-auto-enabled').value = config.autoCleanupEnabled ? 'true' : 'false';
           }
@@ -3292,6 +3363,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         alertsRetentionDays: parseInt(document.getElementById('cleanup-alerts-days').value, 10),
         heartbeatLogsRetentionDays: parseInt(document.getElementById('cleanup-heartbeat-days').value, 10),
         subjectTrackerRetentionHours: parseInt(document.getElementById('cleanup-subject-tracker-hours').value, 10),
+        subjectStatsRetentionDays: parseInt(document.getElementById('cleanup-subject-stats-days').value, 10),
         cleanupHour: parseInt(document.getElementById('cleanup-hour').value, 10),
         autoCleanupEnabled: document.getElementById('cleanup-auto-enabled').value === 'true'
       };
@@ -3312,6 +3384,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       if (config.subjectTrackerRetentionHours < 1 || config.subjectTrackerRetentionHours > 72) {
         errors.push('主题追踪保留小时数必须在 1-72 之间');
+      }
+      if (config.subjectStatsRetentionDays < 1 || config.subjectStatsRetentionDays > 365) {
+        errors.push('邮件主题统计保留天数必须在 1-365 之间');
       }
       
       if (errors.length > 0) {
@@ -3376,6 +3451,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             '<div>告警记录: 删除 ' + result.alerts.deletedCount + ' 条</div>' +
             '<div>心跳日志: 删除 ' + result.heartbeatLogs.deletedCount + ' 条</div>' +
             '<div>主题追踪: 删除 ' + result.subjectTracker.deletedCount + ' 条</div>' +
+            '<div>邮件主题统计: 删除 ' + result.subjectStats.deletedCount + ' 条</div>' +
             '<div style="margin-top:8px;font-weight:600;">总计删除 ' + result.totalDeleted + ' 条记录，耗时 ' + result.durationMs + 'ms</div>';
           resultEl.style.display = 'block';
           statusEl.innerHTML = '<span style="color:#27ae60;">✅ 清理完成</span>';
@@ -6658,7 +6734,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       merchants: null,
       dataStats: null,
       logs: null,
-      stats: null
+      stats: null,
+      subjects: null
     };
 
     // Auto-refresh functions
@@ -6670,7 +6747,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       merchants: () => { loadMerchantList(); loadProjects(); },
       dataStats: () => loadDataStats(),
       logs: () => loadLogs(),
-      stats: () => { loadStats(); loadTrendingRules(); }
+      stats: () => { loadStats(); loadTrendingRules(); },
+      subjects: () => loadSubjects()
     };
 
     // Tab visibility controller - tracks which tab is currently active
@@ -6684,6 +6762,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       'logs': ['logs'],
       'stats': ['stats'],
       'campaign': ['merchants', 'dataStats'],
+      'subjects': ['subjects'],
       'monitoring': ['alerts', 'status', 'funnel', 'heartbeat'],
       'settings': []
     };
@@ -6815,6 +6894,255 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
     // Stop auto-refresh when leaving the page
     window.addEventListener('beforeunload', stopAllAutoRefresh);
+
+    // ============================================
+    // Subjects Tab Functions
+    // ============================================
+    
+    let subjectsData = [];
+    let subjectsPage = 1;
+    let subjectsPageSize = 20;
+    let subjectsTotalCount = 0;
+    let selectedSubjectIds = new Set();
+
+    async function loadSubjects() {
+      if (!apiToken) return;
+      try {
+        const workerFilter = document.getElementById('subjects-worker-filter')?.value || '';
+        const sortOrder = document.getElementById('subjects-sort-order')?.value || 'desc';
+        const focusFilter = document.getElementById('subjects-focus-filter')?.checked || false;
+        
+        let url = '/api/subjects?sortBy=emailCount&sortOrder=' + sortOrder;
+        url += '&limit=' + subjectsPageSize + '&offset=' + ((subjectsPage - 1) * subjectsPageSize);
+        if (workerFilter) url += '&workerName=' + encodeURIComponent(workerFilter);
+        if (focusFilter) url += '&isFocused=true';
+        
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        subjectsData = data.items || [];
+        subjectsTotalCount = data.total || 0;
+        renderSubjects();
+        updateSubjectsWorkerFilter();
+        updateSubjectsPagination();
+      } catch (e) {
+        console.error('Error loading subjects:', e);
+        showAlert('加载邮件主题失败', 'error');
+      }
+    }
+
+    function renderSubjects() {
+      const tbody = document.getElementById('subjects-table');
+      const emptyDiv = document.getElementById('subjects-empty');
+      const tableContainer = document.getElementById('subjects-table-container');
+      
+      if (subjectsData.length === 0) {
+        emptyDiv.style.display = 'block';
+        tableContainer.style.display = 'none';
+        return;
+      }
+      
+      emptyDiv.style.display = 'none';
+      tableContainer.style.display = 'table';
+      
+      tbody.innerHTML = subjectsData.map(s => {
+        const isSelected = selectedSubjectIds.has(s.subjectHash);
+        const focusedClass = s.isFocused ? 'style="background:#fff8e1;"' : '';
+        const focusIcon = s.isFocused ? '⭐' : '☆';
+        const focusTitle = s.isFocused ? '取消关注' : '添加关注';
+        
+        // Render worker stats as multi-line
+        const workerStatsHtml = (s.workerStats || []).map(ws => 
+          '<div style="white-space:nowrap;">' + escapeHtml(ws.workerName) + ' <span style="color:#666;">(' + ws.emailCount + ')</span></div>'
+        ).join('');
+        
+        return '<tr ' + focusedClass + '>' +
+          '<td><input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleSubjectSelection(\\'' + escapeHtml(s.subjectHash) + '\\', this.checked)"></td>' +
+          '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;" title="' + escapeHtml(s.subject) + '">' + escapeHtml(s.subject) + '</td>' +
+          '<td>' + escapeHtml(s.merchantDomain) + '</td>' +
+          '<td>' + workerStatsHtml + '</td>' +
+          '<td style="font-weight:bold;">' + s.totalEmailCount + '</td>' +
+          '<td><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
+          '<td class="actions">' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteSubject(\\'' + escapeHtml(s.subjectHash) + '\\')">删除</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function updateSubjectsWorkerFilter() {
+      const select = document.getElementById('subjects-worker-filter');
+      const currentValue = select.value;
+      
+      // Get unique worker names from current data
+      const workerNames = new Set();
+      subjectsData.forEach(s => {
+        (s.workerStats || []).forEach(ws => workerNames.add(ws.workerName));
+      });
+      
+      // Also use global workers list if available
+      if (workers && workers.length > 0) {
+        workers.forEach(w => workerNames.add(w.name));
+      }
+      
+      // Build options
+      let options = '<option value="">全部实例</option>';
+      Array.from(workerNames).sort().forEach(name => {
+        const selected = name === currentValue ? ' selected' : '';
+        options += '<option value="' + escapeHtml(name) + '"' + selected + '>' + escapeHtml(name) + '</option>';
+      });
+      
+      select.innerHTML = options;
+    }
+
+    function updateSubjectsPagination() {
+      const totalPages = Math.ceil(subjectsTotalCount / subjectsPageSize) || 1;
+      document.getElementById('subjects-page-info').textContent = '第 ' + subjectsPage + ' / ' + totalPages + ' 页 (共 ' + subjectsTotalCount + ' 条)';
+      document.getElementById('subjects-prev-btn').disabled = subjectsPage <= 1;
+      document.getElementById('subjects-next-btn').disabled = subjectsPage >= totalPages;
+    }
+
+    function prevSubjectsPage() {
+      if (subjectsPage > 1) {
+        subjectsPage--;
+        loadSubjects();
+      }
+    }
+
+    function nextSubjectsPage() {
+      const totalPages = Math.ceil(subjectsTotalCount / subjectsPageSize) || 1;
+      if (subjectsPage < totalPages) {
+        subjectsPage++;
+        loadSubjects();
+      }
+    }
+
+    function toggleSubjectSelection(subjectHash, checked) {
+      if (checked) {
+        selectedSubjectIds.add(subjectHash);
+      } else {
+        selectedSubjectIds.delete(subjectHash);
+      }
+      updateSubjectsBatchActions();
+    }
+
+    function toggleSelectAllSubjects(checked) {
+      if (checked) {
+        subjectsData.forEach(s => selectedSubjectIds.add(s.subjectHash));
+      } else {
+        selectedSubjectIds.clear();
+      }
+      renderSubjects();
+      updateSubjectsBatchActions();
+    }
+
+    function updateSubjectsBatchActions() {
+      const batchActions = document.getElementById('subjects-batch-actions');
+      const selectedCount = document.getElementById('subjects-selected-count');
+      
+      if (selectedSubjectIds.size > 0) {
+        batchActions.style.display = 'block';
+        selectedCount.textContent = '已选择 ' + selectedSubjectIds.size + ' 项';
+      } else {
+        batchActions.style.display = 'none';
+      }
+    }
+
+    async function toggleSubjectFocus(subjectHash, focused) {
+      if (!apiToken) return;
+      try {
+        // Find the subject to get its ID
+        const subject = subjectsData.find(s => s.subjectHash === subjectHash);
+        if (!subject || !subject.workerStats || subject.workerStats.length === 0) {
+          showAlert('无法找到主题记录', 'error');
+          return;
+        }
+        
+        // We need to get the actual ID from the first worker stat
+        // The API uses the record ID, not the hash
+        const res = await fetch('/api/subjects?limit=1000', { headers: getHeaders() });
+        const data = await res.json();
+        const fullSubject = (data.items || []).find(s => s.subjectHash === subjectHash);
+        
+        if (!fullSubject) {
+          showAlert('无法找到主题记录', 'error');
+          return;
+        }
+        
+        // Use the subjectHash as the ID for the focus endpoint
+        const focusRes = await fetch('/api/subjects/' + encodeURIComponent(subjectHash) + '/focus', {
+          method: 'POST',
+          headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ focused })
+        });
+        
+        if (focusRes.ok) {
+          showAlert(focused ? '已添加关注' : '已取消关注');
+          loadSubjects();
+        } else {
+          const errData = await focusRes.json();
+          showAlert(errData.error || '操作失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error toggling focus:', e);
+        showAlert('操作失败', 'error');
+      }
+    }
+
+    async function deleteSubject(subjectHash) {
+      if (!confirm('确定要删除这个主题的统计记录吗？')) return;
+      if (!apiToken) return;
+      
+      try {
+        const res = await fetch('/api/subjects/' + encodeURIComponent(subjectHash), {
+          method: 'DELETE',
+          headers: getHeaders()
+        });
+        
+        if (res.ok) {
+          showAlert('删除成功');
+          selectedSubjectIds.delete(subjectHash);
+          loadSubjects();
+        } else {
+          const errData = await res.json();
+          showAlert(errData.error || '删除失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error deleting subject:', e);
+        showAlert('删除失败', 'error');
+      }
+    }
+
+    async function batchDeleteSubjects() {
+      if (selectedSubjectIds.size === 0) return;
+      if (!confirm('确定要删除选中的 ' + selectedSubjectIds.size + ' 个主题统计记录吗？')) return;
+      if (!apiToken) return;
+      
+      try {
+        const res = await fetch('/api/subjects/batch-delete', {
+          method: 'POST',
+          headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: Array.from(selectedSubjectIds) })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          showAlert('成功删除 ' + data.deletedCount + ' 条记录');
+          selectedSubjectIds.clear();
+          loadSubjects();
+        } else {
+          const errData = await res.json();
+          showAlert(errData.error || '批量删除失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error batch deleting subjects:', e);
+        showAlert('批量删除失败', 'error');
+      }
+    }
+
+    // ============================================
+    // End Subjects Tab Functions
+    // ============================================
 
     async function loadMonitoringData() {
       await Promise.all([loadMonitoringRules(), loadMonitoringStatus(), loadMonitoringAlerts()]);

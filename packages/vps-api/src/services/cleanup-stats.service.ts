@@ -37,6 +37,7 @@ const CLEANABLE_TABLES: TableConfig[] = [
   { name: 'alerts', dateColumn: 'created_at' },
   { name: 'heartbeat_logs', dateColumn: 'checked_at' },
   { name: 'email_subject_tracker', dateColumn: 'received_at' },
+  { name: 'subject_stats', dateColumn: 'last_seen_at' },
 ];
 
 /**

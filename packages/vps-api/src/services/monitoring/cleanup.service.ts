@@ -22,6 +22,7 @@ export interface FullCleanupResult {
   systemLogs: CleanupResult;
   heartbeatLogs: CleanupResult;
   subjectTracker: CleanupResult;
+  subjectStats: CleanupResult;
   totalDeleted: number;
   durationMs: number;
   executedAt: Date;
@@ -36,6 +37,7 @@ export interface FullCleanupResult {
  * - System logs: 1-365 days retention
  * - Heartbeat logs: 1-90 days retention
  * - Subject tracker: 1-72 hours retention
+ * - Subject stats: 1-365 days retention
  */
 export class CleanupService {
   private hitLogRepository: HitLogRepository;
@@ -168,6 +170,30 @@ export class CleanupService {
   }
 
   /**
+   * Clean up subject stats records older than specified retention days
+   * 
+   * @param retentionDays - Number of days to retain (1-365)
+   * @returns CleanupResult with details of the operation
+   */
+  cleanupSubjectStats(retentionDays: number): CleanupResult {
+    if (retentionDays < 0) {
+      throw new Error('Retention days must be non-negative');
+    }
+
+    const cutoffDate = new Date();
+    cutoffDate.setTime(cutoffDate.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+
+    const stmt = this.db.prepare('DELETE FROM subject_stats WHERE last_seen_at < ?');
+    const result = stmt.run(cutoffDate.toISOString());
+
+    return {
+      deletedCount: result.changes,
+      cutoffDate,
+      executedAt: new Date(),
+    };
+  }
+
+  /**
    * Run full cleanup with default retention policies
    * 
    * @param hitLogRetentionHours - Hours to retain hit logs (default: 72)
@@ -187,6 +213,7 @@ export class CleanupService {
     const systemLogsResult = this.cleanupSystemLogs(30);
     const heartbeatLogsResult = this.cleanupHeartbeatLogs(30);
     const subjectTrackerResult = this.cleanupSubjectTracker(24);
+    const subjectStatsResult = this.cleanupSubjectStats(30);
 
     const durationMs = Date.now() - startTime;
 
@@ -196,9 +223,10 @@ export class CleanupService {
       systemLogs: systemLogsResult,
       heartbeatLogs: heartbeatLogsResult,
       subjectTracker: subjectTrackerResult,
+      subjectStats: subjectStatsResult,
       totalDeleted: hitLogsResult.deletedCount + alertsResult.deletedCount + 
                     systemLogsResult.deletedCount + heartbeatLogsResult.deletedCount + 
-                    subjectTrackerResult.deletedCount,
+                    subjectTrackerResult.deletedCount + subjectStatsResult.deletedCount,
       durationMs,
       executedAt,
     };
@@ -210,6 +238,7 @@ export class CleanupService {
       systemLogsDeleted: systemLogsResult.deletedCount,
       heartbeatLogsDeleted: heartbeatLogsResult.deletedCount,
       subjectTrackerDeleted: subjectTrackerResult.deletedCount,
+      subjectStatsDeleted: subjectStatsResult.deletedCount,
       totalDeleted: result.totalDeleted,
       durationMs: result.durationMs,
       retentionConfig: {
@@ -218,6 +247,7 @@ export class CleanupService {
         systemLogsRetentionDays: 30,
         heartbeatLogsRetentionDays: 30,
         subjectTrackerRetentionHours: 24,
+        subjectStatsRetentionDays: 30,
       },
     });
 
@@ -239,6 +269,7 @@ export class CleanupService {
     const systemLogsResult = this.cleanupSystemLogs(config.systemLogsRetentionDays);
     const heartbeatLogsResult = this.cleanupHeartbeatLogs(config.heartbeatLogsRetentionDays);
     const subjectTrackerResult = this.cleanupSubjectTracker(config.subjectTrackerRetentionHours);
+    const subjectStatsResult = this.cleanupSubjectStats(config.subjectStatsRetentionDays);
 
     const durationMs = Date.now() - startTime;
 
@@ -248,9 +279,10 @@ export class CleanupService {
       systemLogs: systemLogsResult,
       heartbeatLogs: heartbeatLogsResult,
       subjectTracker: subjectTrackerResult,
+      subjectStats: subjectStatsResult,
       totalDeleted: hitLogsResult.deletedCount + alertsResult.deletedCount + 
                     systemLogsResult.deletedCount + heartbeatLogsResult.deletedCount + 
-                    subjectTrackerResult.deletedCount,
+                    subjectTrackerResult.deletedCount + subjectStatsResult.deletedCount,
       durationMs,
       executedAt,
     };
@@ -262,6 +294,7 @@ export class CleanupService {
       systemLogsDeleted: systemLogsResult.deletedCount,
       heartbeatLogsDeleted: heartbeatLogsResult.deletedCount,
       subjectTrackerDeleted: subjectTrackerResult.deletedCount,
+      subjectStatsDeleted: subjectStatsResult.deletedCount,
       totalDeleted: result.totalDeleted,
       durationMs: result.durationMs,
       retentionConfig: {
@@ -270,6 +303,7 @@ export class CleanupService {
         systemLogsRetentionDays: config.systemLogsRetentionDays,
         heartbeatLogsRetentionDays: config.heartbeatLogsRetentionDays,
         subjectTrackerRetentionHours: config.subjectTrackerRetentionHours,
+        subjectStatsRetentionDays: config.subjectStatsRetentionDays,
       },
     });
 

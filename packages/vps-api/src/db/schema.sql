@@ -507,3 +507,30 @@ CREATE TABLE IF NOT EXISTS merchant_worker_status (
 
 CREATE INDEX IF NOT EXISTS idx_merchant_worker_status_merchant ON merchant_worker_status(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_merchant_worker_status_worker ON merchant_worker_status(worker_name);
+
+-- ============================================
+-- Email Subject Display Schema
+-- ============================================
+
+-- 邮件主题统计表
+CREATE TABLE IF NOT EXISTS subject_stats (
+  id TEXT PRIMARY KEY,
+  subject TEXT NOT NULL,                  -- 邮件主题
+  subject_hash TEXT NOT NULL,             -- 主题哈希（用于快速查找）
+  merchant_domain TEXT NOT NULL,          -- 商户域名
+  worker_name TEXT NOT NULL,              -- Worker实例名称
+  email_count INTEGER DEFAULT 1,          -- 邮件数量
+  is_focused INTEGER DEFAULT 0,           -- 是否重点关注
+  first_seen_at TEXT NOT NULL,            -- 首次出现时间
+  last_seen_at TEXT NOT NULL,             -- 最后出现时间
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(subject_hash, merchant_domain, worker_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_subject_stats_hash ON subject_stats(subject_hash);
+CREATE INDEX IF NOT EXISTS idx_subject_stats_merchant ON subject_stats(merchant_domain);
+CREATE INDEX IF NOT EXISTS idx_subject_stats_worker ON subject_stats(worker_name);
+CREATE INDEX IF NOT EXISTS idx_subject_stats_focused ON subject_stats(is_focused);
+CREATE INDEX IF NOT EXISTS idx_subject_stats_count ON subject_stats(email_count);
+CREATE INDEX IF NOT EXISTS idx_subject_stats_last_seen ON subject_stats(last_seen_at);

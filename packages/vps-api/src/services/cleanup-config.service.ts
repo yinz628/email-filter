@@ -14,6 +14,8 @@ export interface CleanupConfig {
   heartbeatLogsRetentionDays: number;
   /** 主题追踪保留小时数 (1-72) */
   subjectTrackerRetentionHours: number;
+  /** 邮件主题统计保留天数 (1-365) */
+  subjectStatsRetentionDays: number;
   /** 清理执行时间 (0-23) */
   cleanupHour: number;
   /** 是否启用自动清理 */
@@ -37,6 +39,7 @@ export const CONFIG_RANGES = {
   alertsRetentionDays: { min: 7, max: 365 },
   heartbeatLogsRetentionDays: { min: 1, max: 90 },
   subjectTrackerRetentionHours: { min: 1, max: 72 },
+  subjectStatsRetentionDays: { min: 1, max: 365 },
   cleanupHour: { min: 0, max: 23 },
 } as const;
 
@@ -49,6 +52,7 @@ export const DEFAULT_CONFIG: CleanupConfig = {
   alertsRetentionDays: 90,
   heartbeatLogsRetentionDays: 30,
   subjectTrackerRetentionHours: 24,
+  subjectStatsRetentionDays: 30,
   cleanupHour: 3,
   autoCleanupEnabled: true,
 };
@@ -62,6 +66,7 @@ const KEY_MAP: Record<string, keyof CleanupConfig> = {
   alerts_retention_days: 'alertsRetentionDays',
   heartbeat_logs_retention_days: 'heartbeatLogsRetentionDays',
   subject_tracker_retention_hours: 'subjectTrackerRetentionHours',
+  subject_stats_retention_days: 'subjectStatsRetentionDays',
   cleanup_hour: 'cleanupHour',
   auto_cleanup_enabled: 'autoCleanupEnabled',
 };
@@ -75,6 +80,7 @@ const REVERSE_KEY_MAP: Record<keyof CleanupConfig, string> = {
   alertsRetentionDays: 'alerts_retention_days',
   heartbeatLogsRetentionDays: 'heartbeat_logs_retention_days',
   subjectTrackerRetentionHours: 'subject_tracker_retention_hours',
+  subjectStatsRetentionDays: 'subject_stats_retention_days',
   cleanupHour: 'cleanup_hour',
   autoCleanupEnabled: 'auto_cleanup_enabled',
 };

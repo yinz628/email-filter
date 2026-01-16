@@ -13,6 +13,7 @@ import {
   logsRoutes,
   watchRoutes,
   campaignRoutes,
+  subjectRoutes,
   monitoringRoutes,
   ratioMonitoringRoutes,
   telegramRoutes,
@@ -114,6 +115,7 @@ async function start() {
     await fastify.register(logsRoutes, { prefix: '/api/logs' });
     await fastify.register(watchRoutes, { prefix: '/api/watch' });
     await fastify.register(campaignRoutes, { prefix: '/api/campaign' });
+    await fastify.register(subjectRoutes, { prefix: '/api/subjects' });
     await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
     await fastify.register(ratioMonitoringRoutes, { prefix: '/api/monitoring/ratio' });
     await fastify.register(telegramRoutes, { prefix: '/api/telegram' });

@@ -22,3 +22,4 @@ export { userSettingsRoutes } from './user-settings.js';
 export { usersRoutes } from './users.js';
 export { cleanupSettingsRoutes } from './cleanup-settings.js';
 export { backupRoutes } from './backup.js';
+export { subjectRoutes } from './subjects.js';

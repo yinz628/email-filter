@@ -1,0 +1,74 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: packages/vps-api/Dockerfile
+    container_name: email-filter-api
+    ports:
+      - "${API_PORT:-3000}:3000"
+    volumes:
+      - email-filter-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DB_PATH=/app/data/filter.db
+      - API_TOKEN=${API_TOKEN}
+      - DEFAULT_FORWARD_TO=${DEFAULT_FORWARD_TO}
+      - VPS_PUBLIC_URL=${VPS_PUBLIC_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY=${JWT_EXPIRY:-24h}
+      - DEFAULT_ADMIN_USERNAME=${DEFAULT_ADMIN_USERNAME:-admin}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-admin123}
+      - DYNAMIC_ENABLED=${DYNAMIC_ENABLED:-true}
+      - DYNAMIC_TIME_WINDOW=${DYNAMIC_TIME_WINDOW:-60}
+      - DYNAMIC_THRESHOLD=${DYNAMIC_THRESHOLD:-5}
+      - DYNAMIC_EXPIRATION=${DYNAMIC_EXPIRATION:-48}
+    restart: unless-stopped
+    networks:
+      - email-filter-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+    build:
+      context: .
+      dockerfile: packages/vps-admin/Dockerfile
+    container_name: email-filter-admin
+    ports:
+      - "${ADMIN_PORT:-3001}:3001"
+    volumes:
+      - email-filter-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOST=0.0.0.0
+      - ADMIN_DB_PATH=/app/data/admin.db
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - VPS_API_URL=http://api:3000
+      - API_TOKEN=${API_TOKEN}
+    restart: unless-stopped
+    networks:
+      - email-filter-network
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  email-filter-data:
+    driver: local
+
+networks:
+  email-filter-network:
+    driver: bridge

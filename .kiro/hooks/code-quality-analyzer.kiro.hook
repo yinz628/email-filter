@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "name": "Code Quality Analyzer",
+  "description": "Analyzes modified source code files for potential improvements including code smells, design patterns, and best practices. Provides suggestions for improving readability, maintainability, and performance.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Analyze the recently modified code for potential improvements. Focus on:\n\n1. **Code Smells**: Identify any anti-patterns, duplicated code, overly complex functions, long parameter lists, or deeply nested conditionals.\n\n2. **Design Patterns**: Suggest applicable design patterns that could improve the code structure (e.g., Factory, Strategy, Observer, etc.).\n\n3. **Best Practices**: Check for TypeScript/JavaScript best practices including proper typing, error handling, async/await usage, and naming conventions.\n\n4. **Readability**: Suggest improvements for variable/function naming, code organization, and documentation/comments where needed.\n\n5. **Maintainability**: Identify tightly coupled code, suggest ways to improve modularity, and recommend extraction of reusable utilities.\n\n6. **Performance**: Look for potential performance issues like unnecessary re-renders, inefficient loops, memory leaks, or opportunities for optimization.\n\nProvide specific, actionable suggestions while ensuring the existing functionality is preserved. Prioritize the most impactful improvements first."
+  }
+}

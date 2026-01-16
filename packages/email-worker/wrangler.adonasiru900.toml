@@ -30,4 +30,4 @@ local_protocol = "http"
 
 # Observability
 [observability]
-enabled = true
+enabled = false

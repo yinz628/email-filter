@@ -6759,7 +6759,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       merchants: () => { loadMerchantList(); loadProjects(); },
       dataStats: () => loadDataStats(),
       logs: () => loadLogs(),
-      stats: () => { loadStats(); loadTrendingRules(); },
+      stats: () => loadStats(),
       subjects: () => loadSubjects()
     };
 

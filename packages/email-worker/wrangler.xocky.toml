@@ -7,7 +7,7 @@ compatibility_date = "2024-01-01"
 
 # Environment variables for geymail.com worker
 [vars]
-VPS_API_URL = "https://hkwa-d5v4.feimails.com/api/webhook/email"
+VPS_API_URL = "https://hkbage.feimails.com/api/webhook/email"
 VPS_API_TOKEN = "nature123"
 DEFAULT_FORWARD_TO = "xocky333@gmail.com"
 # Unique worker name - must match the name registered in VPS API
@@ -30,4 +30,4 @@ local_protocol = "http"
 
 # Observability
 [observability]
-enabled = true
+enabled = false

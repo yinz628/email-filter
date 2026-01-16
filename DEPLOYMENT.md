@@ -192,16 +192,34 @@ docker volume inspect email-filter_email-filter-data
 ```
 
 
-打包
+# 打包
 docker save -o email-filter-api_latest.tar email-filter-api:latest
 gzip email-filter-api_latest.tar
 
+# 切换分支
+git fetch origin
+git checkout feature/api-worker-performance
+
+docker compose down
+docker compose build --no-cache api
+docker compose up -d  api
+
+# 停止并删除容器
+docker stop email-filter-admin
+docker rm email-filter-admin
+
+# 删除镜像
+docker rmi email-filter-admin
 
 #### Docker 数据持久化
 
 数据存储在 Docker 卷 `email-filter-data` 中：
 - API 数据库：`/app/data/filter.db`
 - Admin 数据库：`/app/data/admin.db`
+
+
+
+
 
 备份数据：
 ```bash
@@ -653,3 +671,5 @@ du -h /var/lib/email-filter --max-depth=2
 
 # 6. 检查清理效果
 df -h
+
+

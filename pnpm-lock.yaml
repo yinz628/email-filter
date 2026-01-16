@@ -42,6 +42,18 @@ importers:
         specifier: ^3.19.0
         version: 3.114.15(@cloudflare/workers-types@4.20251213.0)
 
+  packages/perf-test-worker:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20240117.0
+        version: 4.20251213.0
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      wrangler:
+        specifier: ^3.114.15
+        version: 3.114.15(@cloudflare/workers-types@4.20251213.0)
+
   packages/shared:
     devDependencies:
       fast-check:

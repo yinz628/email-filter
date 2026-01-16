@@ -64,4 +64,4 @@ EXPOSE 3000
 
 # Use root to ensure we can write to mounted volume, then switch to node
 USER root
-CMD ["sh", "-c", "chown -R node:node /app/data && chmod 755 /app/data && su node -c 'node dist/db/run-migrations.js && node dist/index.js'"]
+CMD ["sh", "-c", "chown -R node:node /app/data && chmod 755 /app/data && su node -c 'node dist/index.js'"]

@@ -463,6 +463,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </label>
             <select id="logs-refresh-interval" onchange="updateAutoRefreshInterval('logs')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
               <option value="600">10分钟</option>
             </select>
@@ -540,6 +541,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </label>
             <select id="stats-refresh-interval" onchange="updateAutoRefreshInterval('stats')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
               <option value="600">10分钟</option>
             </select>
@@ -635,9 +637,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <span>自动刷新</span>
             </label>
             <select id="merchants-refresh-interval" onchange="updateAutoRefreshInterval('merchants')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
-              <option value="30">30秒</option>
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
             </select>
             <button class="btn btn-warning" onclick="showOrphanedWorkersModal()" title="清理已删除实例的数据">🧹 清理过期数据</button>
           </div>
@@ -859,6 +862,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             </label>
             <select id="dataStats-refresh-interval" onchange="updateAutoRefreshInterval('dataStats')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;">
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
               <option value="600">10分钟</option>
             </select>
@@ -917,9 +921,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <span>自动刷新</span>
             </label>
             <select id="alerts-refresh-interval" onchange="updateAutoRefreshInterval('alerts')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
-              <option value="30">30秒</option>
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="loadMonitoringAlerts()">🔄 刷新</button>
             <button class="btn btn-sm btn-danger" id="batch-delete-alerts-btn" onclick="batchDeleteAlerts()" style="display:none;">🗑️ 删除选中</button>
@@ -972,9 +977,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <span>自动心跳</span>
             </label>
             <select id="heartbeat-refresh-interval" onchange="updateAutoRefreshInterval('heartbeat')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
-              <option value="30">30秒</option>
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="triggerHeartbeat()">💓 心跳检查</button>
             <button class="btn btn-sm btn-primary" onclick="showModal('add-monitoring-rule-modal')">+ 添加</button>
@@ -1026,9 +1032,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <span>自动刷新</span>
             </label>
             <select id="status-refresh-interval" onchange="updateAutoRefreshInterval('status')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
-              <option value="30">30秒</option>
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="loadMonitoringStatus()">🔄 刷新</button>
           </div>
@@ -1080,9 +1087,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <span>自动刷新</span>
             </label>
             <select id="funnel-refresh-interval" onchange="updateAutoRefreshInterval('funnel')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
-              <option value="30">30秒</option>
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
             </select>
             <button class="btn btn-sm btn-secondary" onclick="checkRatioMonitors()">🔄 检查比例</button>
             <button class="btn btn-sm btn-primary" onclick="showModal('add-ratio-monitor-modal')">+ 添加</button>
@@ -1118,9 +1126,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
               <span>自动刷新</span>
             </label>
             <select id="subjects-refresh-interval" onchange="updateAutoRefreshInterval('subjects')" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:70px;">
-              <option value="30">30秒</option>
               <option value="60" selected>1分钟</option>
+              <option value="180">3分钟</option>
               <option value="300">5分钟</option>
+              <option value="600">10分钟</option>
             </select>
           </div>
         </div>

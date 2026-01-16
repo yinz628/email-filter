@@ -301,25 +301,41 @@ export class SubjectStatsService {
   }
 
   /**
-   * Delete a single subject stat by ID
+   * Delete a single subject stat by ID or subject hash
+   * If the id looks like a SHA-256 hash (64 hex chars), delete by subject_hash
+   * Otherwise, delete by record id
    * 
-   * @param id - Subject stat ID to delete
+   * @param id - Subject stat ID or subject hash to delete
    * @returns true if record was deleted, false if not found
    * 
    * Requirements: 4.1
    */
   deleteSubject(id: string): boolean {
-    const stmt = this.db.prepare(`
-      DELETE FROM subject_stats WHERE id = ?
-    `);
-    const result = stmt.run(id);
-    return result.changes > 0;
+    // Check if id is a SHA-256 hash (64 hex characters)
+    const isHash = /^[a-f0-9]{64}$/i.test(id);
+    
+    if (isHash) {
+      // Delete all records with this subject_hash
+      const stmt = this.db.prepare(`
+        DELETE FROM subject_stats WHERE subject_hash = ?
+      `);
+      const result = stmt.run(id);
+      return result.changes > 0;
+    } else {
+      // Delete by record id
+      const stmt = this.db.prepare(`
+        DELETE FROM subject_stats WHERE id = ?
+      `);
+      const result = stmt.run(id);
+      return result.changes > 0;
+    }
   }
 
   /**
-   * Delete multiple subject stats by IDs (batch delete)
+   * Delete multiple subject stats by IDs or subject hashes (batch delete)
+   * Supports both record IDs and subject hashes
    * 
-   * @param ids - Array of subject stat IDs to delete
+   * @param ids - Array of subject stat IDs or subject hashes to delete
    * @returns Number of records deleted
    * 
    * Requirements: 4.4
@@ -329,18 +345,48 @@ export class SubjectStatsService {
       return 0;
     }
 
-    const placeholders = ids.map(() => '?').join(', ');
-    const stmt = this.db.prepare(`
-      DELETE FROM subject_stats WHERE id IN (${placeholders})
-    `);
-    const result = stmt.run(...ids);
-    return result.changes;
+    // Separate hashes from record IDs
+    const hashes: string[] = [];
+    const recordIds: string[] = [];
+    
+    for (const id of ids) {
+      if (/^[a-f0-9]{64}$/i.test(id)) {
+        hashes.push(id);
+      } else {
+        recordIds.push(id);
+      }
+    }
+
+    let totalDeleted = 0;
+
+    // Delete by subject_hash
+    if (hashes.length > 0) {
+      const hashPlaceholders = hashes.map(() => '?').join(', ');
+      const hashStmt = this.db.prepare(`
+        DELETE FROM subject_stats WHERE subject_hash IN (${hashPlaceholders})
+      `);
+      const hashResult = hashStmt.run(...hashes);
+      totalDeleted += hashResult.changes;
+    }
+
+    // Delete by record id
+    if (recordIds.length > 0) {
+      const idPlaceholders = recordIds.map(() => '?').join(', ');
+      const idStmt = this.db.prepare(`
+        DELETE FROM subject_stats WHERE id IN (${idPlaceholders})
+      `);
+      const idResult = idStmt.run(...recordIds);
+      totalDeleted += idResult.changes;
+    }
+
+    return totalDeleted;
   }
 
   /**
    * Set or unset focus status for a subject stat
+   * Supports both record ID and subject hash
    * 
-   * @param id - Subject stat ID
+   * @param id - Subject stat ID or subject hash
    * @param focused - Whether to mark as focused
    * @returns Updated subject stat or null if not found
    * 
@@ -349,22 +395,45 @@ export class SubjectStatsService {
   setFocused(id: string, focused: boolean): SubjectStat | null {
     const now = new Date().toISOString();
     
-    const updateStmt = this.db.prepare(`
-      UPDATE subject_stats
-      SET is_focused = ?, updated_at = ?
-      WHERE id = ?
-    `);
-    const result = updateStmt.run(focused ? 1 : 0, now, id);
+    // Check if id is a SHA-256 hash (64 hex characters)
+    const isHash = /^[a-f0-9]{64}$/i.test(id);
+    
+    let result;
+    let row: SubjectStatRow | undefined;
+    
+    if (isHash) {
+      // Update all records with this subject_hash
+      const updateStmt = this.db.prepare(`
+        UPDATE subject_stats
+        SET is_focused = ?, updated_at = ?
+        WHERE subject_hash = ?
+      `);
+      result = updateStmt.run(focused ? 1 : 0, now, id);
+      
+      // Get one of the updated records
+      const selectStmt = this.db.prepare(`
+        SELECT * FROM subject_stats WHERE subject_hash = ? LIMIT 1
+      `);
+      row = selectStmt.get(id) as SubjectStatRow | undefined;
+    } else {
+      // Update by record id
+      const updateStmt = this.db.prepare(`
+        UPDATE subject_stats
+        SET is_focused = ?, updated_at = ?
+        WHERE id = ?
+      `);
+      result = updateStmt.run(focused ? 1 : 0, now, id);
+      
+      // Return the updated record
+      const selectStmt = this.db.prepare(`
+        SELECT * FROM subject_stats WHERE id = ?
+      `);
+      row = selectStmt.get(id) as SubjectStatRow | undefined;
+    }
     
     if (result.changes === 0) {
       return null;
     }
-
-    // Return the updated record
-    const selectStmt = this.db.prepare(`
-      SELECT * FROM subject_stats WHERE id = ?
-    `);
-    const row = selectStmt.get(id) as SubjectStatRow | undefined;
     
     if (!row) {
       return null;

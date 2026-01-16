@@ -556,6 +556,46 @@ function migrateCreateUserSettingsTable(): MigrationResult {
   return { name, status: 'applied', message: 'Table created successfully' };
 }
 
+/**
+ * Migration 23: Create subject_stats table for email subject display
+ * 
+ * This migration creates the subject_stats table if it doesn't exist.
+ * Required for tracking and displaying email subject statistics.
+ * 
+ * Requirements: email-subject-display 1.1-1.4
+ */
+function migrateCreateSubjectStatsTable(): MigrationResult {
+  const name = 'subject_stats table';
+  
+  if (tableExists(db, 'subject_stats')) {
+    return { name, status: 'skipped', message: 'Table already exists' };
+  }
+  
+  db.exec(`
+    CREATE TABLE subject_stats (
+      id TEXT PRIMARY KEY,
+      subject TEXT NOT NULL,
+      subject_hash TEXT NOT NULL,
+      merchant_domain TEXT NOT NULL,
+      worker_name TEXT NOT NULL,
+      email_count INTEGER DEFAULT 1,
+      is_focused INTEGER DEFAULT 0,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(subject_hash, merchant_domain, worker_name)
+    )
+  `);
+  db.exec('CREATE INDEX idx_subject_stats_hash ON subject_stats(subject_hash)');
+  db.exec('CREATE INDEX idx_subject_stats_merchant ON subject_stats(merchant_domain)');
+  db.exec('CREATE INDEX idx_subject_stats_worker ON subject_stats(worker_name)');
+  db.exec('CREATE INDEX idx_subject_stats_focused ON subject_stats(is_focused)');
+  db.exec('CREATE INDEX idx_subject_stats_count ON subject_stats(email_count)');
+  db.exec('CREATE INDEX idx_subject_stats_last_seen ON subject_stats(last_seen_at)');
+  return { name, status: 'applied', message: 'Table and indexes created successfully' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -583,6 +623,7 @@ const migrations = [
   migrateProjectUserEventsTimeIndex,
   migrateCreateUsersTable,
   migrateCreateUserSettingsTable,
+  migrateCreateSubjectStatsTable,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

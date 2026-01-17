@@ -1164,6 +1164,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <button class="btn btn-sm btn-secondary" onclick="prevSubjectsPage()" id="subjects-prev-btn" disabled>上一页</button>
           <span id="subjects-page-info" style="color:#666;font-size:13px;">第 1 页</span>
           <button class="btn btn-sm btn-secondary" onclick="nextSubjectsPage()" id="subjects-next-btn">下一页</button>
+          <select id="subjects-page-size" onchange="changeSubjectsPageSize()" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:13px;margin-left:10px;">
+            <option value="20" selected>每页 20 条</option>
+            <option value="50">每页 50 条</option>
+            <option value="100">每页 100 条</option>
+          </select>
         </div>
       </div>
     </div>
@@ -7061,6 +7066,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         subjectsPage++;
         loadSubjects();
       }
+    }
+
+    function changeSubjectsPageSize() {
+      const select = document.getElementById('subjects-page-size');
+      subjectsPageSize = parseInt(select.value, 10);
+      subjectsPage = 1; // Reset to first page when changing page size
+      loadSubjects();
     }
 
     function toggleSubjectSelection(subjectHash, checked) {

@@ -6982,13 +6982,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         ).join('');
         
         return '<tr ' + focusedClass + '>' +
-          '<td><input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleSubjectSelection(\\'' + escapeHtml(s.subjectHash) + '\\', this.checked)"></td>' +
-          '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;" title="' + escapeHtml(s.subject) + '">' + escapeHtml(s.subject) + '</td>' +
-          '<td>' + escapeHtml(s.merchantDomain) + '</td>' +
-          '<td>' + workerStatsHtml + '</td>' +
-          '<td style="font-weight:bold;">' + s.totalEmailCount + '</td>' +
-          '<td><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
-          '<td class="actions">' +
+          '<td style="vertical-align:middle;"><input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleSubjectSelection(\\'' + escapeHtml(s.subjectHash) + '\\', this.checked)"></td>' +
+          '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;" title="' + escapeHtml(s.subject) + '">' + escapeHtml(s.subject) + '</td>' +
+          '<td style="vertical-align:middle;">' + escapeHtml(s.merchantDomain) + '</td>' +
+          '<td style="vertical-align:middle;">' + workerStatsHtml + '</td>' +
+          '<td style="font-weight:bold;vertical-align:middle;">' + s.totalEmailCount + '</td>' +
+          '<td style="vertical-align:middle;"><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
+          '<td class="actions" style="vertical-align:middle;">' +
             '<button class="btn btn-sm btn-primary" onclick="addSubjectToRule(\\'' + escapeHtml(s.subject) + '\\', \\'' + escapeHtml(s.merchantDomain) + '\\')">添加到规则</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteSubject(\\'' + escapeHtml(s.subjectHash) + '\\')">删除</button>' +
           '</td>' +

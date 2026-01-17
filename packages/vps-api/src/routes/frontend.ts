@@ -6989,6 +6989,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td style="font-weight:bold;">' + s.totalEmailCount + '</td>' +
           '<td><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
           '<td class="actions">' +
+            '<button class="btn btn-sm btn-primary" onclick="addSubjectToRule(\\'' + escapeHtml(s.subject) + '\\', \\'' + escapeHtml(s.merchantDomain) + '\\')">添加到规则</button>' +
             '<button class="btn btn-sm btn-danger" onclick="deleteSubject(\\'' + escapeHtml(s.subjectHash) + '\\')">删除</button>' +
           '</td>' +
         '</tr>';
@@ -7145,6 +7146,48 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         console.error('Error toggling focus:', e);
         showAlert('操作失败', 'error');
       }
+    }
+
+    function addSubjectToRule(subject, merchantDomain) {
+      // Extract base domain for tag
+      const baseDomain = extractBaseDomainFromFull(merchantDomain);
+      
+      // Open add rule modal
+      showModal('add-rule-modal');
+      
+      // Pre-fill form fields
+      document.getElementById('rule-match-type').value = 'subject';
+      document.getElementById('rule-match-mode').value = 'exact';
+      document.getElementById('rule-pattern').value = subject;
+      document.getElementById('rule-tags').value = baseDomain;
+      document.getElementById('rule-category').value = 'blacklist';
+    }
+
+    // Helper function to extract base domain (same logic as backend)
+    function extractBaseDomainFromFull(domain) {
+      if (!domain || typeof domain !== 'string') {
+        return '';
+      }
+      
+      const trimmed = domain.trim().toLowerCase();
+      if (!trimmed) {
+        return '';
+      }
+      
+      const parts = trimmed.split('.');
+      if (parts.length < 2) {
+        return trimmed;
+      }
+      
+      // Handle special cases for known TLDs with 2 parts
+      const twoPartTLDs = ['co.uk', 'com.br', 'com.au', 'co.jp', 'co.kr', 'com.mx', 'com.ar'];
+      const lastTwoParts = parts.slice(-2).join('.');
+      
+      if (twoPartTLDs.includes(lastTwoParts)) {
+        return parts.slice(-3).join('.');
+      }
+      
+      return parts.slice(-2).join('.');
     }
 
     async function deleteSubject(subjectHash) {

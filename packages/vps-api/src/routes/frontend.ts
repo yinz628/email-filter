@@ -279,15 +279,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
 
     <div class="tabs">
-      <button class="tab active" onclick="showTab('workers')">Worker 实例</button>
-      <button class="tab" onclick="showTab('rules')">过滤规则</button>
-      <button class="tab" onclick="showTab('dynamic')">动态规则</button>
-      <button class="tab" onclick="showTab('logs')">日志</button>
-      <button class="tab" onclick="showTab('stats')">统计信息</button>
-      <button class="tab" onclick="showTab('campaign')">营销分析</button>
+      <button class="tab active" onclick="showTab('workers')">⚙️ Worker 实例</button>
+      <button class="tab" onclick="showTab('rules')">📋 过滤规则</button>
+      <button class="tab" onclick="showTab('dynamic')">🔄 动态规则</button>
+      <button class="tab" onclick="showTab('logs')">📝 日志</button>
+      <button class="tab" onclick="showTab('stats')">📊 统计信息</button>
+      <button class="tab" onclick="showTab('campaign')">📈 营销分析</button>
       <button class="tab" onclick="showTab('subjects')">📧 邮件主题</button>
       <button class="tab" onclick="showTab('monitoring')">📡 信号监控</button>
-      <button class="tab" onclick="showTab('settings')">设置</button>
+      <button class="tab" onclick="showTab('settings')">⚙️ 设置</button>
       <button class="tab admin-only hidden" id="users-tab-btn" onclick="showTab('users')">👥 用户管理</button>
     </div>
 

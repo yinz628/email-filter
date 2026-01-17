@@ -6988,8 +6988,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td style="vertical-align:middle;">' + workerStatsHtml + '</td>' +
           '<td style="font-weight:bold;vertical-align:middle;">' + s.totalEmailCount + '</td>' +
           '<td style="vertical-align:middle;"><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
-          '<td class="actions" style="vertical-align:middle;">' +
-            '<button class="btn btn-sm btn-primary" onclick="addSubjectToRule(\\'' + escapeHtml(s.subject) + '\\', \\'' + escapeHtml(s.merchantDomain) + '\\')">添加到规则</button>' +
+          '<td style="vertical-align:middle;white-space:nowrap;">' +
+            '<button class="btn btn-sm btn-primary" onclick="addSubjectToRule(\\'' + escapeHtml(s.subject) + '\\', \\'' + escapeHtml(s.merchantDomain) + '\\')">添加到规则</button> ' +
             '<button class="btn btn-sm btn-danger" onclick="deleteSubject(\\'' + escapeHtml(s.subjectHash) + '\\')">删除</button>' +
           '</td>' +
         '</tr>';

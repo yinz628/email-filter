@@ -43,7 +43,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; vertical-align: middle; }
     th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
     td { color: #333; }
     tr:hover { background: #f8f9fa; }

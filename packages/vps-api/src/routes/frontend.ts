@@ -58,7 +58,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     .category-blacklist { background: #f8d7da; color: #721c24; }
     .category-dynamic { background: #fff3cd; color: #856404; }
     .hidden { display: none !important; }
-    .actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
     .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(2px); }
     .modal-content { background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 480px; max-height: 85vh; overflow-y: auto; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
     .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-right: 30px; }

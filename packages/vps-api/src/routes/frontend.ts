@@ -6989,7 +6989,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td style="font-weight:bold;vertical-align:middle;">' + s.totalEmailCount + '</td>' +
           '<td style="vertical-align:middle;"><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
           '<td style="vertical-align:middle;white-space:nowrap;">' +
-            '<button class="btn btn-sm btn-primary" onclick="addSubjectToRule(\\'' + escapeHtml(s.subject) + '\\', \\'' + escapeHtml(s.merchantDomain) + '\\')">添加到规则</button> ' +
+            '<button class="btn btn-sm btn-primary" data-subject="' + escapeHtml(s.subject) + '" data-domain="' + escapeHtml(s.merchantDomain) + '" onclick="addSubjectToRuleFromButton(this)">添加到规则</button> ' +
             '<button class="btn btn-sm btn-danger" onclick="deleteSubject(\\'' + escapeHtml(s.subjectHash) + '\\')">删除</button>' +
           '</td>' +
         '</tr>';
@@ -7146,6 +7146,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         console.error('Error toggling focus:', e);
         showAlert('操作失败', 'error');
       }
+    }
+
+    function addSubjectToRuleFromButton(button) {
+      const subject = button.getAttribute('data-subject');
+      const merchantDomain = button.getAttribute('data-domain');
+      addSubjectToRule(subject, merchantDomain);
     }
 
     function addSubjectToRule(subject, merchantDomain) {

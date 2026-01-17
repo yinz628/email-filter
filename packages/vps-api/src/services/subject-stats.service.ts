@@ -18,7 +18,7 @@ import type {
   SubjectStorageStats,
   SubjectStatRow,
 } from '@email-filter/shared';
-import { toSubjectStat, extractDomainFromEmail } from '@email-filter/shared';
+import { toSubjectStat, extractDomainFromEmail, extractBaseDomain } from '@email-filter/shared';
 
 /**
  * Calculate SHA-256 hash for subject string
@@ -138,8 +138,11 @@ export class SubjectStatsService {
     }
 
     if (merchantDomain) {
-      conditions.push('merchant_domain = ?');
+      // Support filtering by base domain (matches all subdomains)
+      // e.g., "emailbychurch.com" matches "o3820.m.emailbychurch.com", "o3821.m.emailbychurch.com", etc.
+      conditions.push('(merchant_domain = ? OR merchant_domain LIKE ?)');
       params.push(merchantDomain);
+      params.push(`%.${merchantDomain}`);
     }
 
     if (isFocused !== undefined) {
@@ -530,9 +533,10 @@ export class SubjectStatsService {
   }
 
   /**
-   * Get all unique merchant domains
+   * Get all unique merchant domains (base domains only, without subdomains)
+   * For example: "o3820.m.emailbychurch.com" -> "emailbychurch.com"
    * 
-   * @returns Array of unique merchant domain strings
+   * @returns Array of unique base domain strings
    */
   getMerchantDomains(): string[] {
     const stmt = this.db.prepare(`
@@ -541,6 +545,17 @@ export class SubjectStatsService {
       ORDER BY merchant_domain ASC
     `);
     const rows = stmt.all() as Array<{ merchant_domain: string }>;
-    return rows.map(row => row.merchant_domain);
+    
+    // Extract base domains and deduplicate
+    const baseDomains = new Set<string>();
+    for (const row of rows) {
+      const baseDomain = extractBaseDomain(row.merchant_domain);
+      if (baseDomain) {
+        baseDomains.add(baseDomain);
+      }
+    }
+    
+    // Return sorted array
+    return Array.from(baseDomains).sort();
   }
 }

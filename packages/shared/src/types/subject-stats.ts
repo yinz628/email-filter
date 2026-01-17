@@ -184,3 +184,41 @@ export function extractDomainFromEmail(email: string): string {
   
   return email.substring(atIndex + 1).toLowerCase().trim();
 }
+
+/**
+ * Extract base domain from a full domain
+ * Removes subdomains and returns only the main domain (e.g., "o3820.m.emailbychurch.com" -> "emailbychurch.com")
+ * 
+ * @param domain - Full domain string
+ * @returns Base domain (main domain without subdomains)
+ */
+export function extractBaseDomain(domain: string): string {
+  if (!domain || typeof domain !== 'string') {
+    return '';
+  }
+  
+  const trimmed = domain.trim().toLowerCase();
+  if (!trimmed) {
+    return '';
+  }
+  
+  // Split by dots
+  const parts = trimmed.split('.');
+  
+  // If less than 2 parts, return as-is (e.g., "localhost")
+  if (parts.length < 2) {
+    return trimmed;
+  }
+  
+  // Handle special cases for known TLDs with 2 parts (e.g., .co.uk, .com.br)
+  const twoPartTLDs = ['co.uk', 'com.br', 'com.au', 'co.jp', 'co.kr', 'com.mx', 'com.ar'];
+  const lastTwoParts = parts.slice(-2).join('.');
+  
+  if (twoPartTLDs.includes(lastTwoParts)) {
+    // Return last 3 parts for 2-part TLDs (e.g., "example.co.uk")
+    return parts.slice(-3).join('.');
+  }
+  
+  // Return last 2 parts for standard TLDs (e.g., "example.com")
+  return parts.slice(-2).join('.');
+}

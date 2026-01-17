@@ -1109,18 +1109,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
           <h2 style="margin:0;border:none;padding:0;">📧 邮件主题统计</h2>
           <div style="display:flex;gap:10px;align-items:center;">
-            <select id="subjects-worker-filter" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <select id="subjects-worker-filter" onchange="resetSubjectsPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="">全部实例</option>
             </select>
-            <select id="subjects-merchant-filter" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <select id="subjects-merchant-filter" onchange="resetSubjectsPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="">全部商户</option>
             </select>
-            <select id="subjects-sort-order" onchange="loadSubjects()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <select id="subjects-sort-order" onchange="resetSubjectsPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
               <option value="desc">数量降序</option>
               <option value="asc">数量升序</option>
             </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-              <input type="checkbox" id="subjects-focus-filter" onchange="loadSubjects()">
+              <input type="checkbox" id="subjects-focus-filter" onchange="resetSubjectsPageAndLoad()">
               <span>仅显示关注</span>
             </label>
             <button class="btn btn-secondary" onclick="loadSubjects()">🔄 刷新</button>
@@ -6916,6 +6916,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     let subjectsPageSize = 20;
     let subjectsTotalCount = 0;
     let selectedSubjectIds = new Set();
+
+    function resetSubjectsPageAndLoad() {
+      subjectsPage = 1;
+      loadSubjects();
+    }
 
     async function loadSubjects() {
       if (!apiToken) return;

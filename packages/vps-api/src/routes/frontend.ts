@@ -1153,6 +1153,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 <th>商户域名</th>
                 <th>Worker 实例</th>
                 <th>邮件数量</th>
+                <th>邮件时间</th>
                 <th>关注</th>
                 <th>操作</th>
               </tr>
@@ -6976,6 +6977,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const focusIcon = s.isFocused ? '⭐' : '☆';
         const focusTitle = s.isFocused ? '取消关注' : '添加关注';
         
+        // Format email time range
+        const firstTime = new Date(s.firstSeenAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const lastTime = new Date(s.lastSeenAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const timeRangeHtml = '<div style="font-size:12px;color:#666;">首: ' + firstTime + '</div><div style="font-size:12px;color:#666;">末: ' + lastTime + '</div>';
+        
         // Render worker stats as multi-line
         const workerStatsHtml = (s.workerStats || []).map(ws => 
           '<div style="white-space:nowrap;">' + escapeHtml(ws.workerName) + ' <span style="color:#666;">(' + ws.emailCount + ')</span></div>'
@@ -6987,6 +6993,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td style="vertical-align:middle;">' + escapeHtml(s.merchantDomain) + '</td>' +
           '<td style="vertical-align:middle;">' + workerStatsHtml + '</td>' +
           '<td style="font-weight:bold;vertical-align:middle;">' + s.totalEmailCount + '</td>' +
+          '<td style="vertical-align:middle;font-size:12px;">' + timeRangeHtml + '</td>' +
           '<td style="vertical-align:middle;"><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
           '<td style="vertical-align:middle;white-space:nowrap;">' +
             '<button class="btn btn-sm btn-primary" data-subject="' + escapeHtml(s.subject) + '" data-domain="' + escapeHtml(s.merchantDomain) + '" onclick="addSubjectToRuleFromButton(this)">添加到规则</button> ' +

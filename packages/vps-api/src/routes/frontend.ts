@@ -2867,16 +2867,26 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         // For admin_action and system logs, show message in subject column and details summary in other columns
         let subject, from, to, rule;
         if (log.category === 'admin_action' || log.category === 'system') {
-          subject = log.message || '-';
-          // Show relevant details based on log type
-          if (d.action) {
+          // For system logs (dynamic rule creation), show rule pattern as subject
+          if (d.pattern) {
+            subject = d.pattern; // Rule pattern (email subject)
+          } else {
+            subject = log.message || '-';
+          }
+          
+          // Show sender domain in 'from' column
+          if (d.senderDomain) {
+            from = d.senderDomain;
+          } else if (d.action) {
             from = d.action + (d.entityType ? ' (' + d.entityType + ')' : '');
-          } else if (d.pattern) {
-            from = '规则: ' + d.pattern;
           } else {
             from = '-';
           }
-          if (d.detectionLatencyMs !== undefined) {
+          
+          // Show recipient email in 'to' column
+          if (d.recipientEmail) {
+            to = d.recipientEmail;
+          } else if (d.detectionLatencyMs !== undefined) {
             to = '延迟: ' + d.detectionLatencyMs + 'ms';
           } else if (d.entityId) {
             to = 'ID: ' + d.entityId;
@@ -2885,7 +2895,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           } else {
             to = '-';
           }
-          rule = d.emailsForwardedBeforeBlock !== undefined ? '转发: ' + d.emailsForwardedBeforeBlock + '封' : '-';
+          
+          // Show log details in 'rule' column
+          rule = '详情';
         } else {
           subject = d.subject || '-';
           from = d.from || '-';

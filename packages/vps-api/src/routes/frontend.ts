@@ -2891,10 +2891,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           }
           
           // Show recipient email in 'to' column
-          if (d.recipientEmail) {
-            to = d.recipientEmail;
-          } else if (d.detectionLatencyMs !== undefined) {
+          if (d.detectionLatencyMs !== undefined) {
             to = '延迟: ' + d.detectionLatencyMs + 'ms';
+          } else if (d.recipientEmail) {
+            to = d.recipientEmail;
           } else if (d.entityId) {
             to = 'ID: ' + d.entityId;
           } else if (d.deletedCount !== undefined) {

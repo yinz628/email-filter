@@ -2908,7 +2908,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         } else {
           // For email logs, extract domain from sender email
           subject = d.subject || '-';
-          from = extractDomainFromEmail(d.from);
+          // Debug: if from is empty, try to show what we have
+          if (!d.from || d.from === '') {
+            from = '-';
+            // Log to console for debugging
+            console.log('Empty from field in log:', log.id, 'details:', d);
+          } else {
+            from = extractDomainFromEmail(d.from);
+          }
           to = d.to || '-';
           rule = d.matchedRule || '-';
         }

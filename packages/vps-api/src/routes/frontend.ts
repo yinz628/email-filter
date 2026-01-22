@@ -2911,8 +2911,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + workerDisplay + '</td>' +
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + cat + '</td>' +
           '<td style="cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(subject.length > 22 ? subject.substring(0,22) + '...' : subject) + '</td>' +
-          '<td style="font-size:12px;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(from.length > 20 ? from.substring(0,20) + '...' : from) + '</td>' +
-          '<td style="font-size:12px;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(to.length > 20 ? to.substring(0,20) + '...' : to) + '</td>' +
+          '<td style="font-size:12px;">' + escapeHtml(from.length > 20 ? from.substring(0,20) + '...' : from) + '</td>' +
+          '<td style="font-size:12px;">' + escapeHtml(to.length > 20 ? to.substring(0,20) + '...' : to) + '</td>' +
           '<td style="font-size:12px;color:#888;cursor:pointer" onclick="showLogDetail(' + idx + ')">' + escapeHtml(rule) + '</td>' +
           '</tr>';
       }).join('');

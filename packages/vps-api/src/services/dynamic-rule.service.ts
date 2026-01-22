@@ -412,9 +412,16 @@ export class DynamicRuleService {
    * 
    * @param subject - The email subject to track
    * @param receivedAt - When the email was received
+   * @param senderEmail - The sender's email address (optional, for logging)
+   * @param recipientEmail - The recipient's email address (optional, for logging)
    * @returns DynamicRuleCreationResult with rule and metrics
    */
-  trackSubjectWithMetrics(subject: string, receivedAt: Date = new Date()): DynamicRuleCreationResult {
+  trackSubjectWithMetrics(
+    subject: string, 
+    receivedAt: Date = new Date(),
+    senderEmail?: string,
+    recipientEmail?: string
+  ): DynamicRuleCreationResult {
     const config = this.getConfig();
     
     // If dynamic rule feature is disabled, do not create new rules
@@ -514,6 +521,14 @@ export class DynamicRuleService {
           
           // Log system event for dynamic rule creation - Requirements 6.1
           const logRepository = new LogRepository(this.db);
+          
+          // Extract sender domain from email address
+          let senderDomain: string | undefined;
+          if (senderEmail) {
+            const match = senderEmail.match(/@(.+)$/);
+            senderDomain = match ? match[1] : senderEmail;
+          }
+          
           logRepository.create(
             'system',
             `动态规则已创建: ${normalizedSubject}`,
@@ -524,6 +539,8 @@ export class DynamicRuleService {
               emailsForwardedBeforeBlock,
               firstEmailTime: firstEmailTime.toISOString(),
               triggerEmailTime: receivedAtStr,
+              senderDomain,
+              recipientEmail,
             },
             'info'
           );

@@ -114,7 +114,9 @@ export function processPhase1(payload: EmailWebhookPayload): Phase1Result {
     // Track the subject and potentially create a dynamic rule
     const trackingResult = dynamicRuleService.trackSubjectWithMetrics(
       payload.subject,
-      new Date(payload.timestamp)
+      new Date(payload.timestamp),
+      payload.from,
+      payload.to
     );
 
     if (trackingResult.rule) {

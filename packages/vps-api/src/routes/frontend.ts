@@ -2842,6 +2842,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
     
+    // Helper function to extract domain from email address
+    function extractDomainFromEmail(email) {
+      if (!email || email === '-') return '-';
+      const match = email.match(/@(.+)$/);
+      return match ? match[1] : email;
+    }
+    
     function renderLogs(logs) {
       currentLogs = logs;
       const tbody = document.getElementById('logs-table');
@@ -2899,8 +2906,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           // Show log details in 'rule' column
           rule = '详情';
         } else {
+          // For email logs, extract domain from sender email
           subject = d.subject || '-';
-          from = d.from || '-';
+          from = extractDomainFromEmail(d.from);
           to = d.to || '-';
           rule = d.matchedRule || '-';
         }

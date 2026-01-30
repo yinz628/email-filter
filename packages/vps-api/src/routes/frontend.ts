@@ -1155,6 +1155,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 <th>邮件数量</th>
                 <th>邮件时间</th>
                 <th>关注</th>
+                <th>忽略</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -6956,7 +6957,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         const sortOrder = document.getElementById('subjects-sort-order')?.value || 'desc';
         const focusFilter = document.getElementById('subjects-focus-filter')?.checked || false;
         
-        let url = '/api/subjects?sortBy=emailCount&sortOrder=' + sortOrder;
+        // Changed default sortBy to lastSeenAt (last email time)
+        let url = '/api/subjects?sortBy=lastSeenAt&sortOrder=' + sortOrder;
         url += '&limit=' + subjectsPageSize + '&offset=' + ((subjectsPage - 1) * subjectsPageSize);
         if (workerFilter) url += '&workerName=' + encodeURIComponent(workerFilter);
         if (merchantFilter) url += '&merchantDomain=' + encodeURIComponent(merchantFilter);
@@ -6993,9 +6995,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       tbody.innerHTML = subjectsData.map(s => {
         const isSelected = selectedSubjectIds.has(s.subjectHash);
-        const focusedClass = s.isFocused ? 'style="background:#fff8e1;"' : '';
+        // Styling: focused = yellow background, ignored = gray background
+        let rowStyle = '';
+        if (s.isFocused) {
+          rowStyle = 'style="background:#fff8e1;"';
+        } else if (s.isIgnored) {
+          rowStyle = 'style="background:#f5f5f5;color:#999;"';
+        }
+        
         const focusIcon = s.isFocused ? '⭐' : '☆';
         const focusTitle = s.isFocused ? '取消关注' : '添加关注';
+        
+        const ignoreIcon = s.isIgnored ? '🔕' : '🔔';
+        const ignoreTitle = s.isIgnored ? '取消忽略' : '忽略';
+        const ignoreButtonClass = s.isIgnored ? 'btn-secondary' : 'btn-warning';
         
         // Format email time range
         const firstTime = new Date(s.firstSeenAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -7007,7 +7020,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<div style="white-space:nowrap;">' + escapeHtml(ws.workerName) + ' <span style="color:#666;">(' + ws.emailCount + ')</span></div>'
         ).join('');
         
-        return '<tr ' + focusedClass + '>' +
+        return '<tr ' + rowStyle + '>' +
           '<td style="vertical-align:middle;"><input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleSubjectSelection(\\'' + escapeHtml(s.subjectHash) + '\\', this.checked)"></td>' +
           '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;" title="' + escapeHtml(s.subject) + '">' + escapeHtml(s.subject) + '</td>' +
           '<td style="vertical-align:middle;">' + escapeHtml(s.merchantDomain) + '</td>' +
@@ -7015,6 +7028,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           '<td style="font-weight:bold;vertical-align:middle;">' + s.totalEmailCount + '</td>' +
           '<td style="vertical-align:middle;font-size:12px;">' + timeRangeHtml + '</td>' +
           '<td style="vertical-align:middle;"><button class="btn btn-sm" onclick="toggleSubjectFocus(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isFocused + ')" title="' + focusTitle + '">' + focusIcon + '</button></td>' +
+          '<td style="vertical-align:middle;"><button class="btn btn-sm ' + ignoreButtonClass + '" onclick="toggleSubjectIgnore(\\'' + escapeHtml(s.subjectHash) + '\\', ' + !s.isIgnored + ')" title="' + ignoreTitle + '">' + ignoreIcon + '</button></td>' +
           '<td style="vertical-align:middle;white-space:nowrap;">' +
             '<button class="btn btn-sm btn-primary" data-subject="' + escapeHtml(s.subject) + '" data-domain="' + escapeHtml(s.merchantDomain) + '" onclick="addSubjectToRuleFromButton(this)">添加到规则</button> ' +
             '<button class="btn btn-sm btn-danger" onclick="deleteSubject(\\'' + escapeHtml(s.subjectHash) + '\\')">删除</button>' +
@@ -7171,6 +7185,29 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       } catch (e) {
         console.error('Error toggling focus:', e);
+        showAlert('操作失败', 'error');
+      }
+    }
+
+    async function toggleSubjectIgnore(subjectHash, ignored) {
+      if (!apiToken) return;
+      try {
+        // Use the subjectHash as the ID for the ignore endpoint
+        const ignoreRes = await fetch('/api/subjects/' + encodeURIComponent(subjectHash) + '/ignore', {
+          method: 'POST',
+          headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ignored })
+        });
+        
+        if (ignoreRes.ok) {
+          showAlert(ignored ? '已忽略' : '已取消忽略');
+          loadSubjects();
+        } else {
+          const errData = await ignoreRes.json();
+          showAlert(errData.error || '操作失败', 'error');
+        }
+      } catch (e) {
+        console.error('Error toggling ignore:', e);
         showAlert('操作失败', 'error');
       }
     }

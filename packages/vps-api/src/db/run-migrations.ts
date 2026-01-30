@@ -396,6 +396,29 @@ function migrateCreateSubjectStatsTable(db: Database.Database): MigrationResult 
   return { name, status: 'applied', message: 'Table and indexes created successfully' };
 }
 
+/**
+ * Migration 23: Add is_ignored column to subject_stats table
+ */
+function migrateSubjectStatsAddIgnored(db: Database.Database): MigrationResult {
+  const name = 'subject_stats_add_ignored';
+  
+  // Check if column already exists
+  const tableInfo = db.prepare("PRAGMA table_info(subject_stats)").all() as Array<{ name: string }>;
+  const hasIgnoredColumn = tableInfo.some(col => col.name === 'is_ignored');
+  
+  if (hasIgnoredColumn) {
+    return { name, status: 'skipped', message: 'Column is_ignored already exists' };
+  }
+  
+  // Add is_ignored column with default value 0
+  db.exec('ALTER TABLE subject_stats ADD COLUMN is_ignored INTEGER DEFAULT 0');
+  
+  // Create index for is_ignored column
+  db.exec('CREATE INDEX IF NOT EXISTS idx_subject_stats_ignored ON subject_stats(is_ignored)');
+  
+  return { name, status: 'applied', message: 'Column is_ignored added successfully' };
+}
+
 // ============================================
 // Migration Runner
 // ============================================
@@ -423,6 +446,7 @@ const migrations: MigrationFn[] = [
   migrateCreateUsersTable,
   migrateCreateUserSettingsTable,
   migrateCreateSubjectStatsTable,
+  migrateSubjectStatsAddIgnored,
 ];
 
 /**

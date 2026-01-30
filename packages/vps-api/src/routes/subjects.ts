@@ -296,4 +296,33 @@ export async function subjectRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Internal error' });
     }
   });
+
+  /**
+   * POST /api/subjects/:id/ignore
+   * Toggle ignore status for a subject stat
+   */
+  fastify.post('/:id/ignore', async (
+    request: FastifyRequest<{ Params: SubjectParams }>,
+    reply: FastifyReply
+  ) => {
+    const validation = validateSetFocus(request.body); // Reuse the same validation (focused/ignored have same structure)
+    if (!validation.valid || !validation.data) {
+      return reply.status(400).send({ error: 'Invalid request', message: validation.error });
+    }
+
+    try {
+      const db = getDatabase();
+      const service = new SubjectStatsService(db);
+
+      const subject = service.setIgnored(request.params.id, validation.data.focused); // Use 'focused' field as 'ignored'
+      if (!subject) {
+        return reply.status(404).send({ error: 'Subject not found' });
+      }
+
+      return reply.send(subject);
+    } catch (error) {
+      request.log.error(error, 'Error setting subject ignore status');
+      return reply.status(500).send({ error: 'Internal error' });
+    }
+  });
 }

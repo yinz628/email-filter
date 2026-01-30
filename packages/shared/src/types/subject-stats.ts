@@ -18,6 +18,7 @@ export interface SubjectStat {
   workerName: string;
   emailCount: number;
   isFocused: boolean;
+  isIgnored: boolean;
   firstSeenAt: Date;
   lastSeenAt: Date;
   createdAt: Date;
@@ -34,6 +35,7 @@ export interface AggregatedSubjectStat {
   merchantDomain: string;
   totalEmailCount: number;
   isFocused: boolean;
+  isIgnored: boolean;
   firstSeenAt: Date;
   lastSeenAt: Date;
   workerStats: WorkerSubjectStat[];
@@ -60,6 +62,7 @@ export interface SubjectStatsFilter {
   workerName?: string;
   merchantDomain?: string;
   isFocused?: boolean;
+  isIgnored?: boolean;
   sortBy?: 'emailCount' | 'lastSeenAt' | 'firstSeenAt';
   sortOrder?: 'asc' | 'desc';
   limit?: number;
@@ -139,6 +142,7 @@ export interface SubjectStatRow {
   worker_name: string;
   email_count: number;
   is_focused: number;
+  is_ignored: number;
   first_seen_at: string;
   last_seen_at: string;
   created_at: string;
@@ -161,6 +165,7 @@ export function toSubjectStat(row: SubjectStatRow): SubjectStat {
     workerName: row.worker_name,
     emailCount: row.email_count,
     isFocused: row.is_focused === 1,
+    isIgnored: row.is_ignored === 1,
     firstSeenAt: new Date(row.first_seen_at),
     lastSeenAt: new Date(row.last_seen_at),
     createdAt: new Date(row.created_at),

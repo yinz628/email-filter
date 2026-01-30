@@ -96,8 +96,8 @@ export class SubjectStatsService {
     const insertStmt = this.db.prepare(`
       INSERT INTO subject_stats (
         id, subject, subject_hash, merchant_domain, worker_name,
-        email_count, is_focused, first_seen_at, last_seen_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
+        email_count, is_focused, is_ignored, first_seen_at, last_seen_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 1, 0, 0, ?, ?, ?, ?)
     `);
     insertStmt.run(id, subject, subjectHash, merchantDomain, workerName, now, now, now, now);
 
@@ -122,6 +122,7 @@ export class SubjectStatsService {
       workerName,
       merchantDomain,
       isFocused,
+      isIgnored,
       sortBy = 'lastSeenAt',
       sortOrder = 'desc',
       limit = 20,
@@ -150,6 +151,11 @@ export class SubjectStatsService {
       params.push(isFocused ? 1 : 0);
     }
 
+    if (isIgnored !== undefined) {
+      conditions.push('is_ignored = ?');
+      params.push(isIgnored ? 1 : 0);
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Get total count of unique subjects (for pagination)
@@ -169,6 +175,7 @@ export class SubjectStatsService {
 
     // Get aggregated subject stats with pagination
     // Group by subject_hash and merchant_domain to aggregate across workers
+    // Sort order: focused first, then by selected sort column, then ignored last
     const queryStmt = this.db.prepare(`
       SELECT 
         subject,
@@ -176,12 +183,13 @@ export class SubjectStatsService {
         merchant_domain,
         SUM(email_count) as total_email_count,
         MAX(is_focused) as is_focused,
+        MAX(is_ignored) as is_ignored,
         MIN(first_seen_at) as first_seen,
         MAX(last_seen_at) as last_seen
       FROM subject_stats
       ${whereClause}
       GROUP BY subject_hash, merchant_domain
-      ORDER BY ${sortColumn} ${order}
+      ORDER BY is_focused DESC, is_ignored ASC, ${sortColumn} ${order}
       LIMIT ? OFFSET ?
     `);
     
@@ -191,6 +199,7 @@ export class SubjectStatsService {
       merchant_domain: string;
       total_email_count: number;
       is_focused: number;
+      is_ignored: number;
       first_seen: string;
       last_seen: string;
     }>;
@@ -229,6 +238,7 @@ export class SubjectStatsService {
         merchantDomain: row.merchant_domain,
         totalEmailCount: row.total_email_count,
         isFocused: row.is_focused === 1,
+        isIgnored: row.is_ignored === 1,
         firstSeenAt: new Date(row.first_seen),
         lastSeenAt: new Date(row.last_seen),
         workerStats,
@@ -289,20 +299,21 @@ export class SubjectStatsService {
     const firstSeenAt = new Date(Math.min(...workerRows.map(wr => new Date(wr.last_seen_at).getTime())));
     const lastSeenAt = new Date(Math.max(...workerRows.map(wr => new Date(wr.last_seen_at).getTime())));
 
-    // Check if any worker record is focused
-    const focusedStmt = this.db.prepare(`
-      SELECT MAX(is_focused) as is_focused
+    // Check if any worker record is focused or ignored
+    const statusStmt = this.db.prepare(`
+      SELECT MAX(is_focused) as is_focused, MAX(is_ignored) as is_ignored
       FROM subject_stats
       WHERE subject_hash = ? AND merchant_domain = ?
     `);
-    const focusedResult = focusedStmt.get(row.subject_hash, row.merchant_domain) as { is_focused: number };
+    const statusResult = statusStmt.get(row.subject_hash, row.merchant_domain) as { is_focused: number; is_ignored: number };
 
     return {
       subject: row.subject,
       subjectHash: row.subject_hash,
       merchantDomain: row.merchant_domain,
       totalEmailCount,
-      isFocused: focusedResult.is_focused === 1,
+      isFocused: statusResult.is_focused === 1,
+      isIgnored: statusResult.is_ignored === 1,
       firstSeenAt,
       lastSeenAt,
       workerStats,
@@ -432,6 +443,64 @@ export class SubjectStatsService {
         WHERE id = ?
       `);
       result = updateStmt.run(focused ? 1 : 0, now, id);
+      
+      // Return the updated record
+      const selectStmt = this.db.prepare(`
+        SELECT * FROM subject_stats WHERE id = ?
+      `);
+      row = selectStmt.get(id) as SubjectStatRow | undefined;
+    }
+    
+    if (result.changes === 0) {
+      return null;
+    }
+    
+    if (!row) {
+      return null;
+    }
+
+    return toSubjectStat(row);
+  }
+
+  /**
+   * Set or unset ignored status for a subject stat
+   * Supports both record ID and subject hash
+   * 
+   * @param id - Subject stat ID or subject hash
+   * @param ignored - Whether to mark as ignored
+   * @returns Updated subject stat or null if not found
+   */
+  setIgnored(id: string, ignored: boolean): SubjectStat | null {
+    const now = new Date().toISOString();
+    
+    // Check if id is a SHA-256 hash (64 hex characters)
+    const isHash = /^[a-f0-9]{64}$/i.test(id);
+    
+    let result;
+    let row: SubjectStatRow | undefined;
+    
+    if (isHash) {
+      // Update all records with this subject_hash
+      const updateStmt = this.db.prepare(`
+        UPDATE subject_stats
+        SET is_ignored = ?, updated_at = ?
+        WHERE subject_hash = ?
+      `);
+      result = updateStmt.run(ignored ? 1 : 0, now, id);
+      
+      // Get one of the updated records
+      const selectStmt = this.db.prepare(`
+        SELECT * FROM subject_stats WHERE subject_hash = ? LIMIT 1
+      `);
+      row = selectStmt.get(id) as SubjectStatRow | undefined;
+    } else {
+      // Update by record id
+      const updateStmt = this.db.prepare(`
+        UPDATE subject_stats
+        SET is_ignored = ?, updated_at = ?
+        WHERE id = ?
+      `);
+      result = updateStmt.run(ignored ? 1 : 0, now, id);
       
       // Return the updated record
       const selectStmt = this.db.prepare(`

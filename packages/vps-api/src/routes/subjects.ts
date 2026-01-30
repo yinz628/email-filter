@@ -85,6 +85,23 @@ function validateSetFocus(body: unknown): { valid: boolean; error?: string; data
   return { valid: true, data: { focused: data.focused } };
 }
 
+/**
+ * Validate set ignore request body
+ */
+function validateSetIgnore(body: unknown): { valid: boolean; error?: string; data?: { ignored: boolean } } {
+  if (!body || typeof body !== 'object') {
+    return { valid: false, error: 'Request body is required' };
+  }
+
+  const data = body as Record<string, unknown>;
+
+  if (typeof data.ignored !== 'boolean') {
+    return { valid: false, error: 'ignored must be a boolean' };
+  }
+
+  return { valid: true, data: { ignored: data.ignored } };
+}
+
 // ============================================
 // Route Registration
 // ============================================
@@ -305,7 +322,7 @@ export async function subjectRoutes(fastify: FastifyInstance): Promise<void> {
     request: FastifyRequest<{ Params: SubjectParams }>,
     reply: FastifyReply
   ) => {
-    const validation = validateSetFocus(request.body); // Reuse the same validation (focused/ignored have same structure)
+    const validation = validateSetIgnore(request.body);
     if (!validation.valid || !validation.data) {
       return reply.status(400).send({ error: 'Invalid request', message: validation.error });
     }
@@ -314,7 +331,7 @@ export async function subjectRoutes(fastify: FastifyInstance): Promise<void> {
       const db = getDatabase();
       const service = new SubjectStatsService(db);
 
-      const subject = service.setIgnored(request.params.id, validation.data.focused); // Use 'focused' field as 'ignored'
+      const subject = service.setIgnored(request.params.id, validation.data.ignored);
       if (!subject) {
         return reply.status(404).send({ error: 'Subject not found' });
       }

@@ -1,6 +1,6 @@
 /**
  * Shared authentication and user types
- * Used across vps-api, vps-admin, and frontend packages
+ * Used across vps-api and related frontend/admin flows
  */
 
 /**

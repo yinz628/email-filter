@@ -131,11 +131,7 @@ build_packages() {
     # Build vps-api
     cd ../vps-api
     pnpm build
-    
-    # Build vps-admin
-    cd ../vps-admin
-    pnpm build
-    
+
     print_info "Packages built successfully"
 }
 
@@ -144,14 +140,12 @@ setup_systemd() {
     
     # Copy service files
     cp "${INSTALL_DIR}/packages/vps-api/deploy/email-filter-api.service" /etc/systemd/system/
-    cp "${INSTALL_DIR}/packages/vps-admin/deploy/email-filter-admin.service" /etc/systemd/system/
     
     # Reload systemd
     systemctl daemon-reload
     
     # Enable services
     systemctl enable email-filter-api
-    systemctl enable email-filter-admin
     
     print_info "Systemd services configured"
 }
@@ -171,14 +165,6 @@ start_services() {
         print_error "email-filter-api failed to start"
         systemctl status email-filter-api
         exit 1
-    fi
-    
-    systemctl start email-filter-admin
-    
-    if systemctl is-active --quiet email-filter-admin; then
-        print_info "email-filter-admin is running"
-    else
-        print_warn "email-filter-admin failed to start (may be expected if not configured)"
     fi
 }
 
@@ -230,7 +216,7 @@ print_success() {
     echo "1. Edit ${INSTALL_DIR}/.env with your configuration"
     echo "2. Set API_TOKEN to a secure random string"
     echo "3. Set DEFAULT_FORWARD_TO to your email address"
-    echo "4. Set ADMIN_PASSWORD for the admin panel"
+    echo "4. Set DEFAULT_ADMIN_USERNAME and DEFAULT_ADMIN_PASSWORD"
     echo ""
     
     if [[ "$DEPLOY_METHOD" == "systemd" ]]; then
@@ -247,7 +233,7 @@ print_success() {
     
     echo ""
     echo "API will be available at: http://localhost:3000"
-    echo "Admin panel will be available at: http://localhost:3001"
+    echo "Admin panel will be available at: http://localhost:3000/admin"
     echo ""
 }
 

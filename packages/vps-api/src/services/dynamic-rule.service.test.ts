@@ -2996,6 +2996,26 @@ describe('DynamicRuleService', () => {
       return (hash >>> 0).toString(16);
     }
 
+    function benchmarkHash(subject: string, iterations = 200): { hash: string; avgDurationMs: number } {
+      for (let i = 0; i < 5; i++) {
+        computeFnv1aHash(subject);
+      }
+
+      let hash = '';
+      const startTime = performance.now();
+
+      for (let i = 0; i < iterations; i++) {
+        hash = computeFnv1aHash(subject);
+      }
+
+      const totalDurationMs = performance.now() - startTime;
+
+      return {
+        hash,
+        avgDurationMs: totalDurationMs / iterations,
+      };
+    }
+
     // Arbitrary for generating subjects of various lengths (1 to 1000 characters)
     const subjectWithLengthArb = fc.integer({ min: 1, max: 1000 }).chain((length) =>
       fc.string({ minLength: length, maxLength: length })
@@ -3006,13 +3026,10 @@ describe('DynamicRuleService', () => {
         fc.property(
           subjectWithLengthArb,
           (subject) => {
-            const startTime = performance.now();
-            const hash = computeFnv1aHash(subject);
-            const endTime = performance.now();
-            const durationMs = endTime - startTime;
+            const { hash, avgDurationMs } = benchmarkHash(subject);
 
-            // Hash should complete within 1ms
-            expect(durationMs).toBeLessThan(1);
+            // Use average latency to avoid scheduler jitter during full-suite runs.
+            expect(avgDurationMs).toBeLessThan(1);
             
             // Hash should be a valid hex string
             expect(hash).toMatch(/^[0-9a-f]+$/);
@@ -3084,11 +3101,9 @@ describe('DynamicRuleService', () => {
       const edgeCases = ['   ', '\t\t', '\n\n', '  \t  '];
       
       for (const subject of edgeCases) {
-        const startTime = performance.now();
-        const hash = computeFnv1aHash(subject);
-        const endTime = performance.now();
+        const { hash, avgDurationMs } = benchmarkHash(subject);
         
-        expect(endTime - startTime).toBeLessThan(1);
+        expect(avgDurationMs).toBeLessThan(1);
         expect(hash).toMatch(/^[0-9a-f]+$/);
       }
     });
@@ -3098,13 +3113,10 @@ describe('DynamicRuleService', () => {
         fc.property(
           fc.unicodeString({ minLength: 1, maxLength: 500 }),
           (subject) => {
-            const startTime = performance.now();
-            const hash = computeFnv1aHash(subject);
-            const endTime = performance.now();
-            const durationMs = endTime - startTime;
+            const { hash, avgDurationMs } = benchmarkHash(subject);
 
-            // Hash should complete within 1ms even for Unicode
-            expect(durationMs).toBeLessThan(1);
+            // Unicode inputs should also stay well below the 1ms average budget.
+            expect(avgDurationMs).toBeLessThan(1);
             expect(hash).toMatch(/^[0-9a-f]+$/);
             
             return true;

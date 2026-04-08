@@ -40,6 +40,52 @@ export interface Config {
   };
 }
 
+export class SecurityConfigError extends Error {
+  readonly issues: string[];
+
+  constructor(issues: string[]) {
+    super(issues.join('; '));
+    this.name = 'SecurityConfigError';
+    this.issues = issues;
+  }
+}
+
+export function validateSecurityConfig(targetConfig: Config): void {
+  if (targetConfig.nodeEnv !== 'production') {
+    return;
+  }
+
+  const issues: string[] = [];
+
+  if (targetConfig.jwtSecret.includes('dev-')) {
+    issues.push('JWT_SECRET must be set to a production-safe secret');
+  }
+
+  if (targetConfig.jwtSecret.length < 32) {
+    issues.push('JWT_SECRET must be at least 32 characters');
+  }
+
+  if (targetConfig.apiToken === 'dev-token') {
+    issues.push('API_TOKEN must be set to a production-safe token');
+  }
+
+  if (targetConfig.apiToken.length < 16) {
+    issues.push('API_TOKEN must be at least 16 characters');
+  }
+
+  if (targetConfig.defaultAdminPassword === 'admin123') {
+    issues.push('DEFAULT_ADMIN_PASSWORD must be changed before production use');
+  }
+
+  if (targetConfig.defaultAdminPassword.length < 8) {
+    issues.push('DEFAULT_ADMIN_PASSWORD must be at least 8 characters');
+  }
+
+  if (issues.length > 0) {
+    throw new SecurityConfigError(issues);
+  }
+}
+
 export const config: Config = {
   port: parseInt(process.env.PORT || '3000', 10),
   host: process.env.HOST || '0.0.0.0',
@@ -63,3 +109,5 @@ export const config: Config = {
     runHeartbeatOnStart: process.env.RUN_HEARTBEAT_ON_START === 'true',
   },
 };
+
+validateSecurityConfig(config);

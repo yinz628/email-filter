@@ -24,6 +24,34 @@ describe('DynamicPatternCache', () => {
     cache = new DynamicPatternCache();
   });
 
+  function benchmarkLookup(
+    targetCache: DynamicPatternCache,
+    pattern: string,
+    iterations = 5000,
+    rounds = 5,
+  ): number {
+    for (let i = 0; i < 20; i++) {
+      targetCache.has(pattern);
+    }
+
+    const durations: number[] = [];
+
+    for (let round = 0; round < rounds; round++) {
+      const startTime = performance.now();
+
+      for (let i = 0; i < iterations; i++) {
+        targetCache.has(pattern);
+      }
+
+      durations.push(performance.now() - startTime);
+    }
+
+    const sortedDurations = [...durations].sort((left, right) => left - right);
+    const medianDurationMs = sortedDurations[Math.floor(sortedDurations.length / 2)];
+
+    return medianDurationMs / iterations;
+  }
+
   /**
    * **Feature: api-worker-performance, Property 4: 动态 Pattern Set O(1) 查找**
    * **Validates: Requirements 2.4, 4.4**
@@ -48,16 +76,7 @@ describe('DynamicPatternCache', () => {
             // Get a pattern to look up (use one that exists)
             const patternToLookup = patterns[lookupIndex % patterns.length];
             
-            // Measure lookup time for multiple iterations
-            const iterations = 1000;
-            const startTime = performance.now();
-            
-            for (let i = 0; i < iterations; i++) {
-              cache.has(patternToLookup);
-            }
-            
-            const endTime = performance.now();
-            const avgTimeMs = (endTime - startTime) / iterations;
+            const avgTimeMs = benchmarkLookup(cache, patternToLookup);
             
             // O(1) lookup should be very fast - less than 0.1ms per lookup
             // This is a generous threshold to account for test environment variations
@@ -85,25 +104,13 @@ describe('DynamicPatternCache', () => {
           }
           largeCache.add(testPattern);
           
-          // Measure lookup times
-          const iterations = 1000;
-          
-          const smallStart = performance.now();
-          for (let i = 0; i < iterations; i++) {
-            smallCache.has(testPattern);
-          }
-          const smallTime = performance.now() - smallStart;
-          
-          const largeStart = performance.now();
-          for (let i = 0; i < iterations; i++) {
-            largeCache.has(testPattern);
-          }
-          const largeTime = performance.now() - largeStart;
+          const smallTime = benchmarkLookup(smallCache, testPattern);
+          const largeTime = benchmarkLookup(largeCache, testPattern);
           
           // Large set lookup should not be significantly slower than small set
           // Allow up to 5x difference to account for hash collisions and test variance
           // For true O(1), the ratio should be close to 1
-          const ratio = largeTime / smallTime;
+          const ratio = largeTime / Math.max(smallTime, Number.EPSILON);
           expect(ratio).toBeLessThan(5);
         }),
         { numRuns: 20 }

@@ -29,6 +29,8 @@ export interface SchedulerConfig {
   alertRetentionDays: number;
   /** Whether to run heartbeat immediately on start */
   runHeartbeatOnStart: boolean;
+  /** Whether to run heartbeat checks at all */
+  heartbeatEnabled: boolean;
   /** Whether to use CleanupConfigService for cleanup settings */
   useCleanupConfig: boolean;
 }
@@ -42,6 +44,7 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   hitLogRetentionHours: 72,           // 72 hours (within 48-72 range)
   alertRetentionDays: 90,             // 90 days (within 30-90 range)
   runHeartbeatOnStart: false,
+  heartbeatEnabled: true,
   useCleanupConfig: true,             // Use CleanupConfigService by default
 };
 
@@ -162,7 +165,11 @@ export class SchedulerService {
     }
 
     // Start heartbeat task (Requirement 4.1)
-    this.startHeartbeatTask();
+    if (this.config.heartbeatEnabled) {
+      this.startHeartbeatTask();
+    } else {
+      console.log('[Scheduler] Heartbeat is disabled, skipping heartbeat task');
+    }
 
     // Start cleanup task only if auto cleanup is enabled (Requirements 7.2, 7.3, 7.4, 4.2)
     if (!this.config.useCleanupConfig || this.cleanupConfig?.autoCleanupEnabled) {
@@ -174,7 +181,7 @@ export class SchedulerService {
     this.isRunning = true;
 
     // Optionally run heartbeat immediately on start
-    if (this.config.runHeartbeatOnStart) {
+    if (this.config.heartbeatEnabled && this.config.runHeartbeatOnStart) {
       console.log('[Scheduler] Running initial heartbeat check...');
       this.runHeartbeat();
     }

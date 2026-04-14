@@ -114,10 +114,18 @@ async function start() {
     await fastify.register(workerRoutes, { prefix: '/api/workers' });
     await fastify.register(logsRoutes, { prefix: '/api/logs' });
     await fastify.register(watchRoutes, { prefix: '/api/watch' });
-    await fastify.register(campaignRoutes, { prefix: '/api/campaign' });
+    if (config.features.campaignAnalyticsEnabled) {
+      await fastify.register(campaignRoutes, { prefix: '/api/campaign' });
+    } else {
+      fastify.log.info('Campaign analytics is disabled (CAMPAIGN_ANALYTICS_ENABLED=false)');
+    }
     await fastify.register(subjectRoutes, { prefix: '/api/subjects' });
-    await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
-    await fastify.register(ratioMonitoringRoutes, { prefix: '/api/monitoring/ratio' });
+    if (config.features.signalMonitoringEnabled) {
+      await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
+      await fastify.register(ratioMonitoringRoutes, { prefix: '/api/monitoring/ratio' });
+    } else {
+      fastify.log.info('Signal monitoring is disabled (SIGNAL_MONITORING_ENABLED=false)');
+    }
     await fastify.register(telegramRoutes, { prefix: '/api/telegram' });
     await fastify.register(adminRoutes, { prefix: '/api/admin' });
     await fastify.register(authRoutes, { prefix: '/api/auth' });
@@ -130,7 +138,10 @@ async function start() {
     // - Heartbeat checks every 5 minutes (Requirement 4.1)
     // - Data cleanup daily at 3 AM (Requirements 7.2, 7.3, 7.4)
     console.log('Starting monitoring scheduler...');
-    scheduler = new SchedulerService(getDatabase(), config.scheduler);
+    scheduler = new SchedulerService(getDatabase(), {
+      ...config.scheduler,
+      heartbeatEnabled: config.features.signalMonitoringEnabled,
+    });
     scheduler.start();
     console.log('Monitoring scheduler started');
 

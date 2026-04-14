@@ -22,6 +22,7 @@ import { getRuleCache } from '../services/rule-cache.instance.js';
 import { getAsyncTaskProcessor } from '../services/async-task-processor.instance.js';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { getPerformanceMetrics } from '../services/performance-metrics.js';
+import type { AsyncTaskType } from '../services/async-task-processor.js';
 
 /**
  * Validate email webhook payload
@@ -240,12 +241,20 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       // Requirements: 1.3, 2.1, 2.2
       setImmediate(() => {
         const asyncProcessor = getAsyncTaskProcessor();
+        const enabledTypes: AsyncTaskType[] = ['stats', 'log', 'watch', 'subject'];
+        if (config.features.campaignAnalyticsEnabled) {
+          enabledTypes.push('campaign');
+        }
+        if (config.features.signalMonitoringEnabled) {
+          enabledTypes.push('monitoring');
+        }
+
         asyncProcessor.enqueueAll({
           payload,
           filterResult: phase1Result.filterResult,
           workerId: phase1Result.workerId,
           defaultForwardTo: phase1Result.defaultForwardTo,
-        });
+        }, { enabledTypes });
       });
 
       // Return the filter decision immediately (Requirement 1.3)

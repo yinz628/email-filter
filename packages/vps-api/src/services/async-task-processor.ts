@@ -151,11 +151,18 @@ export class AsyncTaskProcessor {
    * Requirements: 2.1, 2.2
    * 
    * @param data - The task data containing payload and filter result
+   * @param options - Optional override for which task types to enqueue
    */
-  enqueueAll(data: AsyncTaskData): void {
+  enqueueAll(
+    data: AsyncTaskData,
+    options?: {
+      enabledTypes?: AsyncTaskType[];
+    }
+  ): void {
     const timestamp = Date.now();
+    const typesToEnqueue = options?.enabledTypes ?? ALL_TASK_TYPES;
     
-    for (const type of ALL_TASK_TYPES) {
+    for (const type of typesToEnqueue) {
       this.enqueue({
         type,
         data,

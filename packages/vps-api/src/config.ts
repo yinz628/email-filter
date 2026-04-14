@@ -8,6 +8,23 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '') return defaultValue;
+
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+
+  return defaultValue;
+}
+
 export interface Config {
   port: number;
   host: string;
@@ -15,6 +32,12 @@ export interface Config {
   apiToken: string;
   defaultForwardTo: string;
   nodeEnv: string;
+  features: {
+    /** Whether campaign analytics functionality is enabled */
+    campaignAnalyticsEnabled: boolean;
+    /** Whether signal monitoring functionality is enabled */
+    signalMonitoringEnabled: boolean;
+  };
   /** Public URL of this VPS API (for webhook endpoint) */
   vpsPublicUrl: string;
   /** JWT secret key for signing tokens - MUST be changed in production */
@@ -93,6 +116,12 @@ export const config: Config = {
   apiToken: process.env.API_TOKEN || 'dev-token',
   defaultForwardTo: process.env.DEFAULT_FORWARD_TO || '',
   nodeEnv: process.env.NODE_ENV || 'development',
+  features: {
+    // Defaults to enabled to preserve existing behavior.
+    // Set to "false"/"0"/"off" to disable.
+    campaignAnalyticsEnabled: parseBooleanEnv(process.env.CAMPAIGN_ANALYTICS_ENABLED, true),
+    signalMonitoringEnabled: parseBooleanEnv(process.env.SIGNAL_MONITORING_ENABLED, true),
+  },
   // VPS Public URL (for checking if worker is connected to this VPS)
   vpsPublicUrl: process.env.VPS_PUBLIC_URL || '',
   // JWT Authentication Configuration

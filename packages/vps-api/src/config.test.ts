@@ -13,6 +13,10 @@ describe('Security Configuration Validation', () => {
     apiToken: 'secure-api-token-12345',
     defaultForwardTo: 'test@example.com',
     nodeEnv: 'production',
+    features: {
+      campaignAnalyticsEnabled: true,
+      signalMonitoringEnabled: true,
+    },
     vpsPublicUrl: 'https://api.example.com',
     jwtSecret: 'a-very-secure-jwt-secret-that-is-long-enough',
     jwtExpiry: '24h',

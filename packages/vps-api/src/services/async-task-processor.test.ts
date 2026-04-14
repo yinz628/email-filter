@@ -99,6 +99,19 @@ describe('AsyncTaskProcessor', () => {
       );
     });
 
+    it('enqueueAll can be restricted to a subset of task types', () => {
+      fc.assert(
+        fc.property(asyncTaskDataArb, (data) => {
+          processor.clear();
+
+          processor.enqueueAll(data, { enabledTypes: ['stats', 'log', 'watch', 'subject'] });
+
+          expect(processor.getQueueSize()).toBe(4);
+        }),
+        { numRuns: 100 }
+      );
+    });
+
     it('enqueueAll creates tasks for all required types', () => {
       fc.assert(
         fc.property(asyncTaskDataArb, (data) => {

@@ -279,9 +279,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('dynamic')">🔄 动态规则</button>
       <button class="tab" onclick="showTab('logs')">📝 日志</button>
       <button class="tab" onclick="showTab('stats')">📊 统计信息</button>
-      <button class="tab" onclick="showTab('campaign')">📈 营销分析</button>
+      <button class="tab" id="campaign-tab-btn" onclick="showTab('campaign')">📈 营销分析</button>
       <button class="tab" onclick="showTab('subjects')">📧 邮件主题</button>
-      <button class="tab" onclick="showTab('monitoring')">📡 信号监控</button>
+      <button class="tab" id="monitoring-tab-btn" onclick="showTab('monitoring')">📡 信号监控</button>
       <button class="tab" onclick="showTab('settings')">⚙️ 设置</button>
       <button class="tab admin-only hidden" id="users-tab-btn" onclick="showTab('users')">👥 用户管理</button>
     </div>
@@ -1205,6 +1205,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <option value="false">禁用</option>
             <option value="true">启用</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>📈 营销分析</label>
+          <select id="setting-campaign-enabled" onchange="setFeatureSetting('campaignAnalyticsEnabled', this.value === 'true')">
+            <option value="true">启用</option>
+            <option value="false">禁用</option>
+          </select>
+          <p class="text-muted" style="margin-top:6px;">禁用后将隐藏顶部入口，并停止相关自动刷新（仅影响本账号界面，不会修改服务器部署开关）。</p>
+        </div>
+        <div class="form-group">
+          <label>📡 信号监控</label>
+          <select id="setting-monitoring-enabled" onchange="setFeatureSetting('signalMonitoringEnabled', this.value === 'true')">
+            <option value="true">启用</option>
+            <option value="false">禁用</option>
+          </select>
+          <p class="text-muted" style="margin-top:6px;">禁用后将隐藏顶部入口，并停止相关自动刷新（仅影响本账号界面，不会修改服务器部署开关）。</p>
         </div>
         <div id="settings-sync-status" style="margin-top:10px;font-size:12px;color:#666;"></div>
       </div>
@@ -2199,14 +2215,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       };
     }
 
-    function showTab(name) {
+    function activateTab(name) {
       // Pause auto-refresh for the old tab before switching
       pauseTabRefresh(currentActiveTab);
       
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
       document.getElementById(name + '-tab').classList.remove('hidden');
-      event.target.classList.add('active');
+      
+      // Mark the current tab button as active (works for both user click + programmatic switching)
+      const btn = document.getElementById(name + '-tab-btn') ||
+        (name === 'campaign' ? document.getElementById('campaign-tab-btn') :
+          (name === 'monitoring' ? document.getElementById('monitoring-tab-btn') : null)) ||
+        document.querySelector('.tab[onclick="showTab(\\'' + name + '\\')"]');
+      if (btn) btn.classList.add('active');
       
       // Update current active tab
       currentActiveTab = name;
@@ -2224,6 +2246,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'monitoring') loadMonitoringData();
       if (name === 'settings') { loadSettings(); loadBackups(); }
       if (name === 'users') loadUsers();
+    }
+
+    function showTab(name) {
+      activateTab(name);
     }
 
     function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
@@ -8451,6 +8477,83 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           }
         }
       }
+
+      // Apply feature toggles (campaign analytics / signal monitoring)
+      const campaignSelect = document.getElementById('setting-campaign-enabled');
+      if (campaignSelect) {
+        const enabled = userSettings.campaignAnalyticsEnabled !== false;
+        campaignSelect.value = enabled ? 'true' : 'false';
+      }
+      const monitoringSelect = document.getElementById('setting-monitoring-enabled');
+      if (monitoringSelect) {
+        const enabled = userSettings.signalMonitoringEnabled !== false;
+        monitoringSelect.value = enabled ? 'true' : 'false';
+      }
+      applyFeatureToggles();
+    }
+
+    /**
+     * Persist a feature toggle to user settings and apply immediately.
+     * (This affects UI visibility/auto-refresh for the current account only.)
+     */
+    function setFeatureSetting(key, enabled) {
+      saveUserSetting(key, enabled);
+      applyFeatureToggles();
+    }
+
+    function applyFeatureToggles() {
+      const campaignEnabled = userSettings.campaignAnalyticsEnabled !== false;
+      const monitoringEnabled = userSettings.signalMonitoringEnabled !== false;
+
+      setTabEnabled('campaign', campaignEnabled);
+      setTabEnabled('monitoring', monitoringEnabled);
+
+      // If the current active tab is disabled, switch to a safe default.
+      if (currentActiveTab === 'campaign' && !campaignEnabled) {
+        activateTab('stats');
+      }
+      if (currentActiveTab === 'monitoring' && !monitoringEnabled) {
+        activateTab('stats');
+      }
+    }
+
+    function setTabEnabled(tabName, enabled) {
+      const tabEl = document.getElementById(tabName + '-tab');
+      const btnEl = tabName === 'campaign'
+        ? document.getElementById('campaign-tab-btn')
+        : (tabName === 'monitoring' ? document.getElementById('monitoring-tab-btn') : null);
+
+      if (btnEl) {
+        btnEl.style.display = enabled ? '' : 'none';
+        if (!enabled) {
+          btnEl.classList.remove('active');
+        }
+      }
+
+      // Keep the DOM in place, but hard-hide when disabled so it can't be interacted with.
+      if (tabEl) {
+        tabEl.style.display = enabled ? '' : 'none';
+        if (!enabled) {
+          tabEl.classList.add('hidden');
+        }
+      }
+
+      // Stop/disable auto-refresh types associated with the tab.
+      const refreshTypes = tabRefreshTypes[tabName] || [];
+      refreshTypes.forEach(type => {
+        if (!enabled) {
+          stopAutoRefresh(type);
+          const cb = document.getElementById(type + '-auto-refresh');
+          const sel = document.getElementById(type + '-refresh-interval');
+          if (cb) { cb.checked = false; cb.disabled = true; }
+          if (sel) { sel.disabled = true; }
+        } else {
+          const cb = document.getElementById(type + '-auto-refresh');
+          const sel = document.getElementById(type + '-refresh-interval');
+          if (cb) { cb.disabled = false; }
+          if (sel) { sel.disabled = false; }
+        }
+      });
     }
     
     /**

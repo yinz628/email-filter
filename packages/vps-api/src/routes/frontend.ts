@@ -89,21 +89,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       .user-info .username { font-size: 12px; }
       .btn-logout { padding: 4px 10px; font-size: 11px; }
       
-      /* Tabs - horizontal scroll on mobile */
-      .tabs { 
-        gap: 4px; 
-        padding: 6px; 
-        overflow-x: auto; 
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        flex-wrap: nowrap;
+      /* Tabs - wrap on mobile so feature tabs are always discoverable */
+      .tabs {
+        gap: 4px;
+        padding: 6px;
+        flex-wrap: wrap;
       }
-      .tabs::-webkit-scrollbar { display: none; }
-      .tab { 
-        padding: 6px 10px; 
-        font-size: 11px; 
+      .tab {
+        padding: 6px 10px;
+        font-size: 11px;
         white-space: nowrap;
-        flex-shrink: 0;
       }
       
       /* Cards */

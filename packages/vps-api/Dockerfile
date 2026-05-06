@@ -1,12 +1,7 @@
-# Single-stage build on a current Debian base so apt sources remain valid.
-FROM node:20-bookworm-slim
+# Use the full Node image so native build tooling is already present.
+FROM node:20-bookworm
 
 WORKDIR /app
-
-# Install build tools for native modules
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 build-essential wget g++ make && \
-    rm -rf /var/lib/apt/lists/*
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate

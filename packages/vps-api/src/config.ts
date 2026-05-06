@@ -79,6 +79,7 @@ export function validateSecurityConfig(targetConfig: Config): void {
   }
 
   const issues: string[] = [];
+  const warnings: string[] = [];
 
   if (targetConfig.jwtSecret.includes('dev-')) {
     issues.push('JWT_SECRET must be set to a production-safe secret');
@@ -93,7 +94,7 @@ export function validateSecurityConfig(targetConfig: Config): void {
   }
 
   if (targetConfig.apiToken.length < 16) {
-    issues.push('API_TOKEN must be at least 16 characters');
+    warnings.push('API_TOKEN is shorter than the recommended 16 characters');
   }
 
   if (targetConfig.defaultAdminPassword === 'admin123') {
@@ -106,6 +107,10 @@ export function validateSecurityConfig(targetConfig: Config): void {
 
   if (issues.length > 0) {
     throw new SecurityConfigError(issues);
+  }
+
+  if (warnings.length > 0) {
+    console.warn(`[config] ${warnings.join('; ')}`);
   }
 }
 

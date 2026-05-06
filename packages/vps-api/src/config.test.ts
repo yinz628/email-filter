@@ -2,8 +2,12 @@
  * Tests for security configuration validation
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { validateSecurityConfig, SecurityConfigError, type Config } from './config.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('Security Configuration Validation', () => {
   const createConfig = (overrides: Partial<Config> = {}): Config => ({
@@ -62,12 +66,13 @@ describe('Security Configuration Validation', () => {
       expect(() => validateSecurityConfig(config)).toThrow(/API_TOKEN must be set/);
     });
 
-    it('should throw when API_TOKEN is too short', () => {
+    it('should warn when API_TOKEN is too short but custom', () => {
       const config = createConfig({
         apiToken: 'short',
       });
-      expect(() => validateSecurityConfig(config)).toThrow(SecurityConfigError);
-      expect(() => validateSecurityConfig(config)).toThrow(/at least 16 characters/);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(() => validateSecurityConfig(config)).not.toThrow();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('API_TOKEN is shorter than the recommended 16 characters'));
     });
 
     it('should throw when DEFAULT_ADMIN_PASSWORD is default value', () => {

@@ -1,12 +1,7 @@
-# Single stage build with Debian 11 (bullseye) to match VPS
-FROM node:20-bullseye-slim
+# Single-stage build on a current Debian base so apt sources remain valid.
+FROM node:20-bookworm-slim
 
 WORKDIR /app
-
-# Use default Debian sources (good for HK region)
-RUN echo "deb http://deb.debian.org/debian bullseye main contrib non-free" > /etc/apt/sources.list && \
-    echo "deb http://deb.debian.org/debian bullseye-updates main contrib non-free" >> /etc/apt/sources.list && \
-    echo "deb http://security.debian.org/debian-security bullseye-security main contrib non-free" >> /etc/apt/sources.list
 
 # Install build tools for native modules
 RUN apt-get update && \

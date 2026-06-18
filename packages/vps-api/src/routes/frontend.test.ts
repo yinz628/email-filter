@@ -12,10 +12,10 @@ import * as fc from 'fast-check';
  */
 
 // Simulated auto-refresh timer types (matching frontend.ts)
-type RefreshType = 'alerts' | 'status' | 'funnel' | 'heartbeat' | 'merchants' | 'dataStats' | 'logs' | 'stats';
+type RefreshType = 'alerts' | 'status' | 'funnel' | 'heartbeat' | 'merchants' | 'dataStats' | 'logs' | 'stats' | 'subjects';
 
 // Tab names in the system
-type TabName = 'workers' | 'rules' | 'dynamic' | 'logs' | 'stats' | 'campaign' | 'monitoring' | 'settings';
+type TabName = 'workers' | 'rules' | 'dynamic' | 'logs' | 'stats' | 'campaign' | 'subjects' | 'monitoring' | 'settings';
 
 // Auto-refresh timer manager (extracted logic from frontend.ts)
 class AutoRefreshManager {
@@ -28,40 +28,43 @@ class AutoRefreshManager {
 
   constructor() {
     // Initialize all timer keys with null (Property 1: Timer Keys Completeness)
-    this.timers = {
-      alerts: null,
-      status: null,
-      funnel: null,
-      heartbeat: null,
-      merchants: null,
-      dataStats: null,
-      logs: null,
-      stats: null
-    };
+      this.timers = {
+        alerts: null,
+        status: null,
+        funnel: null,
+        heartbeat: null,
+        merchants: null,
+        dataStats: null,
+        logs: null,
+        stats: null,
+        subjects: null
+      };
 
     // Mock refresh functions
-    this.functions = {
-      alerts: vi.fn(),
-      status: vi.fn(),
-      funnel: vi.fn(),
-      heartbeat: vi.fn(),
-      merchants: vi.fn(),
-      dataStats: vi.fn(),
-      logs: vi.fn(),
-      stats: vi.fn()
-    };
+      this.functions = {
+        alerts: vi.fn(),
+        status: vi.fn(),
+        funnel: vi.fn(),
+        heartbeat: vi.fn(),
+        merchants: vi.fn(),
+        dataStats: vi.fn(),
+        logs: vi.fn(),
+        stats: vi.fn(),
+        subjects: vi.fn()
+      };
 
     // Tab to refresh type mapping
-    this.tabRefreshTypes = {
-      'workers': [],
-      'rules': [],
-      'dynamic': [],
-      'logs': ['logs'],
-      'stats': ['stats'],
-      'campaign': ['merchants', 'dataStats'],
-      'monitoring': ['alerts', 'status', 'funnel', 'heartbeat'],
-      'settings': []
-    };
+      this.tabRefreshTypes = {
+        'workers': [],
+        'rules': [],
+        'dynamic': [],
+        'logs': ['logs'],
+        'stats': ['stats'],
+        'campaign': ['merchants', 'dataStats'],
+        'subjects': ['subjects'],
+        'monitoring': ['alerts', 'status', 'funnel', 'heartbeat'],
+        'settings': []
+      };
 
     this.pausedState = {};
     this.currentActiveTab = 'workers';
@@ -177,10 +180,11 @@ class AutoRefreshManager {
 // Arbitraries for property-based testing
 const refreshTypeArb = fc.constantFrom<RefreshType>(
   'alerts', 'status', 'funnel', 'heartbeat', 'merchants', 'dataStats', 'logs', 'stats'
+  , 'subjects'
 );
 
 const tabNameArb = fc.constantFrom<TabName>(
-  'workers', 'rules', 'dynamic', 'logs', 'stats', 'campaign', 'monitoring', 'settings'
+  'workers', 'rules', 'dynamic', 'logs', 'stats', 'campaign', 'subjects', 'monitoring', 'settings'
 );
 
 const intervalArb = fc.integer({ min: 1, max: 300 }); // 1-300 seconds
@@ -218,10 +222,10 @@ describe('AutoRefreshManager', () => {
       expect(timerKeys.sort()).toEqual(functionKeys.sort());
     });
 
-    it('should have exactly 8 timer types defined', () => {
+    it('should have exactly 9 timer types defined', () => {
       const expectedTypes: RefreshType[] = [
         'alerts', 'status', 'funnel', 'heartbeat', 
-        'merchants', 'dataStats', 'logs', 'stats'
+        'merchants', 'dataStats', 'logs', 'stats', 'subjects'
       ];
       
       const timerKeys = manager.getTimerKeys();

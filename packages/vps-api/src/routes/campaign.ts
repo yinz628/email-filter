@@ -16,7 +16,6 @@ import type {
   CampaignFilter,
   MerchantFilter,
   MerchantAnalysisStatus,
-  SetMerchantAnalysisStatusDTO,
   AnalysisProjectStatus,
   CreateAnalysisProjectDTO,
   UpdateAnalysisProjectDTO,
@@ -26,6 +25,8 @@ import { ProjectPathAnalysisService, type ProjectRootCampaign, type ProjectPathE
 import { analysisQueue } from '../services/analysis-queue.service.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { createFeatureGuard } from '../middleware/feature-guard.js';
+import { FeatureSettingsService } from '../services/feature-settings.service.js';
 import { getEffectiveWorkerNames, campaignBelongsToWorkers } from '../utils/project-helpers.js';
 
 // ============================================
@@ -402,6 +403,7 @@ interface GetRecipientPathQuery {
 export async function campaignRoutes(fastify: FastifyInstance): Promise<void> {
   // Apply auth middleware to all routes in this plugin
   fastify.addHook('preHandler', authMiddleware);
+  fastify.addHook('preHandler', createFeatureGuard(new FeatureSettingsService(getDatabase()), 'campaignAnalytics'));
 
   // ============================================
   // Merchant Routes (Task 10.1)

@@ -18,3 +18,5 @@ export type {
   AuthResult,
   AuthenticatedRequest,
 } from './auth.js';
+
+export { createFeatureGuard } from './feature-guard.js';

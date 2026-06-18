@@ -1,0 +1,27 @@
+# Cloudflare Email Worker Configuration
+# Dedicated test worker for subject-diagnostic routing
+
+name = "email-filter-forwarder-test"
+main = "src/index-test.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+VPS_API_URL = "https://hkbage.feimails.com/api/webhook/email"
+VPS_API_TOKEN = "nature123"
+DEFAULT_FORWARD_TO = "wangshengshan5@gmail.com"
+# Dedicated worker identity for isolated test traffic
+WORKER_NAME = "aloemail.store_test_worker"
+DEBUG_LOGGING = "false"
+
+[[send_email]]
+name = "SEB"
+
+[build]
+command = ""
+
+[dev]
+port = 8788
+local_protocol = "http"
+
+[observability]
+enabled = false

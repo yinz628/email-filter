@@ -13,7 +13,7 @@
  */
 
 import type { Database } from 'better-sqlite3';
-import type { PendingTask, AsyncTaskData } from './async-task-processor.js';
+import type { PendingTask } from './async-task-processor.js';
 import type { StatsRepository } from '../db/stats-repository.js';
 import type { LogRepository, LogCategory } from '../db/log-repository.js';
 import type { WatchRepository, WatchRule } from '../db/watch-repository.js';
@@ -22,7 +22,6 @@ import { DynamicRuleService } from './dynamic-rule.service.js';
 import { CampaignAnalyticsService } from './campaign-analytics.service.js';
 import { HitProcessor } from './monitoring/hit-processor.js';
 import { SubjectStatsService } from './subject-stats.service.js';
-import { matchesRuleWebhook } from '@email-filter/shared';
 
 /**
  * Aggregated stats for batch processing
@@ -42,6 +41,15 @@ export interface LogEntry {
   details?: Record<string, unknown>;
   level: 'info' | 'warn' | 'error';
   workerName: string;
+}
+
+interface SubjectMetadataPayload {
+  subjectSource?: 'header' | 'raw-header-fallback' | 'missing';
+  subjectRawHeader?: string;
+}
+
+function formatSubjectForDisplay(subject: string): string {
+  return subject.trim().length > 0 ? subject : '（空主题）';
 }
 
 /**
@@ -128,10 +136,11 @@ export async function processLogTasks(
   // Convert tasks to log entries
   const logEntries: LogEntry[] = tasks.map((task) => {
     const { payload, filterResult } = task.data;
+    const subjectMetadata = payload as typeof payload & SubjectMetadataPayload;
     const category: LogCategory = filterResult.action === 'drop' ? 'email_drop' : 'email_forward';
     const message = filterResult.action === 'drop'
-      ? `拦截邮件: ${payload.subject}`
-      : `转发邮件: ${payload.subject}`;
+      ? `拦截邮件: ${formatSubjectForDisplay(payload.subject)}`
+      : `转发邮件: ${formatSubjectForDisplay(payload.subject)}`;
     const workerName = payload.workerName || 'global';
 
     return {
@@ -145,6 +154,8 @@ export async function processLogTasks(
         forwardTo: filterResult.forwardTo,
         matchedRule: filterResult.matchedRule?.pattern,
         reason: filterResult.reason,
+        subjectSource: subjectMetadata.subjectSource,
+        subjectRawHeader: subjectMetadata.subjectRawHeader,
       },
       level: 'info' as const,
       workerName,
@@ -212,8 +223,10 @@ function matchesWatchRule(
       break;
     case 'domain':
       // Extract domain from sender email
-      const atIndex = payload.from.lastIndexOf('@');
-      value = atIndex !== -1 ? payload.from.substring(atIndex + 1).toLowerCase() : '';
+      {
+        const atIndex = payload.from.lastIndexOf('@');
+        value = atIndex !== -1 ? payload.from.substring(atIndex + 1).toLowerCase() : '';
+      }
       break;
     default:
       return false;

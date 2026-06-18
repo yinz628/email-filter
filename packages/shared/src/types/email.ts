@@ -23,6 +23,10 @@ export interface EmailWebhookPayload {
   timestamp: number;
   /** Worker name for routing to correct configuration */
   workerName?: string;
+  /** How the worker obtained the subject value */
+  subjectSource?: 'header' | 'raw-header-fallback' | 'missing';
+  /** Raw subject header value before MIME decoding */
+  subjectRawHeader?: string;
 }
 
 /**

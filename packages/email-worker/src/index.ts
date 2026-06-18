@@ -57,6 +57,8 @@ interface EmailWebhookPayload {
   messageId: string;
   timestamp: number;
   workerName?: string;
+  subjectSource?: 'header' | 'raw-header-fallback' | 'missing';
+  subjectRawHeader?: string;
 }
 
 /** Filter decision returned from VPS API */
@@ -98,6 +100,11 @@ const MAX_SYNC_BATCH_SIZE = 50;
 /** TTL for cached monitoring hits (24 hours in seconds) */
 const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
+/** Placeholder used when the Subject header is missing or empty after normalization */
+export const MISSING_SUBJECT_PLACEHOLDER = '[NO_SUBJECT]';
+/** Maximum header bytes to read when falling back to raw MIME headers */
+export const MAX_HEADER_BYTES = 64 * 1024;
+
 /**
  * Build minimal webhook payload by excluding null/undefined fields
  * Optimized for minimal payload size (Requirements: 9.1, 9.2)
@@ -107,7 +114,9 @@ export function buildMinimalPayload(
   to: string,
   subject: string,
   messageId: string,
-  workerName?: string
+  workerName?: string,
+  subjectSource?: EmailWebhookPayload['subjectSource'],
+  subjectRawHeader?: string
 ): EmailWebhookPayload {
   // Build payload with only defined fields
   const payload: EmailWebhookPayload = {
@@ -122,8 +131,156 @@ export function buildMinimalPayload(
   if (workerName) {
     payload.workerName = workerName;
   }
+
+  if (subjectSource) {
+    payload.subjectSource = subjectSource;
+  }
+
+  if (subjectRawHeader) {
+    payload.subjectRawHeader = subjectRawHeader;
+  }
   
   return payload;
+}
+
+export function decodeMimeEncodedWord(value: string): string {
+  return value.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (
+    match: string,
+    charset: string,
+    encoding: string,
+    encodedText: string
+  ) => {
+    const normalizedCharset = String(charset).toLowerCase();
+    if (normalizedCharset !== 'utf-8' && normalizedCharset !== 'utf8') {
+      return match;
+    }
+
+    try {
+      if (String(encoding).toUpperCase() === 'B') {
+        const bytes = Uint8Array.from(atob(encodedText), char => char.charCodeAt(0));
+        return new TextDecoder('utf-8').decode(bytes);
+      }
+
+      const qp = encodedText
+        .replace(/_/g, ' ')
+        .replace(/=([0-9A-Fa-f]{2})/g, (_segment: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+      const bytes = Uint8Array.from(qp, char => char.charCodeAt(0));
+      return new TextDecoder('utf-8').decode(bytes);
+    } catch {
+      return match;
+    }
+  });
+}
+
+export function normalizeSubject(value: string): string {
+  const unfolded = value
+    .replace(/\r?\n[ \t]+/g, ' ')
+    .replace(/\?=\s+=\?/g, '?==?');
+  return decodeMimeEncodedWord(unfolded).trim();
+}
+
+function unfoldHeaderValue(value: string): string {
+  return value.replace(/\r?\n[ \t]+/g, ' ').trim();
+}
+
+export async function readRawHeaderText(message: ForwardableEmailMessage): Promise<string> {
+  const reader = message.raw.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let headerText = '';
+
+  try {
+    while (headerText.indexOf('\r\n\r\n') === -1 && headerText.indexOf('\n\n') === -1) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      headerText += decoder.decode(value, { stream: true });
+      if (headerText.length > MAX_HEADER_BYTES) {
+        break;
+      }
+    }
+    headerText += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+
+  const separatorIndex = headerText.indexOf('\r\n\r\n') !== -1
+    ? headerText.indexOf('\r\n\r\n')
+    : headerText.indexOf('\n\n');
+  return separatorIndex === -1 ? headerText : headerText.slice(0, separatorIndex);
+}
+
+export function collectHeaderBlocks(headersOnly: string, headerName: string): string[] {
+  const normalized = headersOnly.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  const blocks: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!new RegExp(`^${headerName}:`, 'i').test(lines[i])) {
+      continue;
+    }
+
+    let block = lines[i];
+    let j = i + 1;
+    while (j < lines.length && /^[ \t]/.test(lines[j])) {
+      block += `\n${lines[j]}`;
+      j++;
+    }
+
+    blocks.push(block);
+    i = j - 1;
+  }
+
+  return blocks;
+}
+
+export async function extractSubjectFromRawHeaders(message: ForwardableEmailMessage): Promise<string | undefined> {
+  const headersOnly = await readRawHeaderText(message);
+  const subjectBlocks = collectHeaderBlocks(headersOnly, 'subject');
+
+  for (const block of subjectBlocks) {
+    const rawValue = block.replace(/^subject:\s*/i, '');
+    const unfoldedValue = unfoldHeaderValue(rawValue);
+    if (unfoldedValue) {
+      return unfoldedValue;
+    }
+  }
+
+  return undefined;
+}
+
+export async function resolveSubject(message: ForwardableEmailMessage): Promise<{
+  subject: string;
+  subjectSource: EmailWebhookPayload['subjectSource'];
+  subjectRawHeader?: string;
+}> {
+  const headerSubject = message.headers.get('subject');
+  const normalizedHeaderSubject = headerSubject ? normalizeSubject(headerSubject) : '';
+
+  if (normalizedHeaderSubject) {
+    return {
+      subject: normalizedHeaderSubject,
+      subjectSource: 'header',
+      subjectRawHeader: headerSubject ?? undefined,
+    };
+  }
+
+  const rawHeaderSubject = await extractSubjectFromRawHeaders(message);
+  const normalizedRawHeaderSubject = rawHeaderSubject ? normalizeSubject(rawHeaderSubject) : '';
+
+  if (normalizedRawHeaderSubject) {
+    return {
+      subject: normalizedRawHeaderSubject,
+      subjectSource: 'raw-header-fallback',
+      subjectRawHeader: rawHeaderSubject,
+    };
+  }
+
+  return {
+    subject: MISSING_SUBJECT_PLACEHOLDER,
+    subjectSource: 'missing',
+  };
 }
 
 /** Cached URL object to avoid repeated parsing (Requirements: 11.3) */
@@ -511,7 +668,7 @@ export default {
   /**
    * HTTP handler for health check endpoint
    */
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     
     // Basic health check - just checks Worker is running
@@ -604,11 +761,12 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 
-  async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
+  async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext): Promise<void> {
     // Extract essential fields only (no body parsing to minimize CPU)
     const from = extractEmail(message.from);
     const to = message.to;
-    const subject = message.headers.get('subject') || '';
+    const subjectResult = await resolveSubject(message);
+    const subject = subjectResult.subject;
     const messageId = message.headers.get('message-id') || crypto.randomUUID();
 
     // Use lazy evaluation for debug logs to skip string construction when disabled
@@ -617,11 +775,20 @@ export default {
       debugLog(env, `[DEBUG] From: ${from}`);
       debugLog(env, `[DEBUG] To: ${to}`);
       debugLog(env, `[DEBUG] Subject: ${subject}`);
+      debugLog(env, `[DEBUG] Subject Source: ${subjectResult.subjectSource}`);
       debugLog(env, `[DEBUG] Message-ID: ${messageId}`);
     }
 
     // Build minimal webhook payload (Requirements: 9.1, 9.2)
-    const payload = buildMinimalPayload(from, to, subject, messageId, env.WORKER_NAME);
+    const payload = buildMinimalPayload(
+      from,
+      to,
+      subject,
+      messageId,
+      env.WORKER_NAME,
+      subjectResult.subjectSource,
+      subjectResult.subjectRawHeader
+    );
 
     // Campaign analytics and signal monitoring are now handled by VPS API
     // in the main webhook endpoint, eliminating redundant API calls

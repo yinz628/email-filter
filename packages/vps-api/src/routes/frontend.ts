@@ -1208,19 +1208,27 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         </div>
         <div class="form-group">
           <label>📈 营销分析</label>
-          <select id="setting-campaign-enabled" onchange="setFeatureSetting('campaignAnalyticsEnabled', this.value === 'true')">
+          <select id="setting-campaign-enabled" onchange="setFeatureSetting('campaignAnalytics', this.value === 'true')">
             <option value="true">启用</option>
             <option value="false">禁用</option>
           </select>
-          <p class="text-muted" style="margin-top:6px;">禁用后将隐藏顶部入口，并停止相关自动刷新（仅影响本账号界面，不会修改服务器部署开关）。</p>
+          <p class="text-muted" id="setting-campaign-hint" style="margin-top:6px;">系统级控制：关闭后将停止后台采集、隐藏页面入口并禁止对应 API。</p>
         </div>
         <div class="form-group">
           <label>📡 信号监控</label>
-          <select id="setting-monitoring-enabled" onchange="setFeatureSetting('signalMonitoringEnabled', this.value === 'true')">
+          <select id="setting-monitoring-enabled" onchange="setFeatureSetting('signalMonitoring', this.value === 'true')">
             <option value="true">启用</option>
             <option value="false">禁用</option>
           </select>
-          <p class="text-muted" style="margin-top:6px;">禁用后将隐藏顶部入口，并停止相关自动刷新（仅影响本账号界面，不会修改服务器部署开关）。</p>
+          <p class="text-muted" id="setting-monitoring-hint" style="margin-top:6px;">系统级控制：关闭后将停止后台采集、隐藏页面入口并禁止对应 API。</p>
+        </div>
+        <div class="form-group">
+          <label>📧 邮件主题</label>
+          <select id="setting-subject-enabled" onchange="setFeatureSetting('subjectTracking', this.value === 'true')">
+            <option value="true">启用</option>
+            <option value="false">禁用</option>
+          </select>
+          <p class="text-muted" id="setting-subject-hint" style="margin-top:6px;">系统级控制：关闭后将停止后台采集、隐藏页面入口并禁止对应 API。</p>
         </div>
         <div id="settings-sync-status" style="margin-top:10px;font-size:12px;color:#666;"></div>
       </div>
@@ -2870,6 +2878,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const match = email.match(/@(.+)$/);
       return match ? match[1] : email;
     }
+
+    function formatSubjectDisplay(subject) {
+      if (typeof subject !== 'string') return '（空主题）';
+      return subject.trim().length > 0 ? subject : '（空主题）';
+    }
     
     function renderLogs(logs) {
       currentLogs = logs;
@@ -2929,7 +2942,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           rule = '详情';
         } else {
           // For email logs, extract domain from sender email
-          subject = d.subject || '-';
+          subject = formatSubjectDisplay(d.subject);
           from = extractDomainFromEmail(d.from);
           to = d.to || '-';
           rule = d.matchedRule || '-';
@@ -3036,10 +3049,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       } else {
         // Show email log specific details
         detailContent = 
-          '<p><strong>主题:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.subject || '-') + '</p>' +
+          '<p><strong>主题:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(formatSubjectDisplay(d.subject)) + '</p>' +
           '<p><strong>发件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.from || '-') + '</p>' +
           '<p><strong>收件人:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.to || '-') + '</p>' +
-          '<p><strong>命中规则:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.matchedRule || '-') + '</p>';
+          '<p><strong>命中规则:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.matchedRule || '-') + '</p>' +
+          '<p><strong>主题来源:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.subjectSource || '-') + '</p>' +
+          '<p><strong>原始主题头:</strong></p><p style="background:#f5f5f5;padding:8px;border-radius:4px;word-break:break-all;user-select:all">' + escapeHtml(d.subjectRawHeader || '-') + '</p>';
       }
       
       const content = 
@@ -3227,6 +3242,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('api-token').value = apiToken;
       loadTelegramConfig();
       loadCleanupConfig();
+      loadFeatureStatuses();
       // Update settings tab with account info and user settings
       updateSettingsTab();
     }
@@ -8347,6 +8363,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     
     // Cached user settings from server
     let userSettings = {};
+    let featureStatuses = {};
     
     /**
      * Load user settings from server
@@ -8478,42 +8495,106 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         }
       }
 
-      // Apply feature toggles (campaign analytics / signal monitoring)
-      const campaignSelect = document.getElementById('setting-campaign-enabled');
-      if (campaignSelect) {
-        const enabled = userSettings.campaignAnalyticsEnabled !== false;
-        campaignSelect.value = enabled ? 'true' : 'false';
-      }
-      const monitoringSelect = document.getElementById('setting-monitoring-enabled');
-      if (monitoringSelect) {
-        const enabled = userSettings.signalMonitoringEnabled !== false;
-        monitoringSelect.value = enabled ? 'true' : 'false';
-      }
       applyFeatureToggles();
     }
 
-    /**
-     * Persist a feature toggle to user settings and apply immediately.
-     * (This affects UI visibility/auto-refresh for the current account only.)
-     */
-    function setFeatureSetting(key, enabled) {
-      saveUserSetting(key, enabled);
-      applyFeatureToggles();
+    function getFeatureStatus(key) {
+      return featureStatuses[key] || {
+        key,
+        envEnabled: true,
+        systemEnabled: true,
+        effectiveEnabled: true,
+        reason: 'enabled'
+      };
+    }
+
+    async function setFeatureSetting(key, enabled) {
+      if (!apiToken) {
+        updateSettingsSyncStatus('未登录，功能开关未保存', true);
+        return;
+      }
+
+      try {
+        updateSettingsSyncStatus('正在保存功能开关...');
+        const res = await fetch('/api/admin/features/' + encodeURIComponent(key), {
+          method: 'PATCH',
+          headers: getHeaders(),
+          body: JSON.stringify({ enabled })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          updateSettingsSyncStatus('保存失败: ' + (data.error || '服务器错误'), true);
+          await loadFeatureStatuses();
+          return;
+        }
+        featureStatuses[key] = data.feature;
+        applyFeatureToggles();
+        updateSettingsSyncStatus('功能开关已保存');
+      } catch (e) {
+        console.error('[FeatureSettings] Failed to save feature setting:', e);
+        updateSettingsSyncStatus('保存失败，请检查网络连接', true);
+      }
+    }
+
+    function renderFeatureControl(key, selectId, hintId) {
+      const status = getFeatureStatus(key);
+      const select = document.getElementById(selectId);
+      const hint = document.getElementById(hintId);
+      if (!select) return;
+
+      select.value = status.systemEnabled ? 'true' : 'false';
+      select.disabled = !status.envEnabled;
+
+      if (hint) {
+        if (!status.envEnabled) {
+          hint.textContent = '部署已关闭：当前实例未启用该功能，无法在后台重新开启。';
+        } else if (!status.systemEnabled) {
+          hint.textContent = '系统已关闭：后台采集已停止，页面入口与 API 已禁用。';
+        } else {
+          hint.textContent = '已启用：后台采集开启，页面入口与 API 可用。';
+        }
+      }
     }
 
     function applyFeatureToggles() {
-      const campaignEnabled = userSettings.campaignAnalyticsEnabled !== false;
-      const monitoringEnabled = userSettings.signalMonitoringEnabled !== false;
+      const campaignStatus = getFeatureStatus('campaignAnalytics');
+      const monitoringStatus = getFeatureStatus('signalMonitoring');
+      const subjectStatus = getFeatureStatus('subjectTracking');
 
-      setTabEnabled('campaign', campaignEnabled);
-      setTabEnabled('monitoring', monitoringEnabled);
+      renderFeatureControl('campaignAnalytics', 'setting-campaign-enabled', 'setting-campaign-hint');
+      renderFeatureControl('signalMonitoring', 'setting-monitoring-enabled', 'setting-monitoring-hint');
+      renderFeatureControl('subjectTracking', 'setting-subject-enabled', 'setting-subject-hint');
 
-      // If the current active tab is disabled, switch to a safe default.
-      if (currentActiveTab === 'campaign' && !campaignEnabled) {
+      setTabEnabled('campaign', campaignStatus.effectiveEnabled);
+      setTabEnabled('monitoring', monitoringStatus.effectiveEnabled);
+      setTabEnabled('subjects', subjectStatus.effectiveEnabled);
+
+      if (currentActiveTab === 'campaign' && !campaignStatus.effectiveEnabled) {
         activateTab('stats');
       }
-      if (currentActiveTab === 'monitoring' && !monitoringEnabled) {
+      if (currentActiveTab === 'monitoring' && !monitoringStatus.effectiveEnabled) {
         activateTab('stats');
+      }
+      if (currentActiveTab === 'subjects' && !subjectStatus.effectiveEnabled) {
+        activateTab('stats');
+      }
+    }
+
+    async function loadFeatureStatuses() {
+      if (!apiToken) return;
+
+      try {
+        const res = await fetch('/api/admin/features', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          featureStatuses = {};
+          (data.features || []).forEach(feature => {
+            featureStatuses[feature.key] = feature;
+          });
+          applyFeatureToggles();
+        }
+      } catch (e) {
+        console.error('[FeatureSettings] Failed to load feature statuses:', e);
       }
     }
 
@@ -8521,7 +8602,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tabEl = document.getElementById(tabName + '-tab');
       const btnEl = tabName === 'campaign'
         ? document.getElementById('campaign-tab-btn')
-        : (tabName === 'monitoring' ? document.getElementById('monitoring-tab-btn') : null);
+        : (tabName === 'monitoring'
+          ? document.getElementById('monitoring-tab-btn')
+          : document.querySelector('.tab[onclick="showTab(\\'' + tabName + '\\')"]'));
 
       if (btnEl) {
         btnEl.style.display = enabled ? '' : 'none';
@@ -9017,6 +9100,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       // Load user settings from server (Requirements: 8.2)
       loadUserSettings();
+      loadFeatureStatuses();
       
       // Update settings tab with account info
       updateSettingsTab();

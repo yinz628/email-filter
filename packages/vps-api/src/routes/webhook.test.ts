@@ -36,6 +36,8 @@ const emailPayloadArb: fc.Arbitrary<EmailWebhookPayload> = fc.record({
   messageId: fc.uuid(),
   timestamp: fc.integer({ min: 1000000000000, max: 2000000000000 }),
   workerName: fc.option(fc.string({ minLength: 1, maxLength: 50 }), { nil: undefined }),
+  subjectSource: fc.option(fc.constantFrom('header', 'raw-header-fallback', 'missing'), { nil: undefined }),
+  subjectRawHeader: fc.option(fc.string({ minLength: 1, maxLength: 200 }), { nil: undefined }),
 });
 
 describe('Webhook Handler', () => {
@@ -214,6 +216,8 @@ describe('Webhook Handler', () => {
           expect(payload.messageId).toBe(originalPayload.messageId);
           expect(payload.timestamp).toBe(originalPayload.timestamp);
           expect(payload.workerName).toBe(originalPayload.workerName);
+          expect(payload.subjectSource).toBe(originalPayload.subjectSource);
+          expect(payload.subjectRawHeader).toBe(originalPayload.subjectRawHeader);
         }),
         { numRuns: 100 }
       );

@@ -419,6 +419,72 @@ function migrateSubjectStatsAddIgnored(db: Database.Database): MigrationResult {
   return { name, status: 'applied', message: 'Column is_ignored added successfully' };
 }
 
+function readLegacyFeatureSetting(db: Database.Database, key: string): boolean | null {
+  if (!tableExists(db, 'user_settings')) {
+    return null;
+  }
+
+  const row = db.prepare(`
+    SELECT value
+    FROM user_settings
+    WHERE key = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(key) as { value: string } | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(row.value);
+    return typeof parsed === 'boolean' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function migrateFeatureSettings(db: Database.Database): MigrationResult {
+  const name = 'feature_settings';
+  let applied = false;
+
+  if (!tableExists(db, 'feature_settings')) {
+    db.exec(`
+      CREATE TABLE feature_settings (
+        key TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    applied = true;
+  }
+
+  const now = new Date().toISOString();
+  const featureRecords: Array<[string, boolean]> = [
+    ['campaignAnalytics', readLegacyFeatureSetting(db, 'campaignAnalyticsEnabled') ?? true],
+    ['signalMonitoring', readLegacyFeatureSetting(db, 'signalMonitoringEnabled') ?? true],
+    ['subjectTracking', true],
+  ];
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO feature_settings (key, enabled, updated_at)
+    VALUES (?, ?, ?)
+  `);
+
+  for (const [key, enabled] of featureRecords) {
+    const result = stmt.run(key, enabled ? 1 : 0, now);
+    if (result.changes > 0) {
+      applied = true;
+    }
+  }
+
+  return {
+    name,
+    status: applied ? 'applied' : 'skipped',
+    message: applied ? 'Feature settings initialized successfully' : 'Feature settings already initialized',
+  };
+}
+
 // ============================================
 // Migration Runner
 // ============================================
@@ -445,6 +511,7 @@ const migrations: MigrationFn[] = [
   migrateCreateRatioAlerts,
   migrateCreateUsersTable,
   migrateCreateUserSettingsTable,
+  migrateFeatureSettings,
   migrateCreateSubjectStatsTable,
   migrateSubjectStatsAddIgnored,
 ];

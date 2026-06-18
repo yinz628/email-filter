@@ -20,6 +20,7 @@ describe('Security Configuration Validation', () => {
     features: {
       campaignAnalyticsEnabled: true,
       signalMonitoringEnabled: true,
+      subjectTrackingEnabled: true,
     },
     vpsPublicUrl: 'https://api.example.com',
     jwtSecret: 'a-very-secure-jwt-secret-that-is-long-enough',

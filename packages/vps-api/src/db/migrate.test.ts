@@ -171,6 +171,27 @@ describe('Migration Idempotency', () => {
     db.run('CREATE INDEX idx_ratio_alerts_created_at ON ratio_alerts(created_at)');
   }
 
+  function runMigration_CreateFeatureSettings(): void {
+    if (!tableExists('feature_settings')) {
+      db.run(`
+        CREATE TABLE feature_settings (
+          key TEXT PRIMARY KEY,
+          enabled INTEGER NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    }
+
+    const now = new Date().toISOString();
+    const keys = ['campaignAnalytics', 'signalMonitoring', 'subjectTracking'];
+    for (const key of keys) {
+      db.run(
+        'INSERT OR IGNORE INTO feature_settings (key, enabled, updated_at) VALUES (?, ?, ?)',
+        [key, 1, now]
+      );
+    }
+  }
+
   // All migrations in order
   const allMigrations = [
     runMigration_WorkerUrl,
@@ -185,6 +206,7 @@ describe('Migration Idempotency', () => {
     runMigration_RatioMonitorsSteps,
     runMigration_RatioStatesStepsData,
     runMigration_CreateRatioAlerts,
+    runMigration_CreateFeatureSettings,
   ];
 
   function runAllMigrations(): void {

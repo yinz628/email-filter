@@ -12,7 +12,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { EmailWebhookPayload, FilterDecision, FilterRule } from '@email-filter/shared';
-import { FilterService, type FilterResult, filterEmail } from '../services/filter.service.js';
+import { FilterService, type FilterResult } from '../services/filter.service.js';
 import { RuleRepository, type FilterRuleWithWorker } from '../db/rule-repository.js';
 import { WorkerRepository } from '../db/worker-repository.js';
 import { getDatabase } from '../db/index.js';
@@ -23,6 +23,7 @@ import { getAsyncTaskProcessor } from '../services/async-task-processor.instance
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { getPerformanceMetrics } from '../services/performance-metrics.js';
 import type { AsyncTaskType } from '../services/async-task-processor.js';
+import { FeatureSettingsService } from '../services/feature-settings.service.js';
 
 /**
  * Validate email webhook payload
@@ -35,7 +36,12 @@ function isValidWebhookPayload(body: unknown): body is EmailWebhookPayload {
     typeof payload.to === 'string' &&
     typeof payload.subject === 'string' &&
     typeof payload.messageId === 'string' &&
-    typeof payload.timestamp === 'number'
+    typeof payload.timestamp === 'number' &&
+    (payload.subjectSource === undefined ||
+      payload.subjectSource === 'header' ||
+      payload.subjectSource === 'raw-header-fallback' ||
+      payload.subjectSource === 'missing') &&
+    (payload.subjectRawHeader === undefined || typeof payload.subjectRawHeader === 'string')
   );
 }
 
@@ -241,11 +247,16 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       // Requirements: 1.3, 2.1, 2.2
       setImmediate(() => {
         const asyncProcessor = getAsyncTaskProcessor();
-        const enabledTypes: AsyncTaskType[] = ['stats', 'log', 'watch', 'subject'];
-        if (config.features.campaignAnalyticsEnabled) {
+        const featureSettingsService = new FeatureSettingsService(getDatabase());
+        const enabledTypes: AsyncTaskType[] = ['stats', 'log', 'watch'];
+
+        if (featureSettingsService.isEnabled('subjectTracking')) {
+          enabledTypes.push('subject');
+        }
+        if (featureSettingsService.isEnabled('campaignAnalytics')) {
           enabledTypes.push('campaign');
         }
-        if (config.features.signalMonitoringEnabled) {
+        if (featureSettingsService.isEnabled('signalMonitoring')) {
           enabledTypes.push('monitoring');
         }
 

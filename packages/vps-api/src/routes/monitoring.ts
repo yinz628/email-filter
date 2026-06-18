@@ -14,7 +14,6 @@ import type {
 } from '@email-filter/shared';
 import { getDatabase } from '../db/index.js';
 import { MonitoringRuleRepository } from '../db/monitoring-rule-repository.js';
-import { AlertRepository } from '../db/alert-repository.js';
 import {
   MonitoringRuleService,
   RuleValidationError,
@@ -24,6 +23,8 @@ import {
   HeartbeatService,
 } from '../services/monitoring/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { createFeatureGuard } from '../middleware/feature-guard.js';
+import { FeatureSettingsService } from '../services/feature-settings.service.js';
 
 // ============================================================================
 // Request Type Definitions
@@ -221,6 +222,7 @@ function validateEmailHitBody(body: unknown): { valid: boolean; error?: string; 
 export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Apply auth middleware to all routes
   fastify.addHook('preHandler', authMiddleware);
+  fastify.addHook('preHandler', createFeatureGuard(new FeatureSettingsService(getDatabase()), 'signalMonitoring'));
 
   // ============================================================================
   // Rule Management API (Requirements: 1.1, 1.2, 1.3, 1.4)

@@ -10,6 +10,8 @@ import type { SubjectStatsFilter } from '@email-filter/shared';
 import { SubjectStatsService } from '../services/subject-stats.service.js';
 import { getDatabase } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { createFeatureGuard } from '../middleware/feature-guard.js';
+import { FeatureSettingsService } from '../services/feature-settings.service.js';
 
 // ============================================
 // Request Type Definitions
@@ -114,6 +116,7 @@ function validateSetIgnore(body: unknown): { valid: boolean; error?: string; dat
 export async function subjectRoutes(fastify: FastifyInstance): Promise<void> {
   // Apply auth middleware to all routes in this plugin
   fastify.addHook('preHandler', authMiddleware);
+  fastify.addHook('preHandler', createFeatureGuard(new FeatureSettingsService(getDatabase()), 'subjectTracking'));
 
   /**
    * GET /api/subjects

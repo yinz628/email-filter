@@ -556,6 +556,72 @@ function migrateCreateUserSettingsTable(): MigrationResult {
   return { name, status: 'applied', message: 'Table created successfully' };
 }
 
+function readLegacyFeatureSetting(key: string): boolean | null {
+  if (!tableExists(db, 'user_settings')) {
+    return null;
+  }
+
+  const row = db.prepare(`
+    SELECT value
+    FROM user_settings
+    WHERE key = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(key) as { value: string } | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(row.value);
+    return typeof parsed === 'boolean' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function migrateFeatureSettings(): MigrationResult {
+  const name = 'feature_settings table';
+  let applied = false;
+
+  if (!tableExists(db, 'feature_settings')) {
+    db.exec(`
+      CREATE TABLE feature_settings (
+        key TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    applied = true;
+  }
+
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO feature_settings (key, enabled, updated_at)
+    VALUES (?, ?, ?)
+  `);
+
+  const featureRecords: Array<[string, boolean]> = [
+    ['campaignAnalytics', readLegacyFeatureSetting('campaignAnalyticsEnabled') ?? true],
+    ['signalMonitoring', readLegacyFeatureSetting('signalMonitoringEnabled') ?? true],
+    ['subjectTracking', true],
+  ];
+
+  for (const [key, enabled] of featureRecords) {
+    const result = stmt.run(key, enabled ? 1 : 0, now);
+    if (result.changes > 0) {
+      applied = true;
+    }
+  }
+
+  return {
+    name,
+    status: applied ? 'applied' : 'skipped',
+    message: applied ? 'Table initialized successfully' : 'Table already initialized',
+  };
+}
+
 /**
  * Migration 23: Create subject_stats table for email subject display
  * 
@@ -623,6 +689,7 @@ const migrations = [
   migrateProjectUserEventsTimeIndex,
   migrateCreateUsersTable,
   migrateCreateUserSettingsTable,
+  migrateFeatureSettings,
   migrateCreateSubjectStatsTable,
 ];
 

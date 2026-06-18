@@ -13,7 +13,7 @@ DEFAULT_FORWARD_TO = "abnerklewiyql@yahoo.com"
 # Unique worker name - must match the name registered in VPS API
 WORKER_NAME = "aloemail.space_worker"
 # Enable debug logging (true/false) - set to false in production
-DEBUG_LOGGING = "true"
+DEBUG_LOGGING = "false"
 
 # Email routing binding
 [[send_email]]

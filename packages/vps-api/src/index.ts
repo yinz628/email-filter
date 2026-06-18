@@ -13,6 +13,7 @@ import {
   logsRoutes,
   watchRoutes,
   campaignRoutes,
+  adminFeatureRoutes,
   subjectRoutes,
   monitoringRoutes,
   ratioMonitoringRoutes,
@@ -26,6 +27,7 @@ import {
 } from './routes/index.js';
 import { SchedulerService } from './services/monitoring/index.js';
 import { UserService } from './services/user.service.js';
+import { FeatureSettingsService } from './services/feature-settings.service.js';
 
 // Scheduler instance
 let scheduler: SchedulerService | null = null;
@@ -52,6 +54,7 @@ async function start() {
     // Requirements: 1.4, 1.5
     console.log('Checking for default admin user...');
     const userService = new UserService(getDatabase());
+    const featureSettingsService = new FeatureSettingsService(getDatabase());
     await userService.ensureDefaultAdmin(
       config.defaultAdminUsername,
       config.defaultAdminPassword
@@ -119,7 +122,11 @@ async function start() {
     } else {
       fastify.log.info('Campaign analytics is disabled (CAMPAIGN_ANALYTICS_ENABLED=false)');
     }
-    await fastify.register(subjectRoutes, { prefix: '/api/subjects' });
+    if (config.features.subjectTrackingEnabled) {
+      await fastify.register(subjectRoutes, { prefix: '/api/subjects' });
+    } else {
+      fastify.log.info('Subject tracking is disabled (SUBJECT_TRACKING_ENABLED=false)');
+    }
     if (config.features.signalMonitoringEnabled) {
       await fastify.register(monitoringRoutes, { prefix: '/api/monitoring' });
       await fastify.register(ratioMonitoringRoutes, { prefix: '/api/monitoring/ratio' });
@@ -128,6 +135,7 @@ async function start() {
     }
     await fastify.register(telegramRoutes, { prefix: '/api/telegram' });
     await fastify.register(adminRoutes, { prefix: '/api/admin' });
+    await fastify.register(adminFeatureRoutes, { prefix: '/api/admin/features' });
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(userSettingsRoutes, { prefix: '/api/user' });
     await fastify.register(usersRoutes, { prefix: '/api/admin/users' });
@@ -141,6 +149,7 @@ async function start() {
     scheduler = new SchedulerService(getDatabase(), {
       ...config.scheduler,
       heartbeatEnabled: config.features.signalMonitoringEnabled,
+      featureSettingsService,
     });
     scheduler.start();
     console.log('Monitoring scheduler started');

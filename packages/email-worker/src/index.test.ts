@@ -6,7 +6,21 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fc from 'fast-check';
-import { trackCampaignEmail, extractEmail, buildMinimalPayload, API_TIMEOUT_MS, getCachedUrl, resetUrlCache, trackMonitoringHit } from './index';
+import {
+  trackCampaignEmail,
+  extractEmail,
+  buildMinimalPayload,
+  API_TIMEOUT_MS,
+  getCachedUrl,
+  resetUrlCache,
+  trackMonitoringHit,
+  decodeMimeEncodedWord,
+  extractSubjectFromRawHeaders,
+  MISSING_SUBJECT_PLACEHOLDER,
+  normalizeSubject,
+  readRawHeaderText,
+  resolveSubject,
+} from './index';
 import type { Env } from './index';
 
 // Mock fetch globally
@@ -138,6 +152,119 @@ describe('Campaign Tracking Integration', () => {
   });
 });
 
+describe('Subject Extraction', () => {
+  function createRawStream(text: string): ReadableStream<Uint8Array> {
+    const bytes = new TextEncoder().encode(text);
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+  }
+
+  function createMessage(headerSubject?: string, rawHeaders?: string): ForwardableEmailMessage {
+    return {
+      from: 'Sender <sender@example.com>',
+      to: 'recipient@example.com',
+      raw: createRawStream(rawHeaders ?? 'From: Sender <sender@example.com>\r\n\r\nbody'),
+      rawSize: 0,
+      headers: new Headers(headerSubject !== undefined ? { subject: headerSubject } : {}),
+      setReject: vi.fn(),
+      forward: vi.fn(async () => undefined),
+      reply: vi.fn(async () => undefined),
+    } as unknown as ForwardableEmailMessage;
+  }
+
+  it('should decode RFC2047 base64 encoded subjects', () => {
+    expect(decodeMimeEncodedWord('=?UTF-8?B?V29tZW7igJlzIHN0eWxlcyB1bmRlciAkMTAw?='))
+      .toBe('Women’s styles under $100');
+  });
+
+  it('should trim and normalize decoded subjects', () => {
+    expect(normalizeSubject('  =?UTF-8?B?V29tZW7igJlzIHN0eWxlcyB1bmRlciAkMTAw?=  '))
+      .toBe('Women’s styles under $100');
+  });
+
+  it('should decode RFC2047 quoted-printable encoded subjects', () => {
+    expect(decodeMimeEncodedWord('=?UTF-8?Q?Hello_=E2=9C=85?='))
+      .toBe('Hello ✅');
+  });
+
+  it('should normalize folded encoded-word subjects', () => {
+    expect(normalizeSubject('=?UTF-8?B?SmV3ZWxyeSB1bmRlciAkMTAwIHRoYXQgeW914oCZcmUgZ29pbmc=?=\n\t=?UTF-8?B?IHRvIGxvdmU=?='))
+      .toBe('Jewelry under $100 that you’re going to love');
+  });
+
+  it('should read only the raw header section', async () => {
+    const message = createMessage(
+      undefined,
+      'From: Sender <sender@example.com>\r\nSubject: Test\r\n\r\nThis is the body'
+    );
+
+    await expect(readRawHeaderText(message)).resolves.toBe(
+      'From: Sender <sender@example.com>\r\nSubject: Test'
+    );
+  });
+
+  it('should extract folded subject from raw headers', async () => {
+    const message = createMessage(
+      undefined,
+      'From: Sender <sender@example.com>\r\nSubject: =?UTF-8?B?SmV3ZWxyeSB1bmRlciAkMTAwIHRoYXQgeW914oCZcmUgZ29pbmc=?=\r\n\t=?UTF-8?B?IHRvIGxvdmU=?=\r\n\r\nbody'
+    );
+
+    await expect(extractSubjectFromRawHeaders(message)).resolves.toBe(
+      '=?UTF-8?B?SmV3ZWxyeSB1bmRlciAkMTAwIHRoYXQgeW914oCZcmUgZ29pbmc=?= =?UTF-8?B?IHRvIGxvdmU=?='
+    );
+  });
+
+  it('should use placeholder when subject header and raw subject are missing', async () => {
+    const message = createMessage();
+    const result = await resolveSubject(message);
+
+    expect(result.subject).toBe(MISSING_SUBJECT_PLACEHOLDER);
+    expect(result.subjectSource).toBe('missing');
+    expect(result.subjectRawHeader).toBeUndefined();
+  });
+
+  it('should use placeholder when subject header is blank and raw subject is missing', async () => {
+    const message = createMessage('   ');
+    const result = await resolveSubject(message);
+
+    expect(result.subject).toBe(MISSING_SUBJECT_PLACEHOLDER);
+    expect(result.subjectSource).toBe('missing');
+    expect(result.subjectRawHeader).toBeUndefined();
+  });
+
+  it('should use decoded header subject when header is present', async () => {
+    const message = createMessage('=?UTF-8?B?VW5kZXIgJDUwOiB0aGUgbGF0ZXN0IGtpZHPigJkgbG9va3M=?=');
+    const result = await resolveSubject(message);
+
+    expect(result.subject).toBe('Under $50: the latest kids’ looks');
+    expect(result.subjectSource).toBe('header');
+    expect(result.subjectRawHeader).toBe('=?UTF-8?B?VW5kZXIgJDUwOiB0aGUgbGF0ZXN0IGtpZHPigJkgbG9va3M=?=');
+  });
+
+  it('should fallback to raw folded subject when header subject is missing', async () => {
+    const message = createMessage(
+      undefined,
+      'From: =?UTF-8?B?TWFjeSdz?= <shop@emails.macys.com>\r\n' +
+      'Subject: =?UTF-8?B?VXAgdG8gNjAlIG9mZiB1c2VmdWwgZ2lmdHMgZm9yIGdyYWRzICY=?=\r\n' +
+      '\t=?UTF-8?B?IGRhZHMg8J+Ok/CfkajigI0=?=\r\n' +
+      'Content-Transfer-Encoding: quoted-printable\r\n' +
+      '\r\nbody'
+    );
+
+    const result = await resolveSubject(message);
+
+    expect(result.subject).toBe('Up to 60% off useful gifts for grads & dads 🎓👨‍');
+    expect(result.subjectSource).toBe('raw-header-fallback');
+    expect(result.subjectRawHeader).toBe(
+      '=?UTF-8?B?VXAgdG8gNjAlIG9mZiB1c2VmdWwgZ2lmdHMgZm9yIGdyYWRzICY=?= =?UTF-8?B?IGRhZHMg8J+Ok/CfkajigI0=?='
+    );
+  });
+});
+
 
 /**
  * Property-Based Tests for Worker Optimizations
@@ -155,7 +282,7 @@ describe('Property Tests: Worker Payload Minimization', () => {
         fc.string({ minLength: 1, maxLength: 50 }),  // messageId
         fc.option(fc.string({ minLength: 1, maxLength: 50 }), { nil: undefined }), // workerName (optional)
         (from, to, subject, messageId, workerName) => {
-          const payload = buildMinimalPayload(from, to, subject, messageId, workerName);
+          const payload = buildMinimalPayload(from, to, subject, messageId, workerName, 'header', subject);
           
           // Check that no field is null or undefined
           const values = Object.values(payload);
@@ -175,6 +302,12 @@ describe('Property Tests: Worker Payload Minimization', () => {
           expect(payload.subject).toBe(subject);
           expect(payload.messageId).toBe(messageId);
           expect(typeof payload.timestamp).toBe('number');
+          expect(payload.subjectSource).toBe('header');
+          if (subject.length > 0) {
+            expect(payload.subjectRawHeader).toBe(subject);
+          } else {
+            expect(payload.subjectRawHeader).toBeUndefined();
+          }
         }
       ),
       { numRuns: 100 }
@@ -312,19 +445,10 @@ describe('Worker Timeout Optimization', () => {
   });
 
   describe('Timeout logging', () => {
-    let mockEnv: Env;
-    let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+    let consoleErrorSpy: { mockRestore: () => void };
 
     beforeEach(() => {
       vi.clearAllMocks();
-      mockEnv = {
-        VPS_API_URL: 'https://example.com/api/webhook/email',
-        VPS_API_TOKEN: 'test-token',
-        DEFAULT_FORWARD_TO: 'test@example.com',
-        WORKER_NAME: 'test-worker',
-        DEBUG_LOGGING: 'false',
-        SEB: {} as SendEmail,
-      };
       consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 

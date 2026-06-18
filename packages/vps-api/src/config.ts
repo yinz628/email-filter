@@ -37,6 +37,8 @@ export interface Config {
     campaignAnalyticsEnabled: boolean;
     /** Whether signal monitoring functionality is enabled */
     signalMonitoringEnabled: boolean;
+    /** Whether subject tracking functionality is enabled */
+    subjectTrackingEnabled: boolean;
   };
   /** Public URL of this VPS API (for webhook endpoint) */
   vpsPublicUrl: string;
@@ -126,6 +128,7 @@ export const config: Config = {
     // Set to "false"/"0"/"off" to disable.
     campaignAnalyticsEnabled: parseBooleanEnv(process.env.CAMPAIGN_ANALYTICS_ENABLED, true),
     signalMonitoringEnabled: parseBooleanEnv(process.env.SIGNAL_MONITORING_ENABLED, true),
+    subjectTrackingEnabled: parseBooleanEnv(process.env.SUBJECT_TRACKING_ENABLED, true),
   },
   // VPS Public URL (for checking if worker is connected to this VPS)
   vpsPublicUrl: process.env.VPS_PUBLIC_URL || '',

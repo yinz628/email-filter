@@ -14,6 +14,7 @@ import type { Database } from 'better-sqlite3';
 import { HeartbeatService } from './heartbeat.service.js';
 import { CleanupService } from './cleanup.service.js';
 import { CleanupConfigService, type CleanupConfig } from '../cleanup-config.service.js';
+import type { FeatureSettingsService } from '../feature-settings.service.js';
 
 /**
  * Configuration for the scheduler
@@ -33,6 +34,8 @@ export interface SchedulerConfig {
   heartbeatEnabled: boolean;
   /** Whether to use CleanupConfigService for cleanup settings */
   useCleanupConfig: boolean;
+  /** Feature status service for runtime gating */
+  featureSettingsService?: FeatureSettingsService;
 }
 
 /**
@@ -64,6 +67,7 @@ export class SchedulerService {
   private cleanupTask: ScheduledTask | null = null;
   private isRunning: boolean = false;
   private db: Database;
+  private featureSettingsService?: FeatureSettingsService;
 
   constructor(db: Database, config: Partial<SchedulerConfig> = {}) {
     this.db = db;
@@ -71,6 +75,7 @@ export class SchedulerService {
     this.cleanupService = new CleanupService(db);
     this.cleanupConfigService = new CleanupConfigService(db);
     this.config = { ...DEFAULT_SCHEDULER_CONFIG, ...config };
+    this.featureSettingsService = config.featureSettingsService;
   }
 
   /**
@@ -249,7 +254,15 @@ export class SchedulerService {
    * Can be called directly for testing or manual triggers.
    */
   runHeartbeat(): void {
-    const startTime = Date.now();
+    const signalMonitoringEnabled = this.featureSettingsService
+      ? this.featureSettingsService.isEnabled('signalMonitoring')
+      : this.config.heartbeatEnabled;
+
+    if (!signalMonitoringEnabled) {
+      console.log('[Scheduler] Heartbeat skipped: signalMonitoring is disabled');
+      return;
+    }
+
     console.log('[Scheduler] Running heartbeat check...');
 
     try {

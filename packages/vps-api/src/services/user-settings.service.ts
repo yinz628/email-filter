@@ -11,6 +11,16 @@ import type { UserSetting } from '@email-filter/shared';
 // Re-export types for backward compatibility
 export type { UserSetting };
 
+const DEPRECATED_SYSTEM_FEATURE_SETTING_KEYS = new Set([
+  'campaignAnalyticsEnabled',
+  'signalMonitoringEnabled',
+  'subjectTrackingEnabled',
+]);
+
+function isDeprecatedSystemFeatureSettingKey(key: string): boolean {
+  return DEPRECATED_SYSTEM_FEATURE_SETTING_KEYS.has(key);
+}
+
 /**
  * Database row type for user_settings table
  */
@@ -46,6 +56,10 @@ export class UserSettingsService {
     
     const settings: Record<string, any> = {};
     for (const row of rows) {
+      if (isDeprecatedSystemFeatureSettingKey(row.key)) {
+        continue;
+      }
+
       try {
         settings[row.key] = JSON.parse(row.value);
       } catch {
@@ -66,6 +80,10 @@ export class UserSettingsService {
    * @returns The setting value or null if not found
    */
   getSetting(userId: string, key: string): any | null {
+    if (isDeprecatedSystemFeatureSettingKey(key)) {
+      return null;
+    }
+
     const stmt = this.db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?');
     const row = stmt.get(userId, key) as Pick<UserSettingRow, 'value'> | undefined;
     
@@ -89,6 +107,10 @@ export class UserSettingsService {
    * @param value - The setting value (will be JSON serialized)
    */
   setSetting(userId: string, key: string, value: any): void {
+    if (isDeprecatedSystemFeatureSettingKey(key)) {
+      return;
+    }
+
     const now = new Date().toISOString();
     const jsonValue = JSON.stringify(value);
     
@@ -111,6 +133,9 @@ export class UserSettingsService {
    */
   setSettings(userId: string, settings: Record<string, any>): void {
     const now = new Date().toISOString();
+    const filteredEntries = Object.entries(settings).filter(
+      ([key]) => !isDeprecatedSystemFeatureSettingKey(key)
+    );
     
     const stmt = this.db.prepare(`
       INSERT INTO user_settings (user_id, key, value, updated_at)
@@ -121,7 +146,7 @@ export class UserSettingsService {
     `);
     
     const transaction = this.db.transaction(() => {
-      for (const [key, value] of Object.entries(settings)) {
+      for (const [key, value] of filteredEntries) {
         const jsonValue = JSON.stringify(value);
         stmt.run(userId, key, jsonValue, now);
       }

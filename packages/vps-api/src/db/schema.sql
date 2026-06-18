@@ -391,6 +391,13 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 CREATE INDEX IF NOT EXISTS idx_user_settings_user ON user_settings(user_id);
 
+-- 系统级功能开关表
+CREATE TABLE IF NOT EXISTS feature_settings (
+  key TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- Token黑名单表
 CREATE TABLE IF NOT EXISTS token_blacklist (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

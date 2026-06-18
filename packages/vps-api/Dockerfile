@@ -3,8 +3,8 @@ FROM node:20-bookworm
 
 WORKDIR /app
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pin pnpm to a Node 20 compatible version so Docker builds remain reproducible.
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Copy workspace config
 COPY pnpm-workspace.yaml ./

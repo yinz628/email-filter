@@ -12,6 +12,8 @@ import type {
 import { getDatabase } from '../db/index.js';
 import { RatioMonitorService } from '../services/monitoring/ratio-monitor.service.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { createFeatureGuard } from '../middleware/feature-guard.js';
+import { FeatureSettingsService } from '../services/feature-settings.service.js';
 
 interface RatioMonitorParams {
   id: string;
@@ -37,6 +39,7 @@ function getService(): RatioMonitorService {
 export async function ratioMonitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Apply auth middleware to all routes
   fastify.addHook('preHandler', authMiddleware);
+  fastify.addHook('preHandler', createFeatureGuard(new FeatureSettingsService(getDatabase()), 'signalMonitoring'));
 
   // Get all ratio monitors
   fastify.get(

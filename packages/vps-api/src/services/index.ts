@@ -21,3 +21,4 @@ export * from './user-settings.service.js';
 export * from './backup.service.js';
 export * from './performance-metrics.js';
 export * from './subject-stats.service.js';
+export * from './feature-settings.service.js';

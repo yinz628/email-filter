@@ -96,6 +96,7 @@ describe('Schema Completeness', () => {
     // User Authentication Tables
     users: ['id', 'username', 'password_hash', 'role', 'created_at', 'updated_at'],
     user_settings: ['id', 'user_id', 'key', 'value', 'updated_at'],
+    feature_settings: ['key', 'enabled', 'updated_at'],
     token_blacklist: ['id', 'token_hash', 'expires_at', 'created_at'],
   };
 

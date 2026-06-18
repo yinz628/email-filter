@@ -9,8 +9,9 @@
 - **Worker实例API**: 独立部署的邮件过滤服务实例，负责执行邮件过滤规则和记录处理结果
 - **管理面板**: 集中管理多个Worker实例API的Web界面
 - **过滤规则**: 定义邮件过滤条件的配置项，包括发件人、邮件名、发件邮箱等匹配条件
-- **白名单**: 优先级最高的规则列表，匹配的邮件不进行过滤
+- **白名单**: 优先级较高的规则列表，匹配的邮件放行；可选指定独立的转发地址覆写默认地址
 - **黑名单**: 匹配的邮件将被静默删除
+- **转发名单**: 最高优先级的规则列表，必填转发地址，匹配的邮件直接转发到指定地址
 - **动态名单**: 系统自动检测异常营销邮件并动态生成的过滤规则
 - **重点关注邮件**: 用户设定的需要特别关注的邮件主题列表
 - **静默删除**: 删除邮件但不发送任何通知
@@ -64,15 +65,17 @@
 
 ### Requirement 5: 过滤规则分类管理
 
-**User Story:** As a 邮件管理员, I want to 将过滤规则分类为白名单、黑名单和动态名单, so that I can 实现不同优先级的邮件处理策略。
+**User Story:** As a 邮件管理员, I want to 将过滤规则分类为转发名单、白名单、黑名单和动态名单, so that I can 实现不同优先级的邮件处理策略。
 
 #### Acceptance Criteria
 
-1. WHEN 邮件匹配白名单规则 THEN Worker实例API SHALL 跳过所有其他过滤规则并允许邮件通过
-2. WHEN 邮件匹配黑名单规则且未匹配白名单 THEN Worker实例API SHALL 静默删除该邮件
-3. WHEN 邮件匹配动态名单规则且未匹配白名单 THEN Worker实例API SHALL 静默删除该邮件
-4. WHEN 管理员修改规则的启用状态 THEN Worker实例API SHALL 更新规则状态并立即生效
-5. WHEN 管理员删除一条过滤规则 THEN Worker实例API SHALL 移除该规则并删除相关统计数据
+1. WHEN 邮件匹配转发名单规则 THEN Worker实例API SHALL 以最高优先级将邮件转发到规则指定的地址
+2. WHEN 邮件匹配白名单规则 THEN Worker实例API SHALL 放行邮件；若规则指定了 forwardTo 则转发到该地址，否则使用 Worker 默认地址
+3. WHEN 邮件匹配黑名单规则且未匹配转发名单或白名单 THEN Worker实例API SHALL 静默删除该邮件
+4. WHEN 邮件匹配动态名单规则且未匹配转发名单或白名单 THEN Worker实例API SHALL 静默删除该邮件
+5. WHEN 管理员修改规则的启用状态 THEN Worker实例API SHALL 更新规则状态并立即生效
+6. WHEN 管理员删除一条过滤规则 THEN Worker实例API SHALL 移除该规则并删除相关统计数据
+7. WHEN Worker 的 ruleForwardEnabled 为关闭状态 THEN Worker实例API SHALL 忽略白名单规则的 forwardTo 字段
 
 ### Requirement 6: 动态名单自动管理
 

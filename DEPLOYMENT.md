@@ -59,6 +59,11 @@ DEFAULT_ADMIN_USERNAME=admin
 DEFAULT_ADMIN_PASSWORD=你的后台密码
 NODE_ENV=production
 HOST=0.0.0.0
+# 功能开关（可选，默认启用）
+DYNAMIC_ENABLED=true          # 动态规则自动生成
+SUBJECT_TRACKING_ENABLED=true # 邮件主题追踪统计
+CAMPAIGN_ANALYTICS_ENABLED=true # 营销分析
+SIGNAL_MONITORING_ENABLED=true  # 信号监控
 ```
 
 ### 3. 启动服务
@@ -239,6 +244,23 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 ```
 
 恢复与下载能力已由 `vps-api` 的 `/api/admin/backup/*` 提供。
+
+## 过滤规则说明
+
+### 规则类别与优先级
+
+| 优先级 | 类别 | forwardTo | 行为 |
+|--------|------|-----------|------|
+| 最高 | 转发名单 (forward) | 必填 | 匹配后直接转发到指定地址 |
+| 高 | 白名单 (whitelist) | 选填 | 匹配后放行，填写后覆写默认转发地址 |
+| 中 | 黑名单 (blacklist) | 忽略 | 匹配后静默丢弃 |
+| 低 | 动态规则 (dynamic) | 忽略 | 系统自动生成，匹配后丢弃 |
+
+### 规则级转发地址覆写
+
+1. 在管理面板 Worker 编辑页开启「启用规则转发覆写」开关
+2. 创建白名单规则时填写「转发地址」字段，命中后优先使用该地址
+3. 关闭 Worker 级开关后，所有白名单规则的 forwardTo 被忽略，统一使用默认地址
 
 ## 排障
 

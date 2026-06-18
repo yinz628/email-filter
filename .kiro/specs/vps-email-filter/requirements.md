@@ -11,6 +11,8 @@
 - **SQLite_DB**: VPS 上的本地 SQLite 数据库，使用 better-sqlite3 驱动
 - **Admin_Panel**: VPS 上的管理面板服务，用于管理 Worker 实例和系统配置
 - **Webhook**: Email_Worker 调用 VPS_API 的 HTTP 接口
+- **Forward_Rule**: 转发名单规则，最高优先级，匹配后直接转发到规则指定的地址（forwardTo 必填）
+- **Rule_Forward_Enabled**: Worker 实例级开关，控制是否允许白名单规则覆写默认转发地址
 
 ## Requirements
 
@@ -57,10 +59,12 @@
 #### Acceptance Criteria
 
 1. WHEN VPS_API receives email data via webhook THEN the system SHALL evaluate all enabled filter rules against the email
-2. WHEN an email matches a blacklist rule THEN the system SHALL return action "drop" to Email_Worker
-3. WHEN an email matches a whitelist rule THEN the system SHALL return action "forward" with priority over blacklist
-4. WHEN an email matches no rules THEN the system SHALL return action "forward" to default destination
-5. WHEN evaluating rules THEN the system SHALL support exact, contains, startsWith, endsWith, and regex match modes
+2. WHEN an email matches a forward list rule THEN the system SHALL return action "forward" with the rule's specified forwarding address (highest priority)
+3. WHEN an email matches a blacklist rule THEN the system SHALL return action "drop" to Email_Worker
+4. WHEN an email matches a whitelist rule THEN the system SHALL return action "forward" with priority over blacklist; if the whitelist rule specifies a forwardTo address, use that instead of the default
+5. WHEN an email matches no rules THEN the system SHALL return action "forward" to default destination
+6. WHEN evaluating rules THEN the system SHALL support exact, contains, startsWith, endsWith, and regex match modes
+7. WHEN a Worker has ruleForwardEnabled set to false THEN the system SHALL ignore forwardTo on whitelist rules for that Worker
 
 ### Requirement 5
 

@@ -10,6 +10,7 @@ interface RuleRow {
   match_mode: string;
   pattern: string;
   tags: string | null;
+  forward_to: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -39,6 +40,7 @@ export class RuleRepository {
       matchMode: row.match_mode as MatchMode,
       pattern: row.pattern,
       tags: row.tags ? JSON.parse(row.tags) : undefined,
+      forwardTo: row.forward_to || undefined,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -82,11 +84,11 @@ export class RuleRepository {
     const tags = dto.tags ? JSON.stringify(dto.tags) : null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, forward_to, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, enabled ? 1 : 0, now, now);
+    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, dto.forwardTo || null, enabled ? 1 : 0, now, now);
 
     // Create associated stats record
     const statsStmt = this.db.prepare(`
@@ -230,6 +232,10 @@ export class RuleRepository {
     if (dto.tags !== undefined) {
       updates.push('tags = ?');
       params.push(dto.tags ? JSON.stringify(dto.tags) : null);
+    }
+    if (dto.forwardTo !== undefined) {
+      updates.push('forward_to = ?');
+      params.push(dto.forwardTo || null);
     }
 
     params.push(id);

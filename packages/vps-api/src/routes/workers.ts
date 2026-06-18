@@ -56,7 +56,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
    * Requirements: 5.4 - Log admin action when creating a Worker
    */
   fastify.post<{ Body: CreateWorkerInput }>('/', async (request, reply) => {
-    const { name, domain, defaultForwardTo, workerUrl } = request.body;
+    const { name, domain, defaultForwardTo, workerUrl, ruleForwardEnabled } = request.body;
 
     if (!name || !defaultForwardTo) {
       return reply.status(400).send({
@@ -66,7 +66,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     try {
-      const worker = getRepository().create({ name, domain, defaultForwardTo, workerUrl });
+      const worker = getRepository().create({ name, domain, defaultForwardTo, workerUrl, ruleForwardEnabled });
       
       // Log admin action (Requirement 5.4)
       getLogRepository().createAdminLog('创建Worker', {

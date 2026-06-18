@@ -112,11 +112,12 @@ export function filterEmail(
   // If email matches whitelist, it is forwarded regardless of other rules
   const whitelistMatch = matchesWhitelist(payload, grouped.whitelist);
   if (whitelistMatch) {
+    const forwardTo = whitelistMatch.forwardTo || defaultForwardTo;
     return {
       action: 'forward',
       matchedRule: whitelistMatch,
       matchedCategory: 'whitelist',
-      forwardTo: defaultForwardTo,
+      forwardTo,
       reason: `Matched whitelist rule: ${whitelistMatch.pattern}`,
     };
   }

@@ -24,6 +24,7 @@ export interface FilterRule {
   matchMode: MatchMode;
   pattern: string;
   tags?: string[];  // Optional tags for organization
+  forwardTo?: string;  // Override default forwarding address when rule matches
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +40,7 @@ export interface CreateRuleDTO {
   matchMode: MatchMode;
   pattern: string;
   tags?: string[];
+  forwardTo?: string;
   enabled?: boolean;
 }
 
@@ -51,5 +53,6 @@ export interface UpdateRuleDTO {
   matchMode?: MatchMode;
   pattern?: string;
   tags?: string[];
+  forwardTo?: string;
   enabled?: boolean;
 }

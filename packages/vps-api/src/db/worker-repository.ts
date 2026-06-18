@@ -11,6 +11,7 @@ export interface WorkerInstance {
   domain: string;
   defaultForwardTo: string;
   workerUrl: string | null;
+  ruleForwardEnabled: boolean;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -21,6 +22,7 @@ export interface CreateWorkerInput {
   domain?: string;
   defaultForwardTo: string;
   workerUrl?: string;
+  ruleForwardEnabled?: boolean;
 }
 
 export interface UpdateWorkerInput {
@@ -28,6 +30,7 @@ export interface UpdateWorkerInput {
   domain?: string;
   defaultForwardTo?: string;
   workerUrl?: string;
+  ruleForwardEnabled?: boolean;
   enabled?: boolean;
 }
 
@@ -39,7 +42,7 @@ export class WorkerRepository {
    */
   findAll(): WorkerInstance[] {
     const rows = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, rule_forward_enabled, enabled, created_at, updated_at
       FROM worker_instances
       ORDER BY created_at DESC
     `).all() as any[];
@@ -52,7 +55,7 @@ export class WorkerRepository {
    */
   findEnabled(): WorkerInstance[] {
     const rows = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, rule_forward_enabled, enabled, created_at, updated_at
       FROM worker_instances
       WHERE enabled = 1
       ORDER BY created_at DESC
@@ -66,7 +69,7 @@ export class WorkerRepository {
    */
   findById(id: string): WorkerInstance | null {
     const row = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, rule_forward_enabled, enabled, created_at, updated_at
       FROM worker_instances
       WHERE id = ?
     `).get(id) as any;
@@ -79,7 +82,7 @@ export class WorkerRepository {
    */
   findByName(name: string): WorkerInstance | null {
     const row = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, rule_forward_enabled, enabled, created_at, updated_at
       FROM worker_instances
       WHERE name = ? AND enabled = 1
     `).get(name) as any;
@@ -92,7 +95,7 @@ export class WorkerRepository {
    */
   findByDomain(domain: string): WorkerInstance | null {
     const row = this.db.prepare(`
-      SELECT id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at
+      SELECT id, name, domain, default_forward_to, worker_url, rule_forward_enabled, enabled, created_at, updated_at
       FROM worker_instances
       WHERE domain = ? AND enabled = 1
     `).get(domain) as any;
@@ -108,9 +111,9 @@ export class WorkerRepository {
     const now = new Date().toISOString();
 
     this.db.prepare(`
-      INSERT INTO worker_instances (id, name, domain, default_forward_to, worker_url, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(id, input.name, input.domain || null, input.defaultForwardTo, input.workerUrl || null, now, now);
+      INSERT INTO worker_instances (id, name, domain, default_forward_to, worker_url, rule_forward_enabled, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, input.name, input.domain || null, input.defaultForwardTo, input.workerUrl || null, input.ruleForwardEnabled ? 1 : 0, now, now);
 
     return this.findById(id)!;
   }
@@ -141,6 +144,10 @@ export class WorkerRepository {
     if (input.workerUrl !== undefined) {
       updates.push('worker_url = ?');
       values.push(input.workerUrl || null);
+    }
+    if (input.ruleForwardEnabled !== undefined) {
+      updates.push('rule_forward_enabled = ?');
+      values.push(input.ruleForwardEnabled ? 1 : 0);
     }
     if (input.enabled !== undefined) {
       updates.push('enabled = ?');
@@ -183,6 +190,7 @@ export class WorkerRepository {
       domain: row.domain,
       defaultForwardTo: row.default_forward_to,
       workerUrl: row.worker_url,
+      ruleForwardEnabled: row.rule_forward_enabled === 1,
       enabled: row.enabled === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

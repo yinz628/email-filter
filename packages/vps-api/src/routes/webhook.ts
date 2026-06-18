@@ -103,6 +103,11 @@ export function processPhase1(payload: EmailWebhookPayload): Phase1Result {
     ruleCache.set(workerId, rules);
   }
 
+  // If worker has not enabled rule-level forwarding override, strip forwardTo from all rules
+  if (rules && !worker?.ruleForwardEnabled) {
+    rules = rules.map(r => ({ ...r, forwardTo: undefined }));
+  }
+
   // Step 3: Execute filter matching
   const filterService = new FilterService(defaultForwardTo);
   let filterResult = filterService.processEmail(payload, rules);

@@ -662,6 +662,44 @@ function migrateCreateSubjectStatsTable(): MigrationResult {
   return { name, status: 'applied', message: 'Table and indexes created successfully' };
 }
 
+/**
+ * Migration: Add forward_to column to filter_rules
+ * Supports rule-level forwarding address override
+ */
+function migrateFilterRulesForwardTo(): MigrationResult {
+  const name = 'filter_rules.forward_to';
+
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+
+  if (columnExists(db, 'filter_rules', 'forward_to')) {
+    return { name, status: 'skipped', message: 'Column already exists' };
+  }
+
+  db.exec('ALTER TABLE filter_rules ADD COLUMN forward_to TEXT');
+  return { name, status: 'applied', message: 'Column added successfully' };
+}
+
+/**
+ * Migration: Add rule_forward_enabled column to worker_instances
+ * Worker-level toggle for rule-level forwarding override
+ */
+function migrateWorkerRuleForwardEnabled(): MigrationResult {
+  const name = 'worker_instances.rule_forward_enabled';
+
+  if (!tableExists(db, 'worker_instances')) {
+    return { name, status: 'skipped', message: 'Table worker_instances does not exist' };
+  }
+
+  if (columnExists(db, 'worker_instances', 'rule_forward_enabled')) {
+    return { name, status: 'skipped', message: 'Column already exists' };
+  }
+
+  db.exec('ALTER TABLE worker_instances ADD COLUMN rule_forward_enabled INTEGER NOT NULL DEFAULT 0');
+  return { name, status: 'applied', message: 'Column added successfully' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -691,6 +729,8 @@ const migrations = [
   migrateCreateUserSettingsTable,
   migrateFeatureSettings,
   migrateCreateSubjectStatsTable,
+  migrateFilterRulesForwardTo,
+  migrateWorkerRuleForwardEnabled,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

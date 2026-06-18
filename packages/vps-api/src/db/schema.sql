@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS worker_instances (
   domain TEXT,
   default_forward_to TEXT NOT NULL,
   worker_url TEXT,
+  rule_forward_enabled INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS filter_rules (
   match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
   pattern TEXT NOT NULL,
   tags TEXT,
+  forward_to TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

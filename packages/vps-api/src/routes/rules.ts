@@ -50,6 +50,7 @@ function validateCreateRule(body: unknown): { valid: boolean; error?: string; da
       matchMode: data.matchMode as CreateRuleDTO['matchMode'],
       pattern: data.pattern as string,
       enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
+      forwardTo: typeof data.forwardTo === 'string' && data.forwardTo.trim() ? data.forwardTo : undefined,
     },
   };
 }
@@ -91,6 +92,13 @@ function validateUpdateRule(body: unknown): { valid: boolean; error?: string; da
   }
   if (data.enabled !== undefined) {
     updateData.enabled = Boolean(data.enabled);
+  }
+  if (data.forwardTo !== undefined) {
+    if (typeof data.forwardTo === 'string' && data.forwardTo.trim()) {
+      updateData.forwardTo = data.forwardTo;
+    } else {
+      updateData.forwardTo = undefined;
+    }
   }
   if (data.tags !== undefined) {
     if (Array.isArray(data.tags)) {

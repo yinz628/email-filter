@@ -35,19 +35,18 @@ class TestRuleRepository {
   constructor(private db: SqlJsDatabase) {}
 
   private rowToRule(row: any[]): FilterRule {
-    // Schema: id, worker_id, category, match_type, match_mode, pattern, tags, enabled, created_at, updated_at, last_hit_at
+    // Schema: id(0), worker_id(1), category(2), match_type(3), match_mode(4), pattern(5), tags(6), forward_to(7), enabled(8), created_at(9), updated_at(10), last_hit_at(11)
     return {
       id: row[0] as string,
-      // row[1] is worker_id (skipped for FilterRule)
       category: row[2] as RuleCategory,
       matchType: row[3] as MatchType,
       matchMode: row[4] as MatchMode,
       pattern: row[5] as string,
-      // row[6] is tags (skipped for FilterRule)
-      enabled: row[7] === 1,
-      createdAt: new Date(row[8] as string),
-      updatedAt: new Date(row[9] as string),
-      lastHitAt: row[10] ? new Date(row[10] as string) : undefined,
+      forwardTo: (row[7] as string) || undefined,
+      enabled: row[8] === 1,
+      createdAt: new Date(row[9] as string),
+      updatedAt: new Date(row[10] as string),
+      lastHitAt: row[11] ? new Date(row[11] as string) : undefined,
     };
   }
 
@@ -57,9 +56,9 @@ class TestRuleRepository {
     const enabled = dto.enabled !== undefined ? dto.enabled : true;
 
     this.db.run(
-      `INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, enabled, created_at, updated_at)
-       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, dto.category, dto.matchType, dto.matchMode, dto.pattern, enabled ? 1 : 0, now, now]
+      `INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, forward_to, enabled, created_at, updated_at)
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, dto.category, dto.matchType, dto.matchMode, dto.pattern, dto.forwardTo || null, enabled ? 1 : 0, now, now]
     );
 
     // Create associated stats record
@@ -75,6 +74,7 @@ class TestRuleRepository {
       matchType: dto.matchType,
       matchMode: dto.matchMode,
       pattern: dto.pattern,
+      forwardTo: dto.forwardTo,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),

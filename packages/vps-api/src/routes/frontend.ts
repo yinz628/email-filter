@@ -1477,6 +1477,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="url" id="worker-url" placeholder="https://xxx.workers.dev">
           <p style="color:#888;font-size:12px;margin-top:5px">填写后可检测 Worker 是否在线</p>
         </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="worker-rule-forward">
+          <label for="worker-rule-forward" style="margin:0;cursor:pointer">启用规则转发覆写</label>
+          <p style="color:#888;font-size:12px;margin:0">开启后，白名单规则可指定独立的转发地址</p>
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -1507,6 +1512,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>Worker URL（可选，用于在线检测）</label>
           <input type="url" id="edit-worker-url" placeholder="https://xxx.workers.dev">
           <p style="color:#888;font-size:12px;margin-top:5px">填写后可检测 Worker 是否在线</p>
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="edit-worker-rule-forward">
+          <label for="edit-worker-rule-forward" style="margin:0;cursor:pointer">启用规则转发覆写</label>
+          <p style="color:#888;font-size:12px;margin:0">开启后，白名单规则可指定独立的转发地址</p>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2463,7 +2473,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         name: document.getElementById('worker-name').value,
         defaultForwardTo: document.getElementById('worker-forward').value,
         domain: document.getElementById('worker-domain').value || undefined,
-        workerUrl: document.getElementById('worker-url').value || undefined
+        workerUrl: document.getElementById('worker-url').value || undefined,
+        ruleForwardEnabled: document.getElementById('worker-rule-forward').checked
       };
       try {
         const res = await fetch('/api/workers', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
@@ -2487,6 +2498,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-worker-forward').value = w.defaultForwardTo;
       document.getElementById('edit-worker-domain').value = w.domain || '';
       document.getElementById('edit-worker-url').value = w.workerUrl || '';
+      document.getElementById('edit-worker-rule-forward').checked = !!w.ruleForwardEnabled;
       showModal('edit-worker-modal');
     }
     
@@ -2496,7 +2508,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const body = {
         defaultForwardTo: document.getElementById('edit-worker-forward').value,
         domain: document.getElementById('edit-worker-domain').value || undefined,
-        workerUrl: document.getElementById('edit-worker-url').value || undefined
+        workerUrl: document.getElementById('edit-worker-url').value || undefined,
+        ruleForwardEnabled: document.getElementById('edit-worker-rule-forward').checked
       };
       try {
         const res = await fetch('/api/workers/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });

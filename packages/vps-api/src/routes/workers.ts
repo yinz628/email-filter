@@ -125,6 +125,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
         domain: existingWorker.domain,
         defaultForwardTo: existingWorker.defaultForwardTo,
         workerUrl: existingWorker.workerUrl,
+        ruleForwardEnabled: existingWorker.ruleForwardEnabled,
         enabled: existingWorker.enabled,
       },
       after: {
@@ -132,6 +133,7 @@ export async function workerRoutes(fastify: FastifyInstance): Promise<void> {
         domain: worker.domain,
         defaultForwardTo: worker.defaultForwardTo,
         workerUrl: worker.workerUrl,
+        ruleForwardEnabled: worker.ruleForwardEnabled,
         enabled: worker.enabled,
       },
     }, worker.name);

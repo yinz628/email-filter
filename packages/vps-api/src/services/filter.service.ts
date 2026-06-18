@@ -18,6 +18,7 @@ import { matchesRuleWebhook, findMatchingRuleWebhook } from '@email-filter/share
  * Filter rules grouped by category
  */
 export interface GroupedRules {
+  forward: FilterRule[];
   whitelist: FilterRule[];
   blacklist: FilterRule[];
   dynamic: FilterRule[];
@@ -28,13 +29,16 @@ export interface GroupedRules {
  */
 export function groupRulesByCategory(rules: FilterRule[]): GroupedRules {
   const grouped: GroupedRules = {
+    forward: [],
     whitelist: [],
     blacklist: [],
     dynamic: [],
   };
 
   for (const rule of rules) {
-    if (rule.category === 'whitelist') {
+    if (rule.category === 'forward') {
+      grouped.forward.push(rule);
+    } else if (rule.category === 'whitelist') {
       grouped.whitelist.push(rule);
     } else if (rule.category === 'blacklist') {
       grouped.blacklist.push(rule);
@@ -44,6 +48,15 @@ export function groupRulesByCategory(rules: FilterRule[]): GroupedRules {
   }
 
   return grouped;
+}
+
+/**
+ * Check if email matches any forward list rule
+ * Forward rules route matching emails to a specific destination
+ */
+export function matchesForwardList(payload: EmailWebhookPayload, forwardRules: FilterRule[]): FilterRule | undefined {
+  const result = findMatchingRuleWebhook(payload, forwardRules);
+  return result.matched ? result.rule : undefined;
 }
 
 /**
@@ -108,7 +121,20 @@ export function filterEmail(
   // Group rules by category
   const grouped = groupRulesByCategory(rules);
 
-  // Step 1: Check whitelist first (highest priority) - Requirements 4.3
+  // Step 1: Check forward list first (highest priority)
+  // Forward rules explicitly route matching emails to a specific destination
+  const forwardMatch = matchesForwardList(payload, grouped.forward);
+  if (forwardMatch) {
+    return {
+      action: 'forward',
+      matchedRule: forwardMatch,
+      matchedCategory: 'forward',
+      forwardTo: forwardMatch.forwardTo || defaultForwardTo,
+      reason: `Matched forward rule: ${forwardMatch.pattern}`,
+    };
+  }
+
+  // Step 2: Check whitelist - Requirements 4.3
   // If email matches whitelist, it is forwarded regardless of other rules
   const whitelistMatch = matchesWhitelist(payload, grouped.whitelist);
   if (whitelistMatch) {

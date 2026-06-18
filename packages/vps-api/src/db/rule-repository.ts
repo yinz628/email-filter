@@ -105,6 +105,7 @@ export class RuleRepository {
       matchMode: dto.matchMode,
       pattern: dto.pattern,
       tags: dto.tags,
+      forwardTo: dto.forwardTo,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),

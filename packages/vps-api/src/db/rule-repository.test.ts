@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Arbitraries for generating valid rule data
-const categoryArb = fc.constantFrom<RuleCategory>('whitelist', 'blacklist', 'dynamic');
+const categoryArb = fc.constantFrom<RuleCategory>('whitelist', 'blacklist', 'dynamic', 'forward');
 const matchTypeArb = fc.constantFrom<MatchType>('sender', 'subject', 'domain');
 const matchModeArb = fc.constantFrom<MatchMode>('exact', 'contains', 'startsWith', 'endsWith', 'regex');
 

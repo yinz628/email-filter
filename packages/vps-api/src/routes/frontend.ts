@@ -326,6 +326,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </select>
           <select id="rule-category-filter" onchange="loadRules()">
             <option value="">全部类型</option>
+            <option value="forward">转发名单</option>
             <option value="whitelist">白名单</option>
             <option value="blacklist">黑名单</option>
             <option value="dynamic">动态规则</option>
@@ -1603,9 +1604,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-row">
           <div class="form-group">
             <label>规则类型 *</label>
-            <select id="rule-category" required>
+            <select id="rule-category" required onchange="toggleForwardToField()">
               <option value="blacklist">黑名单（拦截）</option>
               <option value="whitelist">白名单（放行）</option>
+              <option value="forward">转发名单（指定地址）</option>
             </select>
           </div>
           <div class="form-group">
@@ -1635,6 +1637,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>标签（可选，用逗号分隔）</label>
           <input type="text" id="rule-tags" placeholder="例如：营销,广告,垃圾">
         </div>
+        <div class="form-group" id="add-forward-to-group" style="display:none">
+          <label>转发地址 <span style="color:red">*</span></label>
+          <input type="email" id="rule-forward-to" placeholder="second@example.com">
+          <p style="color:#888;font-size:12px;margin-top:5px">转发名单必填；白名单选填，填写后覆写默认转发地址</p>
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -1658,9 +1665,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-row">
           <div class="form-group">
             <label>规则类型 *</label>
-            <select id="edit-rule-category" required>
+            <select id="edit-rule-category" required onchange="toggleEditForwardToField()">
               <option value="blacklist">黑名单（拦截）</option>
               <option value="whitelist">白名单（放行）</option>
+              <option value="forward">转发名单（指定地址）</option>
             </select>
           </div>
           <div class="form-group">
@@ -1689,6 +1697,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         <div class="form-group">
           <label>标签（可选，用逗号分隔）</label>
           <input type="text" id="edit-rule-tags" placeholder="例如：营销,广告,垃圾">
+        </div>
+        <div class="form-group" id="edit-forward-to-group" style="display:none">
+          <label>转发地址 <span style="color:red">*</span></label>
+          <input type="email" id="edit-rule-forward-to" placeholder="second@example.com">
+          <p style="color:#888;font-size:12px;margin-top:5px">转发名单必填；白名单选填，填写后覆写默认转发地址</p>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2574,7 +2587,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       tbody.innerHTML = rules.map(r => {
         const cat = '<span class="category category-' + r.category + '">' + 
-          (r.category === 'whitelist' ? '白名单' : r.category === 'blacklist' ? '黑名单' : '动态') + '</span>';
+          (r.category === 'forward' ? '转发' : r.category === 'whitelist' ? '白名单' : r.category === 'blacklist' ? '黑名单' : '动态') + '</span>';
         const status = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const worker = r.workerId ? (workers.find(w => w.id === r.workerId)?.name || '未知') : '全局';
         const matchType = {sender:'发件人',subject:'主题',domain:'域名'}[r.matchType] || r.matchType;
@@ -2593,17 +2606,47 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }).join('');
     }
 
+    function toggleForwardToField() {
+      const category = document.getElementById('rule-category').value;
+      const group = document.getElementById('add-forward-to-group');
+      const input = document.getElementById('rule-forward-to');
+      if (category === 'forward' || category === 'whitelist') {
+        group.style.display = 'block';
+        input.required = (category === 'forward');
+      } else {
+        group.style.display = 'none';
+        input.required = false;
+        input.value = '';
+      }
+    }
+
+    function toggleEditForwardToField() {
+      const category = document.getElementById('edit-rule-category').value;
+      const group = document.getElementById('edit-forward-to-group');
+      const input = document.getElementById('edit-rule-forward-to');
+      if (category === 'forward' || category === 'whitelist') {
+        group.style.display = 'block';
+        input.required = (category === 'forward');
+      } else {
+        group.style.display = 'none';
+        input.required = false;
+      }
+    }
+
     document.getElementById('add-rule-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const tagsInput = document.getElementById('rule-tags').value.trim();
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : undefined;
+      const category = document.getElementById('rule-category').value;
+      const forwardToValue = document.getElementById('rule-forward-to').value.trim();
       const body = {
         workerId: document.getElementById('rule-worker').value || undefined,
-        category: document.getElementById('rule-category').value,
+        category: category,
         matchType: document.getElementById('rule-match-type').value,
         matchMode: document.getElementById('rule-match-mode').value,
         pattern: document.getElementById('rule-pattern').value,
-        tags: tags
+        tags: tags,
+        forwardTo: forwardToValue || undefined
       };
       try {
         const res = await fetch('/api/rules', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
@@ -2674,6 +2717,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-rule-match-mode').value = rule.matchMode;
       document.getElementById('edit-rule-pattern').value = rule.pattern;
       document.getElementById('edit-rule-tags').value = rule.tags ? rule.tags.join(', ') : '';
+      document.getElementById('edit-rule-forward-to').value = rule.forwardTo || '';
+      toggleEditForwardToField();
       
       // Update worker select options
       const workerSelect = document.getElementById('edit-rule-worker');
@@ -2688,13 +2733,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const id = document.getElementById('edit-rule-id').value;
       const tagsInput = document.getElementById('edit-rule-tags').value.trim();
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
+      const forwardToValue = document.getElementById('edit-rule-forward-to').value.trim();
       const body = {
         workerId: document.getElementById('edit-rule-worker').value || null,
         category: document.getElementById('edit-rule-category').value,
         matchType: document.getElementById('edit-rule-match-type').value,
         matchMode: document.getElementById('edit-rule-match-mode').value,
         pattern: document.getElementById('edit-rule-pattern').value,
-        tags: tags
+        tags: tags,
+        forwardTo: forwardToValue || null
       };
       try {
         const res = await fetch('/api/rules/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });

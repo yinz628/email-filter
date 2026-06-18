@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_worker_instances_domain ON worker_instances(domai
 CREATE TABLE IF NOT EXISTS filter_rules (
   id TEXT PRIMARY KEY,
   worker_id TEXT,
-  category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic')),
+  category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic', 'forward')),
   match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
   match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
   pattern TEXT NOT NULL,

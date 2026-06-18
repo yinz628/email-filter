@@ -700,6 +700,60 @@ function migrateWorkerRuleForwardEnabled(): MigrationResult {
   return { name, status: 'applied', message: 'Column added successfully' };
 }
 
+/**
+ * Migration: Update filter_rules CHECK constraint to allow 'forward' category
+ * SQLite requires rebuilding the table to change a CHECK constraint
+ */
+function migrateFilterRulesForwardCategory(): MigrationResult {
+  const name = 'filter_rules.category_forward';
+
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+
+  // Check if 'forward' is already allowed in the CHECK constraint
+  const tableInfo = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='filter_rules'"
+  ).get() as { sql: string } | undefined;
+  if (tableInfo?.sql?.includes("'forward'")) {
+    return { name, status: 'skipped', message: 'CHECK constraint already includes forward' };
+  }
+
+  // Rebuild table with updated CHECK constraint
+  db.exec(`
+    PRAGMA foreign_keys=OFF;
+    BEGIN TRANSACTION;
+
+    CREATE TABLE filter_rules_new (
+      id TEXT PRIMARY KEY,
+      worker_id TEXT,
+      category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic', 'forward')),
+      match_type TEXT NOT NULL,
+      match_mode TEXT NOT NULL,
+      pattern TEXT NOT NULL,
+      tags TEXT,
+      forward_to TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_hit_at TEXT,
+      FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
+    );
+
+    INSERT INTO filter_rules_new SELECT * FROM filter_rules;
+    DROP TABLE filter_rules;
+    ALTER TABLE filter_rules_new RENAME TO filter_rules;
+
+    CREATE INDEX IF NOT EXISTS idx_rules_worker ON filter_rules(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_rules_category ON filter_rules(category);
+    CREATE INDEX IF NOT EXISTS idx_rules_enabled ON filter_rules(enabled);
+
+    COMMIT;
+    PRAGMA foreign_keys=ON;
+  `);
+  return { name, status: 'applied', message: 'CHECK constraint updated successfully' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -731,6 +785,7 @@ const migrations = [
   migrateCreateSubjectStatsTable,
   migrateFilterRulesForwardTo,
   migrateWorkerRuleForwardEnabled,
+  migrateFilterRulesForwardCategory,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

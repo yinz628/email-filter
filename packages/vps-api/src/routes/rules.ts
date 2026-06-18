@@ -15,7 +15,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { getRuleCache } from '../services/rule-cache.instance.js';
 
 // Valid values for validation
-const VALID_CATEGORIES: RuleCategory[] = ['whitelist', 'blacklist', 'dynamic'];
+const VALID_CATEGORIES: RuleCategory[] = ['whitelist', 'blacklist', 'dynamic', 'forward'];
 const VALID_MATCH_TYPES = ['sender', 'subject', 'domain'];
 const VALID_MATCH_MODES = ['exact', 'contains', 'startsWith', 'endsWith', 'regex'];
 
@@ -42,15 +42,22 @@ function validateCreateRule(body: unknown): { valid: boolean; error?: string; da
     return { valid: false, error: 'pattern is required and must be a non-empty string' };
   }
 
+  // Forward rules must specify a forwarding address
+  const category = data.category as RuleCategory;
+  const forwardTo = typeof data.forwardTo === 'string' && data.forwardTo.trim() ? data.forwardTo : undefined;
+  if (category === 'forward' && !forwardTo) {
+    return { valid: false, error: 'forwardTo is required for forward rules' };
+  }
+
   return {
     valid: true,
     data: {
-      category: data.category as RuleCategory,
+      category,
       matchType: data.matchType as CreateRuleDTO['matchType'],
       matchMode: data.matchMode as CreateRuleDTO['matchMode'],
       pattern: data.pattern as string,
       enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
-      forwardTo: typeof data.forwardTo === 'string' && data.forwardTo.trim() ? data.forwardTo : undefined,
+      forwardTo,
     },
   };
 }

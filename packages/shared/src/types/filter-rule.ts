@@ -1,7 +1,7 @@
 /**
  * Filter rule category types
  */
-export type RuleCategory = 'whitelist' | 'blacklist' | 'dynamic';
+export type RuleCategory = 'whitelist' | 'blacklist' | 'dynamic' | 'forward';
 
 /**
  * Match type - what field to match against

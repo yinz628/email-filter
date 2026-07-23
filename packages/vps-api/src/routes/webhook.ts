@@ -22,6 +22,7 @@ import { getRuleCache } from '../services/rule-cache.instance.js';
 import { getAsyncTaskProcessor } from '../services/async-task-processor.instance.js';
 import { DynamicRuleService } from '../services/dynamic-rule.service.js';
 import { getPerformanceMetrics } from '../services/performance-metrics.js';
+import { applyWorkerForwardPolicy } from '../services/forward-resolver.js';
 import type { AsyncTaskType } from '../services/async-task-processor.js';
 import { FeatureSettingsService } from '../services/feature-settings.service.js';
 
@@ -103,10 +104,11 @@ export function processPhase1(payload: EmailWebhookPayload): Phase1Result {
     ruleCache.set(workerId, rules);
   }
 
-  // If worker has not enabled rule-level forwarding override, strip forwardTo from all rules
-  if (rules && !worker?.ruleForwardEnabled) {
-    rules = rules.map(r => ({ ...r, forwardTo: undefined }));
-  }
+  // Apply the Worker-level forwarding policy.
+  // When the toggle is off (or the worker is unregistered), override addresses
+  // on whitelist/etc. rules are stripped, but `forward` rules keep their core
+  // address. See services/forward-resolver.ts for the full policy.
+  rules = applyWorkerForwardPolicy(rules, !!worker?.ruleForwardEnabled);
 
   // Step 3: Execute filter matching
   const filterService = new FilterService(defaultForwardTo);

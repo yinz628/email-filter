@@ -399,7 +399,8 @@ CREATE TABLE IF NOT EXISTS admin_config (
 ### Property 16: 规则级转发覆写受 Worker 开关门控
 *For any* 命中白名单（携带 `forwardTo`）的邮件：
 - 当 `worker.ruleForwardEnabled = true` 时，转发到该 `forwardTo`；
-- 当 `worker.ruleForwardEnabled = false`（默认）时，`forwardTo` 在求值前被剥离，邮件回退转发到默认地址。
+- 当 `worker.ruleForwardEnabled = false`（默认，或 Worker 未注册）时，白名单等规则的 `forwardTo`（覆写地址）在求值前被剥离，邮件回退转发到默认地址；
+- **forward 规则的核心 `forwardTo` 永不被剥离**，由 `services/forward-resolver.ts` 的 `isOverrideAddress` 集中判定。Worker 未注册时按「不启用覆写」安全默认处理。
 **Validates: Requirements 5（vps-email-filter requirements）**
 
 ## Testing Strategy

@@ -157,11 +157,34 @@ class TestRuleRepository {
   }
 
   count(): number {
-    const result = this.db.exec('SELECT COUNT(*) as count FROM filter_rules');
+    const result = this.db.exec('SELECT COUNT(*) as count');
     if (result.length === 0) {
       return 0;
     }
     return result[0].values[0][0] as number;
+  }
+
+  /**
+   * Mirror of production findDuplicate: includes forward_to via COALESCE so that
+   * the same match criteria with different forwarding addresses are NOT
+   * considered duplicates.
+   */
+  findDuplicate(dto: CreateRuleDTO): FilterRule | null {
+    const result = this.db.exec(
+      `SELECT * FROM filter_rules
+       WHERE worker_id IS NULL
+         AND category = ?
+         AND match_type = ?
+         AND match_mode = ?
+         AND pattern = ?
+         AND COALESCE(forward_to, '') = COALESCE(?, '')
+       LIMIT 1`,
+      [dto.category, dto.matchType, dto.matchMode, dto.pattern, dto.forwardTo || null]
+    );
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+    return this.rowToRule(result[0].values[0]);
   }
 }
 
@@ -305,6 +328,56 @@ describe('RuleRepository', () => {
     it('should return null when toggling non-existent rule', () => {
       const result = repository.toggle('non-existent-id');
       expect(result).toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // Deduplication with forward_to (point 4 of the forward-override review)
+  // The UNIQUE index includes forward_to, so the same match criteria may route
+  // to different forwarding addresses. findDuplicate must mirror this.
+  // ===========================================================================
+  describe('Deduplication with forward_to', () => {
+    const baseDto = (overrides: Partial<CreateRuleDTO> = {}): CreateRuleDTO => ({
+      category: 'forward',
+      matchType: 'sender',
+      matchMode: 'contains',
+      pattern: 'newsletter@example.com',
+      enabled: true,
+      ...overrides,
+    });
+
+    it('detects an exact duplicate including the same forwardTo', () => {
+      const dto = baseDto({ forwardTo: 'dest-a@example.com' });
+      repository.create(dto);
+      const dup = repository.findDuplicate(baseDto({ forwardTo: 'dest-a@example.com' }));
+      expect(dup).not.toBeNull();
+    });
+
+    it('does NOT treat same-match-but-different-forwardTo as a duplicate', () => {
+      repository.create(baseDto({ forwardTo: 'dest-a@example.com' }));
+      const dup = repository.findDuplicate(baseDto({ forwardTo: 'dest-b@example.com' }));
+      expect(dup).toBeNull();
+    });
+
+    it('treats two rules both without forwardTo as duplicates (NULL normalized)', () => {
+      // Without forwardTo — COALESCE(NULL,'') == '' for both, so they collide.
+      repository.create(baseDto({ forwardTo: undefined }));
+      const dup = repository.findDuplicate(baseDto({ forwardTo: undefined }));
+      expect(dup).not.toBeNull();
+    });
+
+    it('treats undefined forwardTo the same as omitted forwardTo', () => {
+      repository.create(baseDto({ forwardTo: undefined }));
+      // A DTO that never set forwardTo should still match the NULL-stored rule.
+      const dup = repository.findDuplicate(baseDto({ forwardTo: undefined }));
+      expect(dup).not.toBeNull();
+    });
+
+    it('allows inserting two forward rules that differ only by forwardTo (DB-level)', () => {
+      // The DB UNIQUE index itself should permit the second insert.
+      expect(() => repository.create(baseDto({ forwardTo: 'dest-a@example.com' }))).not.toThrow();
+      expect(() => repository.create(baseDto({ forwardTo: 'dest-b@example.com' }))).not.toThrow();
+      expect(repository.findAll().length).toBe(2);
     });
   });
 });

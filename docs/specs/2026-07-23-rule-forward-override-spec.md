@@ -52,18 +52,31 @@ flowchart TD
 
 ## 5. 关键实现约束
 
-### 5.1 双层开关剥离逻辑
+### 5.1 双层开关剥离逻辑(集中式实现)
 
-`webhook.ts` Phase 1 处理（`processPhase1`）中，规则取出后执行：
+转发地址策略由独立模块 `services/forward-resolver.ts` 统一管理，避免语义逻辑散落在 webhook/过滤引擎多处。`webhook.ts` 的 `processPhase1` 在取出规则后调用：
 
 ```ts
-// If worker has not enabled rule-level forwarding override, strip forwardTo from all rules
-if (rules && !worker?.ruleForwardEnabled) {
-  rules = rules.map(r => ({ ...r, forwardTo: undefined }));
+import { applyWorkerForwardPolicy } from '../services/forward-resolver.js';
+// ...
+rules = applyWorkerForwardPolicy(rules, !!worker?.ruleForwardEnabled);
+```
+
+`applyWorkerForwardPolicy` 的行为：
+
+- **开关开启**：保留所有规则的 `forwardTo`。
+- **开关关闭**（或 worker 未注册）：**仅剥离覆写地址**（白名单/黑名单/动态规则），**保留 forward 规则的核心地址**。
+- 永不修改入参数组与元素（返回新对象数组），保证规则缓存不被污染。
+
+核心判定函数 `isOverrideAddress(rule)` 集中了「哪些类别的 forwardTo 受门控」的语义：
+
+```ts
+export function isOverrideAddress(rule: FilterRule): boolean {
+  return rule.category !== 'forward';
 }
 ```
 
-> 注意：此处的「所有规则」实指白名单/黑名单/动态规则的覆写地址。`forward` 规则由于在 `filterEmail` 中优先求值，且其 `forwardTo` 是核心语义（必填），剥离对其语义无实质影响 —— 即使被剥离，`filterEmail` 中 `forwardMatch.forwardTo || defaultForwardTo` 会回退到默认地址，仍执行转发动作。但为保持 `forward` 规则的定向语义清晰，文档要求其核心地址不被视为「覆写」。
+> 设计要点：剥离逻辑只作用于覆写地址；`forward` 规则的核心地址（`forwardTo`）**永不剥离**。这与旧实现（`rules.map(r => ({ ...r, forwardTo: undefined }))` 无差别剥离所有规则）有本质区别 —— 旧实现会让 forward 规则在开关关闭时退化为转发到默认地址，是一个已修复的缺陷。未来新增规则类别时，只需更新 `isOverrideAddress` 一处。
 
 ### 5.2 forward 规则的 forwardTo 回退
 
@@ -98,13 +111,14 @@ if (category === 'forward' && !forwardTo) {
 
 ### 6.1 迁移函数
 
-| 迁移函数 | migrate.ts 行号 | 作用 |
+| 迁移函数 | migrate.ts | 作用 |
 | --- | --- | --- |
 | `migrateFilterRulesForwardTo` | 669 | `filter_rules` 加 `forward_to TEXT` 列 |
 | `migrateWorkerRuleForwardEnabled` | 688 | `worker_instances` 加 `rule_forward_enabled INTEGER NOT NULL DEFAULT 0` |
 | `migrateFilterRulesForwardCategory` | 707 | 重建 `filter_rules` 表，CHECK 约束纳入 `'forward'` |
+| `migrateFilterRulesUniqueForwardTo` | 768 | 用 UNIQUE INDEX 将 `COALESCE(forward_to,'')` 纳入唯一约束，允许同匹配条件不同转发地址 |
 
-三个迁移均幂等：列已存在 / 约束已含 forward 时返回 `skipped`。
+四个迁移均幂等：列已存在 / 约束已含 forward / 索引已存在时返回 `skipped`。第四个迁移用 UNIQUE INDEX + COALESCE 表达式（而非表级 UNIQUE），因为表级 UNIQUE 不支持表达式，且 COALESCE 把 NULL 归一为空串，使「无转发地址」的多条规则仍判为重复（保持原行为）。
 
 ### 6.2 最终 schema 要点
 
@@ -147,14 +161,20 @@ ALTER TABLE worker_instances ADD COLUMN rule_forward_enabled INTEGER NOT NULL DE
 
 ## 8. 风险与缓解
 
-### 风险 1：剥离逻辑误伤 forward 规则
+### 已修复：剥离逻辑误伤 forward 规则（历史缺陷）
 
-缓解：`forward` 规则优先求值，且 `forwardTo` 缺失时回退默认地址仍执行转发，语义安全；创建校验强制 `forwardTo` 必填，杜绝缺失场景。
+**旧实现**：`webhook.ts` 用 `rules.map(r => ({ ...r, forwardTo: undefined }))` 无差别剥离所有规则的 forwardTo，包括 forward 规则。这导致开关关闭时 forward 规则退化为转发到默认地址，丧失定向能力。
 
-### 风险 2：迁移重建 filter_rules 表锁库
+**修复**：引入 `services/forward-resolver.ts`，剥离时通过 `isOverrideAddress(rule)` 跳过 forward 规则（其 forwardTo 为核心地址）。回归测试覆盖于 `forward-resolver.test.ts`。
 
-缓解：迁移在事务内执行（`BEGIN TRANSACTION`），先建新表 `filter_rules_new`、`INSERT INTO ... SELECT *`、`DROP`、`RENAME`，最小化锁持有时间。
+### 风险 1：迁移重建 filter_rules 表锁库
 
-### 风险 3：规则缓存与剥离逻辑叠加
+缓解：迁移在事务内执行（`BEGIN TRANSACTION`），先建新表 `filter_rules_new`、`INSERT INTO ... SELECT *`、`DROP`、`RENAME`，最小化锁持有时间。第四个迁移（UNIQUE INDEX）不重建表，仅建索引，无锁库风险。
 
-缓解：剥离发生在 `processPhase1` 取出规则后的内存层，不污染缓存内容；缓存失效（`ruleCache.invalidateAll`）在规则变更时触发，确保新规则即时生效。
+### 风险 2：规则缓存与剥离逻辑叠加
+
+缓解：`applyWorkerForwardPolicy` 返回全新对象数组，不修改入参，缓存内容永不被污染；缓存失效（`ruleCache.invalidate`）在规则变更时触发，确保新规则即时生效。回归测试覆盖于 `forward-resolver.test.ts`（输入不可变性章节）。
+
+### 风险 3：sql.js 测试环境不强制表达式 UNIQUE 约束
+
+说明：sql.js（测试用，编译自旧版 SQLite）能创建 COALESCE 表达式 UNIQUE 索引，但不在插入时强制约束。因此 DB 级去重在测试中无法验证。生产环境 better-sqlite3（绑定原生 SQLite）正常强制。应用层 `findDuplicate` 作为双重保障，在所有环境生效。

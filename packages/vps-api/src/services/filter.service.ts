@@ -99,15 +99,24 @@ export interface FilterResult {
 
 /**
  * Process an email through the filter engine
- * 
- * Priority order (Requirements 4.3):
- * 1. Whitelist - if matched, email is forwarded regardless of other rules
- * 2. Blacklist - if matched (and not whitelisted), email is dropped (Requirements 4.2)
- * 3. Dynamic list - if matched (and not whitelisted), email is dropped
- * 4. No match - email is forwarded to default destination (Requirements 4.4)
- * 
+ *
+ * Priority order:
+ * 1. Forward - if matched, email is forwarded to the rule's core address
+ *    (forward rules have the highest priority)
+ * 2. Whitelist - if matched, email is forwarded regardless of other rules
+ * 3. Blacklist - if matched (and not whitelisted), email is dropped (Requirements 4.2)
+ * 4. Dynamic list - if matched (and not whitelisted), email is dropped
+ * 5. No match - email is forwarded to default destination (Requirements 4.4)
+ *
  * Note: Only enabled rules are considered for matching (Requirements 4.1)
- * 
+ *
+ * The `rules` array is expected to have already been preprocessed by
+ * `applyWorkerForwardPolicy()` (see services/forward-resolver.ts). That function
+ * strips override `forwardTo` values from whitelist/etc. rules when the Worker
+ * toggle is off, while always preserving the core `forwardTo` on `forward`
+ * rules. As a result, the `forwardMatch.forwardTo || defaultForwardTo` fallback
+ * below behaves correctly in every toggle state.
+ *
  * @param payload - The email webhook payload to process
  * @param rules - All filter rules (will be grouped by category)
  * @param defaultForwardTo - Default forwarding address when no rules match

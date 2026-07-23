@@ -50,18 +50,25 @@ export class RuleRepository {
 
   /**
    * Check if a duplicate rule exists
+   *
+   * Two rules are duplicates when they share worker_id, category, matchType,
+   * matchMode and pattern — AND the same forward_to (NULL treated as empty
+   * string via COALESCE). This mirrors the DB-level unique index
+   * idx_filter_rules_unique_forward and allows the same match criteria to route
+   * to different forwarding addresses.
    */
   findDuplicate(dto: CreateRuleDTO, workerId?: string): FilterRuleWithWorker | null {
     const stmt = this.db.prepare(`
-      SELECT * FROM filter_rules 
+      SELECT * FROM filter_rules
       WHERE (worker_id = ? OR (worker_id IS NULL AND ? IS NULL))
-        AND category = ? 
-        AND match_type = ? 
-        AND match_mode = ? 
+        AND category = ?
+        AND match_type = ?
+        AND match_mode = ?
         AND pattern = ?
+        AND COALESCE(forward_to, '') = COALESCE(?, '')
       LIMIT 1
     `);
-    const row = stmt.get(workerId || null, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern) as RuleRow | undefined;
+    const row = stmt.get(workerId || null, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, dto.forwardTo || null) as RuleRow | undefined;
     return row ? this.rowToRule(row) : null;
   }
 

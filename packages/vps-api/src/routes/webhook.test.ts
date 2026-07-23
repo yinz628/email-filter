@@ -253,20 +253,59 @@ describe('Webhook Handler', () => {
         fc.property(emailPayloadArb, (payload) => {
           const ruleCache = getRuleCache();
           ruleCache.clear();
-          
+
           // First call populates cache
           processPhase1(payload);
           const stats1 = ruleCache.getStats();
-          
+
           // Second call should hit cache
           processPhase1(payload);
           const stats2 = ruleCache.getStats();
-          
+
           // Hits should increase
           expect(stats2.hits).toBeGreaterThan(stats1.hits);
         }),
         { numRuns: 50 }
       );
+    });
+  });
+
+  // ===========================================================================
+  // Forwarding override safety (forward-resolver integration)
+  // When no Worker record is found (unregistered workerName, or none supplied),
+  // the safe default is "override disabled": the email falls back to the default
+  // forwarding address. This pins down point 2 of the review.
+  // ===========================================================================
+  describe('Forwarding override default when worker is absent', () => {
+    it('forwards to the default address when payload has no workerName', () => {
+      const payload: EmailWebhookPayload = {
+        from: 'someone@example.com',
+        to: 'recipient@example.com',
+        subject: 'Hello',
+        messageId: 'msg-no-worker',
+        timestamp: 1700000000000,
+      };
+      const result = processPhase1(payload);
+
+      // No worker => no override => forwards to the default address
+      expect(result.decision.action).toBe('forward');
+      expect(result.decision.forwardTo).toBe('default@example.com');
+    });
+
+    it('forwards to the default address for an unregistered workerName', () => {
+      const payload: EmailWebhookPayload = {
+        from: 'someone@example.com',
+        to: 'recipient@example.com',
+        subject: 'Hello',
+        messageId: 'msg-unknown-worker',
+        timestamp: 1700000000000,
+        workerName: 'unregistered-worker',
+      };
+      const result = processPhase1(payload);
+
+      // findByName returns null (mocked DB) => treat as unregistered => no override
+      expect(result.decision.action).toBe('forward');
+      expect(result.decision.forwardTo).toBe('default@example.com');
     });
   });
 });

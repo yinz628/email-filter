@@ -400,17 +400,146 @@ describe('FilterService', () => {
 
     it('should convert result to API response format', () => {
       const service = new FilterService(defaultForwardTo);
-      
+
       fc.assert(
         fc.property(
           emailPayloadArb,
           (payload) => {
             const result = service.processEmail(payload, []);
             const decision = service.toApiResponse(result);
-            
+
             expect(decision.action).toBe(result.action);
             expect(decision.forwardTo).toBe(result.forwardTo);
             expect(decision.reason).toBe(result.reason);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  // ===========================================================================
+  // Forward rule category (转发名单) — highest priority, core forwarding address
+  // These tests pin down the behavior fixed by the forward-override refactor and
+  // were entirely absent before (categoryArb above excludes 'forward').
+  // ===========================================================================
+  describe('Forward rule category', () => {
+    const customDefault = 'default@example.com';
+
+    it('forward rule takes priority over blacklist (forward even when both match)', () => {
+      fc.assert(
+        fc.property(
+          emailPayloadArb,
+          matchTypeArb,
+          (payload, matchType) => {
+            const fwdRule = createMatchingRule(payload, 'forward', matchType);
+            fwdRule.forwardTo = 'dest@example.com';
+            const blackRule = createMatchingRule(payload, 'blacklist', matchType);
+
+            const result = filterEmail(payload, [fwdRule, blackRule], customDefault);
+
+            expect(result.action).toBe('forward');
+            expect(result.matchedCategory).toBe('forward');
+            // forward rule's core address wins, not the default
+            expect(result.forwardTo).toBe('dest@example.com');
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('forward rule takes priority over dynamic rules', () => {
+      fc.assert(
+        fc.property(
+          emailPayloadArb,
+          matchTypeArb,
+          (payload, matchType) => {
+            const fwdRule = createMatchingRule(payload, 'forward', matchType);
+            fwdRule.forwardTo = 'dest@example.com';
+            const dynRule = createMatchingRule(payload, 'dynamic', matchType);
+
+            const result = filterEmail(payload, [dynRule, fwdRule], customDefault);
+
+            expect(result.action).toBe('forward');
+            expect(result.matchedCategory).toBe('forward');
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('forward rule takes priority over whitelist', () => {
+      fc.assert(
+        fc.property(
+          emailPayloadArb,
+          matchTypeArb,
+          (payload, matchType) => {
+            const fwdRule = createMatchingRule(payload, 'forward', matchType);
+            fwdRule.forwardTo = 'fwd@example.com';
+            const wlRule = createMatchingRule(payload, 'whitelist', matchType);
+
+            const result = filterEmail(payload, [wlRule, fwdRule], customDefault);
+
+            expect(result.matchedCategory).toBe('forward');
+            expect(result.forwardTo).toBe('fwd@example.com');
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('forward rule without forwardTo falls back to default address (defensive)', () => {
+      // A forward rule should never lack forwardTo (creation validates it), but
+      // filterEmail must stay safe: fall back to default rather than drop.
+      fc.assert(
+        fc.property(
+          emailPayloadArb,
+          matchTypeArb,
+          (payload, matchType) => {
+            const fwdRule = createMatchingRule(payload, 'forward', matchType);
+            // forwardTo intentionally left undefined
+
+            const result = filterEmail(payload, [fwdRule], customDefault);
+
+            expect(result.action).toBe('forward');
+            expect(result.forwardTo).toBe(customDefault);
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('whitelist with forwardTo overrides the default forwarding address', () => {
+      fc.assert(
+        fc.property(
+          emailPayloadArb,
+          matchTypeArb,
+          (payload, matchType) => {
+            const wlRule = createMatchingRule(payload, 'whitelist', matchType);
+            wlRule.forwardTo = 'override@example.com';
+
+            const result = filterEmail(payload, [wlRule], customDefault);
+
+            expect(result.action).toBe('forward');
+            expect(result.matchedCategory).toBe('whitelist');
+            expect(result.forwardTo).toBe('override@example.com');
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it('whitelist without forwardTo uses the default address', () => {
+      fc.assert(
+        fc.property(
+          emailPayloadArb,
+          matchTypeArb,
+          (payload, matchType) => {
+            const wlRule = createMatchingRule(payload, 'whitelist', matchType);
+
+            const result = filterEmail(payload, [wlRule], customDefault);
+
+            expect(result.forwardTo).toBe(customDefault);
           }
         ),
         { numRuns: 100 }

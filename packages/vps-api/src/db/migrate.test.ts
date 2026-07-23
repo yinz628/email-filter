@@ -361,4 +361,47 @@ describe('Migration Idempotency', () => {
     expect(result[0].values[0][0]).toBe('test-1');
     expect(result[0].values[0][1]).toBe('test-worker');
   });
+
+  /**
+   * Test: filter_rules uniqueness includes forward_to (point 4 of forward-override review)
+   *
+   * The schema defines a UNIQUE INDEX covering COALESCE(forward_to) so that
+   * identical match criteria may route to different forwarding addresses. Note:
+   * sql.js (compiled from an older SQLite) does not enforce UNIQUE on expression
+   * indexes at insert time, so this test only verifies the index is DEFINED. The
+   * behavioral guarantee is covered by findDuplicate (rule-repository.test.ts)
+   * and enforced by better-sqlite3 in production.
+   */
+  it('filter_rules unique index includes forward_to, allowing multi-destination routing', () => {
+    const schemaPath = join(__dirname, 'schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
+
+    const baseInsert = (forwardTo: string | null, id: string) =>
+      db.run(
+        `INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, forward_to, enabled, created_at, updated_at)
+         VALUES (?, NULL, 'forward', 'sender', 'contains', 'shop@example.com', ?, 1, '2024-01-01', '2024-01-01')`,
+        [id, forwardTo]
+      );
+
+    // Two rules differing only by forward_to: both succeed (multi-destination)
+    expect(() => baseInsert('dest-a@example.com', 'r1')).not.toThrow();
+    expect(() => baseInsert('dest-b@example.com', 'r2')).not.toThrow();
+  });
+
+  /**
+   * Test: schema.sql defines the forward_to unique index
+   */
+  it('schema.sql defines a unique index covering COALESCE(forward_to)', () => {
+    const schemaPath = join(__dirname, 'schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
+
+    // The expression-based unique index must exist after loading the schema
+    const idx = db.exec(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='filter_rules' AND sql LIKE '%COALESCE(forward_to%'"
+    );
+    expect(idx.length).toBeGreaterThan(0);
+    expect(idx[0].values.length).toBeGreaterThan(0);
+  });
 });

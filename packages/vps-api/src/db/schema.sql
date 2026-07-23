@@ -28,9 +28,14 @@ CREATE TABLE IF NOT EXISTS filter_rules (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_hit_at TEXT,
-  FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE,
-  UNIQUE(worker_id, category, match_type, match_mode, pattern)
+  FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
 );
+
+-- 唯一约束含 forward_to：同匹配条件但不同转发地址允许共存（支持多地址分发）。
+-- 用 UNIQUE INDEX + COALESCE 表达式而非表级 UNIQUE，因为表级 UNIQUE 不支持表达式，
+-- 且 COALESCE 把 NULL 归一为空串，使“无转发地址”的多条规则仍判为重复（保持原行为）。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_rules_unique_forward
+  ON filter_rules(worker_id, category, match_type, match_mode, pattern, COALESCE(forward_to, ''));
 
 CREATE INDEX IF NOT EXISTS idx_filter_rules_worker ON filter_rules(worker_id);
 

@@ -754,6 +754,59 @@ function migrateFilterRulesForwardCategory(): MigrationResult {
   return { name, status: 'applied', message: 'CHECK constraint updated successfully' };
 }
 
+/**
+ * Migration: Include forward_to in the filter_rules uniqueness constraint
+ *
+ * The previous UNIQUE(worker_id, category, match_type, match_mode, pattern)
+ * constraint did not account for forward_to, so two rules with the same match
+ * criteria but different forwarding addresses were rejected as duplicates. This
+ * prevented legitimate use cases such as routing the same sender to multiple
+ * destinations via separate `forward` rules.
+ *
+ * This migration replaces the table-level UNIQUE with a UNIQUE INDEX that
+ * includes a COALESCE(forward_to, '') expression. COALESCE normalizes NULL to an
+ * empty string so that multiple rules without a forwarding address are still
+ * considered duplicates of each other (preserving the original behavior), while
+ * rules that differ only by forward_to are now allowed.
+ *
+ * Note: SQLite's table-level UNIQUE(...) cannot contain expressions, so a
+ * separate UNIQUE INDEX is required. The migration is idempotent: it drops the
+ * old index name first (if present) and checks whether the new index already
+ * exists before creating it.
+ */
+function migrateFilterRulesUniqueForwardTo(): MigrationResult {
+  const name = 'filter_rules.unique_forward_to';
+
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+
+  // Drop the legacy table-level UNIQUE index that SQLite auto-created for the
+  // old constraint. Its auto-generated name varies, so we look it up by the
+  // columns it covers. If the table was created by schema.sql with the updated
+  // UNIQUE (already including COALESCE), this index won't exist and the drop is
+  // a no-op.
+  const legacyIndex = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='filter_rules' AND sql LIKE '%worker_id, category, match_type, match_mode, pattern)%' AND sql NOT LIKE '%forward_to%'"
+  ).all() as { name: string }[];
+  for (const idx of legacyIndex) {
+    db.exec(`DROP INDEX IF EXISTS ${idx.name}`);
+  }
+
+  // Check if the new expression-based unique index already exists.
+  const newIndex = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='filter_rules' AND sql LIKE '%COALESCE(forward_to%'"
+  ).get() as { name: string } | undefined;
+  if (newIndex) {
+    return { name, status: 'skipped', message: 'Unique index with forward_to already exists' };
+  }
+
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_rules_unique_forward ON filter_rules(worker_id, category, match_type, match_mode, pattern, COALESCE(forward_to, ''))"
+  );
+  return { name, status: 'applied', message: 'Unique index with forward_to created successfully' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -786,6 +839,7 @@ const migrations = [
   migrateFilterRulesForwardTo,
   migrateWorkerRuleForwardEnabled,
   migrateFilterRulesForwardCategory,
+  migrateFilterRulesUniqueForwardTo,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

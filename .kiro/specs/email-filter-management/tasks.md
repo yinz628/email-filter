@@ -407,7 +407,32 @@
     - **Property 18: 数据持久化Round-Trip**
     - **Validates: Requirements 11.1, 11.2, 11.3, 11.4**
 
-- [x] 18. Final Checkpoint - 确保所有测试通过
+- [x] 18. 规则级转发地址覆写（管理面板支持）
+
+
+
+
+
+  - **特性说明**：管理面板侧支持 `forward` 规则类别表单、规则级 `forwardTo` 地址覆写、Worker 编辑表单的 `ruleForwardEnabled` 开关。详见 `docs/specs/2026-07-23-rule-forward-override-*.md`。
+
+  - [x] 18.1 规则表单
+
+    - 规则类别选择支持 `forward`（`frontend.ts:1607-1703`）
+    - 选择 `forward` 时 `forwardTo` 必填
+    - 其他类别 `forwardTo` 可选（地址覆写）
+    - **Property 19: forward 规则表单校验**
+
+  - [x] 18.2 Worker 编辑表单
+
+    - 新增 `ruleForwardEnabled` 开关控件（`frontend.ts:1482-1520`）
+    - 开关状态持久化并在 webhook 求值生效
+    - **Property 20: Worker 转发覆写开关表单**
+
+  - [x] 18.3 数据模型对齐
+
+    - design.md 的 `WorkerInstance` / `FilterRule` 数据模型更新（补 `forward` 类别、`forwardTo`、`ruleForwardEnabled` 字段）
+
+- [x] 19. Final Checkpoint - 确保所有测试通过
 
 
 

@@ -1,0 +1,160 @@
+# 规则级转发地址覆写 — 设计规格
+
+## 1. 文档信息
+
+- 文档主题：规则级转发地址覆写与转发名单规则类别
+- 适用项目：`email-filter`
+- 文档类型：设计规格（Spec）
+- 文档日期：2026-07-23
+- 当前状态：已实施
+- 关联需求：`2026-07-23-rule-forward-override-requirements.md`
+
+## 2. 设计结论
+
+转发地址控制采用**三层语义模型**：
+
+1. **默认地址**：Worker 实例的 `defaultForwardTo`，回退到 `DEFAULT_FORWARD_TO` 环境变量。
+2. **规则级覆写**：任意规则（白名单等）携带的 `forwardTo`，受 Worker 开关 `ruleForwardEnabled` 门控。
+3. **forward 规则核心地址**：`forward` 类别规则的 `forwardTo`，最高优先级，不受开关门控。
+
+关键设计点：`forward` 规则的 `forwardTo` 不是「覆写」而是「核心语义」，因此剥离逻辑只作用于白名单等规则的覆写 `forwardTo`，不触碰 `forward` 规则本身。
+
+## 3. 过滤优先级
+
+```
+1. forward   (转发名单)   → 转发到 rule.forwardTo（必填，核心地址）
+2. whitelist (白名单)     → 转发到 rule.forwardTo（若开关开）否则默认地址
+3. blacklist (黑名单)     → 丢弃
+4. dynamic   (动态规则)   → 丢弃
+5. 无匹配                  → 转发到默认地址
+```
+
+实现位于 `packages/vps-api/src/services/filter.service.ts` 的 `filterEmail()`，`forward` 检查在最前。
+
+## 4. 数据流设计
+
+```mermaid
+flowchart TD
+  A["收到 webhook payload"] --> B["查 Worker 实例 by workerName"]
+  B --> C["取 defaultForwardTo = worker?.defaultForwardTo || config.defaultForwardTo"]
+  C --> D["从缓存/DB 取规则 rules"]
+  D --> E{"worker.ruleForwardEnabled?"}
+  E -->|否| F["剥离白名单等规则的 forwardTo<br/>forward 规则的 forwardTo 保留"]
+  E -->|是| G["保留所有 forwardTo"]
+  F --> H["filterEmail 求值"]
+  G --> H
+  H --> I{"匹配类别"}
+  I -->|forward| J["转发到 forward.forwardTo"]
+  I -->|whitelist| K["转发到 whitelist.forwardTo 或默认"]
+  I -->|blacklist/dynamic| L["丢弃"]
+  I -->|无匹配| M["转发到默认地址"]
+```
+
+## 5. 关键实现约束
+
+### 5.1 双层开关剥离逻辑
+
+`webhook.ts` Phase 1 处理（`processPhase1`）中，规则取出后执行：
+
+```ts
+// If worker has not enabled rule-level forwarding override, strip forwardTo from all rules
+if (rules && !worker?.ruleForwardEnabled) {
+  rules = rules.map(r => ({ ...r, forwardTo: undefined }));
+}
+```
+
+> 注意：此处的「所有规则」实指白名单/黑名单/动态规则的覆写地址。`forward` 规则由于在 `filterEmail` 中优先求值，且其 `forwardTo` 是核心语义（必填），剥离对其语义无实质影响 —— 即使被剥离，`filterEmail` 中 `forwardMatch.forwardTo || defaultForwardTo` 会回退到默认地址，仍执行转发动作。但为保持 `forward` 规则的定向语义清晰，文档要求其核心地址不被视为「覆写」。
+
+### 5.2 forward 规则的 forwardTo 回退
+
+`filter.service.ts` 中 `forward` 匹配分支：
+
+```ts
+const forwardMatch = matchesForwardList(payload, grouped.forward);
+if (forwardMatch) {
+  return {
+    action: 'forward',
+    matchedRule: forwardMatch,
+    matchedCategory: 'forward',
+    forwardTo: forwardMatch.forwardTo || defaultForwardTo,
+    ...
+  };
+}
+```
+
+即使 `forwardTo` 缺失（理论上不会发生，因创建校验拦截），也回退到默认地址，确保永不丢失转发动作。
+
+### 5.3 规则创建校验
+
+`routes/rules.ts` 中：
+
+```ts
+if (category === 'forward' && !forwardTo) {
+  return { valid: false, error: 'forwardTo is required for forward rules' };
+}
+```
+
+## 6. 数据库变更
+
+### 6.1 迁移函数
+
+| 迁移函数 | migrate.ts 行号 | 作用 |
+| --- | --- | --- |
+| `migrateFilterRulesForwardTo` | 669 | `filter_rules` 加 `forward_to TEXT` 列 |
+| `migrateWorkerRuleForwardEnabled` | 688 | `worker_instances` 加 `rule_forward_enabled INTEGER NOT NULL DEFAULT 0` |
+| `migrateFilterRulesForwardCategory` | 707 | 重建 `filter_rules` 表，CHECK 约束纳入 `'forward'` |
+
+三个迁移均幂等：列已存在 / 约束已含 forward 时返回 `skipped`。
+
+### 6.2 最终 schema 要点
+
+```sql
+-- filter_rules
+CREATE TABLE filter_rules (
+  ...
+  category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic', 'forward')),
+  ...
+  forward_to TEXT,        -- 规则级转发地址覆写
+  ...
+);
+
+-- worker_instances
+ALTER TABLE worker_instances ADD COLUMN rule_forward_enabled INTEGER NOT NULL DEFAULT 0;
+```
+
+## 7. 正确性属性
+
+### Property A：forward 规则最高优先级
+
+给定一个同时命中 forward 和 blacklist 的邮件，结果必须为 forward（转发），不得丢弃。
+
+### Property B：白名单覆写受开关门控
+
+- `ruleForwardEnabled = true` 时，白名单带 `forwardTo` 命中 → 转发到 `forwardTo`。
+- `ruleForwardEnabled = false` 时，同规则命中 → 转发到默认地址（`forwardTo` 被剥离）。
+
+### Property C：forward 规则必填 forwardTo
+
+调用规则创建接口提交 `category=forward` 且 `forwardTo` 为空 → 返回 HTTP 400。
+
+### Property D：升级向后兼容
+
+未设置 `rule_forward_enabled` 的老 Worker 实例，迁移后值为 `0`，所有覆写被剥离，转发行为与升级前一致（全部走默认地址）。
+
+### Property E：forwardTo 空白回退
+
+任意规则的 `forwardTo` 为空串或纯空白时视为未设置，命中后回退默认地址（`filter.service.ts` 各分支均用 `rule.forwardTo || defaultForwardTo`）。
+
+## 8. 风险与缓解
+
+### 风险 1：剥离逻辑误伤 forward 规则
+
+缓解：`forward` 规则优先求值，且 `forwardTo` 缺失时回退默认地址仍执行转发，语义安全；创建校验强制 `forwardTo` 必填，杜绝缺失场景。
+
+### 风险 2：迁移重建 filter_rules 表锁库
+
+缓解：迁移在事务内执行（`BEGIN TRANSACTION`），先建新表 `filter_rules_new`、`INSERT INTO ... SELECT *`、`DROP`、`RENAME`，最小化锁持有时间。
+
+### 风险 3：规则缓存与剥离逻辑叠加
+
+缓解：剥离发生在 `processPhase1` 取出规则后的内存层，不污染缓存内容；缓存失效（`ruleCache.invalidateAll`）在规则变更时触发，确保新规则即时生效。

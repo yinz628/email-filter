@@ -212,16 +212,22 @@ vps-admin/
 
 ```sql
 -- 过滤规则表
+-- CHECK 约束在迁移 migrate.ts:707 中重建以纳入 'forward' 类别
+-- forward_to 列在迁移 migrate.ts:669 中新增
 CREATE TABLE IF NOT EXISTS filter_rules (
   id TEXT PRIMARY KEY,
-  category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic')),
+  worker_id TEXT,
+  category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic', 'forward')),
   match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
   match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
   pattern TEXT NOT NULL,
+  tags TEXT,
+  forward_to TEXT,  -- 规则级转发地址覆写（forward 规则必填，其他类别可选）
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  last_hit_at TEXT
+  last_hit_at TEXT,
+  FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
 );
 
 -- 规则统计表
@@ -282,12 +288,16 @@ CREATE TABLE IF NOT EXISTS watch_stats (
 ### Admin Panel 数据库
 
 ```sql
--- Worker 实例表
-CREATE TABLE IF NOT EXISTS instances (
+-- Worker 实例表（多 Worker 配置）
+-- rule_forward_enabled 列在迁移 migrate.ts:688 中新增
+CREATE TABLE IF NOT EXISTS worker_instances (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  api_url TEXT NOT NULL,
-  api_key TEXT NOT NULL,
+  domain TEXT,
+  default_forward_to TEXT NOT NULL,
+  worker_url TEXT,
+  rule_forward_enabled INTEGER NOT NULL DEFAULT 0,  -- 规则级转发覆写总开关（默认关）
+  enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -298,6 +308,8 @@ CREATE TABLE IF NOT EXISTS admin_config (
   value TEXT NOT NULL
 );
 ```
+
+> 旧的 `instances` 表（name/api_url/api_key 三字段）已被 `worker_instances` 取代，后者支持多 Worker、域名、默认转发地址、规则覆写开关与启停状态。webhook 路由按 `payload.workerName` 查找 `worker_instances` 确定转发配置。
 
 
 
@@ -379,6 +391,16 @@ CREATE TABLE IF NOT EXISTS admin_config (
 ### Property 14: 实例管理
 *For any* 有效的 Worker 实例数据，注册后应能查询到该实例。
 **Validates: Requirements 7.2**
+
+### Property 15: forward 规则最高优先级
+*For any* 同时匹配 forward 与 blacklist/dynamic 规则的邮件，系统应返回 "forward" 动作，转发到该 forward 规则的 `forwardTo`。forward 类别先于白名单/黑名单/动态规则求值。
+**Validates: Requirements 4（vps-email-filter requirements）**
+
+### Property 16: 规则级转发覆写受 Worker 开关门控
+*For any* 命中白名单（携带 `forwardTo`）的邮件：
+- 当 `worker.ruleForwardEnabled = true` 时，转发到该 `forwardTo`；
+- 当 `worker.ruleForwardEnabled = false`（默认）时，`forwardTo` 在求值前被剥离，邮件回退转发到默认地址。
+**Validates: Requirements 5（vps-email-filter requirements）**
 
 ## Testing Strategy
 
@@ -516,11 +538,13 @@ ADMIN_PORT=3001
 ADMIN_DB_PATH=/opt/email-filter/data/admin.db
 ADMIN_PASSWORD=your-admin-password
 
-# Dynamic Rules
-DYNAMIC_ENABLED=true
-DYNAMIC_TIME_WINDOW=60
-DYNAMIC_THRESHOLD=5
-DYNAMIC_EXPIRATION=48
+# Dynamic Rules（参数不在 env 配置，运行时经 /api/dynamic 存入 dynamic_config 表）
+# Scheduler
+HEARTBEAT_CRON=*/5 * * * *
+CLEANUP_CRON=0 3 * * *
+HIT_LOG_RETENTION_HOURS=72
+ALERT_RETENTION_DAYS=90
+RUN_HEARTBEAT_ON_START=false
 ```
 
 ### Cloudflare Email Worker 配置

@@ -50,7 +50,7 @@ cp .env.example .env
 至少需要配置：
 
 ```bash
-API_PORT=3000
+PORT=3000
 API_TOKEN=你的安全随机令牌
 DEFAULT_FORWARD_TO=your-email@gmail.com
 VPS_PUBLIC_URL=https://your-vps-domain.com
@@ -60,11 +60,18 @@ DEFAULT_ADMIN_PASSWORD=你的后台密码
 NODE_ENV=production
 HOST=0.0.0.0
 # 功能开关（可选，默认启用）
-DYNAMIC_ENABLED=true          # 动态规则自动生成
 SUBJECT_TRACKING_ENABLED=true # 邮件主题追踪统计
 CAMPAIGN_ANALYTICS_ENABLED=true # 营销分析
 SIGNAL_MONITORING_ENABLED=true  # 信号监控
+# 调度器配置（可选，以下为默认值）
+HEARTBEAT_CRON='*/5 * * * *'           # 信号监控心跳检查周期
+CLEANUP_CRON='0 3 * * *'               # 数据清理周期（每日凌晨3点）
+HIT_LOG_RETENTION_HOURS=72             # 命中日志保留小时数（48-72）
+ALERT_RETENTION_DAYS=90                # 告警保留天数（30-90）
+RUN_HEARTBEAT_ON_START=false           # 启动时立即执行一次心跳检查
 ```
+
+> 注意：动态规则的参数（启用状态、时间窗口、阈值、过期）**不通过环境变量配置**，而是运行时通过 `/api/dynamic` 接口管理，存储在数据库的 `dynamic_config` 表中。请勿在 `.env` 中添加 `DYNAMIC_*` 变量。
 
 ### 3. 启动服务
 
@@ -258,9 +265,16 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 
 ### 规则级转发地址覆写
 
-1. 在管理面板 Worker 编辑页开启「启用规则转发覆写」开关
-2. 创建白名单规则时填写「转发地址」字段，命中后优先使用该地址
-3. 关闭 Worker 级开关后，所有白名单规则的 forwardTo 被忽略，统一使用默认地址
+转发地址控制采用双层语义：
+
+1. **forward 规则的核心地址**：`forward` 类别规则的 `forwardTo` 属于核心语义（必填），在求值时始终生效，不受任何开关影响。这是最高优先级的定向转发，确保命中邮件转往指定地址。
+2. **其他规则的覆写地址**：白名单等规则的可选 `forwardTo` 属于「覆写」，受 Worker 实例的 `ruleForwardEnabled` 开关门控：
+   - 在管理面板 Worker 编辑页开启「启用规则转发覆写」开关（数据库字段 `worker_instances.rule_forward_enabled`）
+   - 创建白名单规则时填写「转发地址」字段，命中后优先使用该地址
+   - **关闭 Worker 级开关后（默认状态），所有白名单规则的 forwardTo 被剥离忽略，统一使用默认地址** —— 保证升级后行为不变
+3. **管理入口**：规则的 `forward` 类别与 `forwardTo` 字段在管理面板的规则表单中配置；Worker 开关在 Worker 编辑表单中配置。
+
+> 相关规格文档见 `docs/specs/2026-07-23-rule-forward-override-{requirements,spec,task-list}.md`。
 
 ## 排障
 

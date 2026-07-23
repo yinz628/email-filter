@@ -320,7 +320,39 @@ vps-email-filter/
     - .env.example - 环境变量模板
     - _Requirements: 9.3, 9.4_
 
-- [x] 13. Final Checkpoint - 确保所有测试通过
+- [x] 13. 规则级转发地址覆写（forward 规则类别 + forwardTo + Worker 开关）
+
+
+
+
+
+  - **特性说明**：新增 `forward` 规则类别（最高优先级）、规则级 `forwardTo` 地址覆写、Worker 实例 `ruleForwardEnabled` 双层开关。详见 `docs/specs/2026-07-23-rule-forward-override-*.md`。
+
+  - [x] 13.1 数据库迁移
+
+    - `filter_rules` 新增 `forward_to` 列（`migrate.ts:669`）
+    - `worker_instances` 新增 `rule_forward_enabled` 列（`migrate.ts:688`）
+    - 重建 `filter_rules` 使 CHECK 约束含 `'forward'`（`migrate.ts:707`）
+    - 三个迁移幂等
+    - _Requirements: 4_
+
+  - [x] 13.2 过滤引擎
+
+    - `filter.service.ts`：`GroupedRules` 加 `forward` 分组、`matchesForwardList`、`filterEmail` 中 forward 优先级最高
+    - 白名单分支支持 `forwardTo` 覆写
+    - **Property 15: forward 规则最高优先级** / **Property 16: 规则级转发覆写受 Worker 开关门控**
+
+  - [x] 13.3 webhook 求值剥离逻辑
+
+    - `routes/webhook.ts:106-109`：`ruleForwardEnabled=false` 时剥离规则 `forwardTo`（forward 规则核心地址不受影响）
+    - `routes/rules.ts:48`：`forward` 类别必填 `forwardTo` 校验
+
+  - [x] 13.4 文档对齐
+
+    - design.md 更新 SQLite 表结构与 Property 15/16
+    - 新建 `docs/specs/2026-07-23-rule-forward-override-{requirements,spec,task-list}.md`
+
+- [x] 14. Final Checkpoint - 确保所有测试通过
 
 
 

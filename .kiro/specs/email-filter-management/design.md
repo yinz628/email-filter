@@ -224,11 +224,13 @@ interface DynamicConfigAPI {
 interface WorkerInstance {
   id: string;
   name: string;
-  apiUrl: string;
-  apiKey?: string;
+  domain?: string;
+  defaultForwardTo: string;        // 该 Worker 的默认转发地址
+  workerUrl?: string;              // Worker 健康检查 URL
+  ruleForwardEnabled: boolean;     // 规则级转发覆写总开关（默认 false）
+  enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
-  status: 'active' | 'inactive' | 'error';
 }
 
 // 管理员配置
@@ -244,10 +246,12 @@ interface AdminConfig {
 // 过滤规则
 interface FilterRule {
   id: string;
-  category: 'whitelist' | 'blacklist' | 'dynamic';
-  matchType: 'sender_name' | 'subject' | 'sender_email';
-  matchMode: 'regex' | 'contains';
+  category: 'whitelist' | 'blacklist' | 'dynamic' | 'forward';
+  matchType: 'sender' | 'subject' | 'domain';
+  matchMode: 'exact' | 'contains' | 'startsWith' | 'endsWith' | 'regex';
   pattern: string;
+  tags?: string[];
+  forwardTo?: string;  // 规则级转发地址覆写（forward 类别必填）
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -484,6 +488,14 @@ CREATE INDEX idx_subject_tracker_time ON email_subject_tracker(received_at);
 ### Property 18: 数据持久化Round-Trip
 *For any* 保存的过滤规则、处理日志和统计数据，重新加载后应与保存前的数据一致。
 **Validates: Requirements 11.1, 11.2, 11.3, 11.4**
+
+### Property 19: forward 规则表单校验
+*For any* 在规则表单选择 `forward` 类别时，`forwardTo` 字段必填，提交空值应被前端拦截并返回 400；其他类别（whitelist/blacklist/dynamic）的 `forwardTo` 可选，留空则命中后走默认地址。
+**Validates: Requirements 5（email-filter-management requirements）**
+
+### Property 20: Worker 转发覆写开关表单
+*For any* Worker 编辑表单提交，`ruleForwardEnabled` 字段应能持久化并在 webhook 求值时生效：开关关闭时白名单等规则的 `forwardTo` 被剥离，开关开启时保留。
+**Validates: Requirements 2（email-filter-management requirements）**
 
 ## Error Handling
 

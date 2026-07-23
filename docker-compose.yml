@@ -5,7 +5,7 @@ services:
       dockerfile: packages/vps-api/Dockerfile
     container_name: email-filter-api
     ports:
-      - "${API_PORT:-3000}:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       - email-filter-data:/app/data
     environment:
@@ -23,10 +23,11 @@ services:
       - CAMPAIGN_ANALYTICS_ENABLED=${CAMPAIGN_ANALYTICS_ENABLED:-true}
       - SIGNAL_MONITORING_ENABLED=${SIGNAL_MONITORING_ENABLED:-true}
       - SUBJECT_TRACKING_ENABLED=${SUBJECT_TRACKING_ENABLED:-true}
-      - DYNAMIC_ENABLED=${DYNAMIC_ENABLED:-true}
-      - DYNAMIC_TIME_WINDOW=${DYNAMIC_TIME_WINDOW:-60}
-      - DYNAMIC_THRESHOLD=${DYNAMIC_THRESHOLD:-5}
-      - DYNAMIC_EXPIRATION=${DYNAMIC_EXPIRATION:-48}
+      - HEARTBEAT_CRON=${HEARTBEAT_CRON:-*/5 * * * *}
+      - CLEANUP_CRON=${CLEANUP_CRON:-0 3 * * *}
+      - HIT_LOG_RETENTION_HOURS=${HIT_LOG_RETENTION_HOURS:-72}
+      - ALERT_RETENTION_DAYS=${ALERT_RETENTION_DAYS:-90}
+      - RUN_HEARTBEAT_ON_START=${RUN_HEARTBEAT_ON_START:-false}
     restart: unless-stopped
     networks:
       - email-filter-network

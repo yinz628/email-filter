@@ -546,4 +546,99 @@ describe('FilterService', () => {
       );
     });
   });
+
+  /**
+   * **Feature: verification-extraction — verificationRequired flag passing**
+   *
+   * A forward rule with extractVerification=true must propagate
+   * verificationRequired=true through the FilterResult, so the email-worker
+   * knows to extract a code/link from the body. Rules without the flag (or
+   * non-forward categories) must NOT set it.
+   */
+  describe('verificationRequired flag passing', () => {
+    const customForward = 'verify-bucket@example.com';
+
+    it('forward rule with extractVerification=true sets verificationRequired', () => {
+      const payload: EmailWebhookPayload = {
+        from: 'noreply@svc.com',
+        to: 'me@example.com',
+        subject: 'Your code',
+        messageId: 'mid-1',
+        timestamp: 1,
+      };
+      const fwdRule: FilterRule = {
+        id: crypto.randomUUID(),
+        category: 'forward',
+        matchType: 'sender',
+        matchMode: 'contains',
+        pattern: 'svc.com',
+        forwardTo: customForward,
+        extractVerification: true,
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = filterEmail(payload, [fwdRule], 'default@example.com');
+
+      expect(result.action).toBe('forward');
+      expect(result.forwardTo).toBe(customForward);
+      expect(result.verificationRequired).toBe(true);
+    });
+
+    it('forward rule WITHOUT extractVerification does not set verificationRequired', () => {
+      const payload: EmailWebhookPayload = {
+        from: 'noreply@svc.com',
+        to: 'me@example.com',
+        subject: 'Your code',
+        messageId: 'mid-2',
+        timestamp: 2,
+      };
+      const fwdRule: FilterRule = {
+        id: crypto.randomUUID(),
+        category: 'forward',
+        matchType: 'sender',
+        matchMode: 'contains',
+        pattern: 'svc.com',
+        forwardTo: customForward,
+        // extractVerification omitted / falsy
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = filterEmail(payload, [fwdRule], 'default@example.com');
+
+      expect(result.action).toBe('forward');
+      expect(result.verificationRequired).not.toBe(true);
+    });
+
+    it('toFilterDecision carries verificationRequired through to the worker contract', () => {
+      const payload: EmailWebhookPayload = {
+        from: 'noreply@svc.com',
+        to: 'me@example.com',
+        subject: 'verify',
+        messageId: 'mid-3',
+        timestamp: 3,
+      };
+      const fwdRule: FilterRule = {
+        id: crypto.randomUUID(),
+        category: 'forward',
+        matchType: 'sender',
+        matchMode: 'contains',
+        pattern: 'svc.com',
+        forwardTo: customForward,
+        extractVerification: true,
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const service = new FilterService('default@example.com');
+      const result = service.processEmail(payload, [fwdRule]);
+      const decision = service.toApiResponse(result);
+
+      expect(decision.action).toBe('forward');
+      expect(decision.verificationRequired).toBe(true);
+    });
+  });
 });

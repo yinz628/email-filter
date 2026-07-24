@@ -34,19 +34,30 @@ const createRuleDTOArb: fc.Arbitrary<CreateRuleDTO> = fc.record({
 class TestRuleRepository {
   constructor(private db: SqlJsDatabase) {}
 
-  private rowToRule(row: any[]): FilterRule {
-    // Schema: id(0), worker_id(1), category(2), match_type(3), match_mode(4), pattern(5), tags(6), forward_to(7), enabled(8), created_at(9), updated_at(10), last_hit_at(11)
+  /**
+   * Convert a sql.js result row to a FilterRule.
+   *
+   * Reads columns BY NAME (via the columns array returned alongside values)
+   * rather than by positional index. This is robust to schema changes that
+   * add/reorder columns (e.g. extract_verification was inserted between
+   * forward_to and enabled), so positional index assumptions don't break.
+   */
+  private rowToRule(row: any[], columns: string[]): FilterRule {
+    const idx = (name: string): number => columns.indexOf(name);
+    const val = (name: string): any => row[idx(name)];
+
     return {
-      id: row[0] as string,
-      category: row[2] as RuleCategory,
-      matchType: row[3] as MatchType,
-      matchMode: row[4] as MatchMode,
-      pattern: row[5] as string,
-      forwardTo: (row[7] as string) || undefined,
-      enabled: row[8] === 1,
-      createdAt: new Date(row[9] as string),
-      updatedAt: new Date(row[10] as string),
-      lastHitAt: row[11] ? new Date(row[11] as string) : undefined,
+      id: val('id') as string,
+      category: val('category') as RuleCategory,
+      matchType: val('match_type') as MatchType,
+      matchMode: val('match_mode') as MatchMode,
+      pattern: val('pattern') as string,
+      forwardTo: (val('forward_to') as string) || undefined,
+      extractVerification: val('extract_verification') === 1,
+      enabled: val('enabled') === 1,
+      createdAt: new Date(val('created_at') as string),
+      updatedAt: new Date(val('updated_at') as string),
+      lastHitAt: val('last_hit_at') ? new Date(val('last_hit_at') as string) : undefined,
     };
   }
 
@@ -86,7 +97,7 @@ class TestRuleRepository {
     if (result.length === 0 || result[0].values.length === 0) {
       return null;
     }
-    return this.rowToRule(result[0].values[0]);
+    return this.rowToRule(result[0].values[0], result[0].columns);
   }
 
   findAll(): FilterRule[] {
@@ -94,7 +105,7 @@ class TestRuleRepository {
     if (result.length === 0) {
       return [];
     }
-    return result[0].values.map((row) => this.rowToRule(row));
+    return result[0].values.map((row) => this.rowToRule(row, result[0].columns));
   }
 
   update(id: string, dto: UpdateRuleDTO): FilterRule | null {
@@ -184,7 +195,7 @@ class TestRuleRepository {
     if (result.length === 0 || result[0].values.length === 0) {
       return null;
     }
-    return this.rowToRule(result[0].values[0]);
+    return this.rowToRule(result[0].values[0], result[0].columns);
   }
 }
 

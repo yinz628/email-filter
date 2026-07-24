@@ -807,6 +807,68 @@ function migrateFilterRulesUniqueForwardTo(): MigrationResult {
   return { name, status: 'applied', message: 'Unique index with forward_to created successfully' };
 }
 
+/**
+ * Migration: Add extract_verification column to filter_rules
+ *
+ * forward rules may optionally flag extractVerification=true so the
+ * email-worker extracts a verification code/link from the body via the
+ * extraction-worker service binding. This is an orthogonal action on the
+ * existing forward category — no new category is introduced, keeping the
+ * category enum stable and the change surface small.
+ *
+ * Idempotent: skipped if the column already exists.
+ */
+function migrateFilterRulesExtractVerification(): MigrationResult {
+  const name = 'filter_rules.extract_verification';
+
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+
+  const colExists = db.prepare(
+    "SELECT COUNT(*) as c FROM pragma_table_info('filter_rules') WHERE name='extract_verification'"
+  ).get() as { c: number };
+  if (colExists.c > 0) {
+    return { name, status: 'skipped', message: 'Column extract_verification already exists' };
+  }
+
+  db.exec('ALTER TABLE filter_rules ADD COLUMN extract_verification INTEGER NOT NULL DEFAULT 0');
+  return { name, status: 'applied', message: 'Column extract_verification added' };
+}
+
+/**
+ * Migration: Create verification_codes table
+ *
+ * Stores verification codes/links extracted by extraction-worker and reported
+ * by email-worker to POST /api/webhook/verification. Queried by the admin
+ * panel via GET /api/verification/list.
+ *
+ * Idempotent: CREATE TABLE IF NOT EXISTS.
+ */
+function migrateCreateVerificationCodesTable(): MigrationResult {
+  const name = 'verification_codes.create';
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS verification_codes (
+      id TEXT PRIMARY KEY,
+      worker_name TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      sender TEXT,
+      subject TEXT,
+      code TEXT,
+      link TEXT,
+      message_id TEXT,
+      received_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_verification_recipient ON verification_codes(recipient, received_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_verification_message_id ON verification_codes(message_id);
+    CREATE INDEX IF NOT EXISTS idx_verification_created ON verification_codes(created_at DESC);
+  `);
+  return { name, status: 'applied', message: 'verification_codes table ready' };
+}
+
 // ============================================
 // Run All Migrations
 // ============================================
@@ -840,6 +902,8 @@ const migrations = [
   migrateWorkerRuleForwardEnabled,
   migrateFilterRulesForwardCategory,
   migrateFilterRulesUniqueForwardTo,
+  migrateFilterRulesExtractVerification,
+  migrateCreateVerificationCodesTable,
 ];
 
 console.log(`Running ${migrations.length} migrations...\n`);

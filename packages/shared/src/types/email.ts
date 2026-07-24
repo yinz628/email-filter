@@ -36,6 +36,24 @@ export interface FilterDecision {
   action: 'forward' | 'drop';
   forwardTo?: string;
   reason?: string;
+  /**
+   * When true, the email-worker should extract a verification code/link from
+   * the message body via the extraction-worker service binding. Set only when
+   * the matched forward rule has extractVerification=true.
+   * Mutually exclusive with discountRequired.
+   */
+  verificationRequired?: boolean;
+  /**
+   * When true, the email-worker should extract a discount code/link.
+   * Set only when the matched forward rule has extractDiscount=true.
+   * Mutually exclusive with verificationRequired.
+   */
+  discountRequired?: boolean;
+  /**
+   * The matched forward rule's ID, passed to extraction-worker so it can
+   * look up the extraction config (code_pattern, link_anchor_pattern) from D1.
+   */
+  ruleId?: string;
 }
 
 /**

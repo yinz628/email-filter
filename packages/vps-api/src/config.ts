@@ -42,6 +42,10 @@ export interface Config {
   };
   /** Public URL of this VPS API (for webhook endpoint) */
   vpsPublicUrl: string;
+  /** Extraction worker URL (for pushing extraction rule configs). Optional. */
+  extractionWorkerUrl: string;
+  /** Extraction worker admin token (for /api/rules auth). Optional. */
+  extractionWorkerToken: string;
   /** JWT secret key for signing tokens - MUST be changed in production */
   jwtSecret: string;
   /** JWT token expiration time (e.g., '24h', '7d') */
@@ -132,6 +136,9 @@ export const config: Config = {
   },
   // VPS Public URL (for checking if worker is connected to this VPS)
   vpsPublicUrl: process.env.VPS_PUBLIC_URL || '',
+  // Extraction worker config (for pushing extraction rules to worker D1)
+  extractionWorkerUrl: process.env.EXTRACTION_WORKER_URL || '',
+  extractionWorkerToken: process.env.EXTRACTION_WORKER_TOKEN || '',
   // JWT Authentication Configuration
   jwtSecret: process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production',
   jwtExpiry: process.env.JWT_EXPIRY || '24h',

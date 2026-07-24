@@ -48,3 +48,12 @@ __pycache__/
 # Build artifacts
 dist-test/
 logs-*.json
+
+# SSH credentials / deployment secrets
+ssh2/.env*
+ssh/.env*
+ssh2/*.tar.gz
+ssh/*.tar.gz
+
+# ZCode agent session state (plans, cache)
+.zcode/

@@ -444,6 +444,184 @@ function readLegacyFeatureSetting(db: Database.Database, key: string): boolean |
   }
 }
 
+/**
+ * Migration: filter_rules.forward_to column
+ * Adds the override forwarding address column to filter rules.
+ */
+function migrateFilterRulesForwardTo(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.forward_to';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  if (columnExists(db, 'filter_rules', 'forward_to')) {
+    return { name, status: 'skipped', message: 'Column forward_to already exists' };
+  }
+  db.exec('ALTER TABLE filter_rules ADD COLUMN forward_to TEXT');
+  return { name, status: 'applied', message: 'Column forward_to added' };
+}
+
+/**
+ * Migration: worker_instances.rule_forward_enabled column
+ */
+function migrateWorkerRuleForwardEnabled(db: Database.Database): MigrationResult {
+  const name = 'worker_instances.rule_forward_enabled';
+  if (!tableExists(db, 'worker_instances')) {
+    return { name, status: 'skipped', message: 'Table worker_instances does not exist' };
+  }
+  if (columnExists(db, 'worker_instances', 'rule_forward_enabled')) {
+    return { name, status: 'skipped', message: 'Column rule_forward_enabled already exists' };
+  }
+  db.exec('ALTER TABLE worker_instances ADD COLUMN rule_forward_enabled INTEGER NOT NULL DEFAULT 0');
+  return { name, status: 'applied', message: 'Column rule_forward_enabled added' };
+}
+
+/**
+ * Migration: 'forward' category for filter_rules CHECK constraint
+ * The original CHECK only allowed whitelist/blacklist/dynamic. This adds
+ * forward by recreating the table constraint (existing rows preserved).
+ */
+function migrateFilterRulesForwardCategory(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.forward_category';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  // If a forward rule already exists, the constraint is already updated.
+  const hasForward = db.prepare("SELECT COUNT(*) as c FROM filter_rules WHERE category='forward'").get() as { c: number };
+  if (hasForward.c > 0) {
+    return { name, status: 'skipped', message: 'forward category already in use' };
+  }
+  // Check if the CHECK constraint already includes forward
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='filter_rules'").get() as { sql: string };
+  if (schema.sql && schema.sql.includes("'forward'")) {
+    return { name, status: 'skipped', message: 'CHECK constraint already includes forward' };
+  }
+  // Recreate table with updated constraint (existing data preserved via copy)
+  db.exec('PRAGMA foreign_keys=OFF');
+  db.exec(`
+    CREATE TABLE filter_rules_new (
+      id TEXT PRIMARY KEY,
+      worker_id TEXT,
+      category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic', 'forward')),
+      match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
+      match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
+      pattern TEXT NOT NULL,
+      tags TEXT,
+      forward_to TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_hit_at TEXT,
+      FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
+    );
+    INSERT INTO filter_rules_new SELECT * FROM filter_rules;
+    DROP TABLE filter_rules;
+    ALTER TABLE filter_rules_new RENAME TO filter_rules;
+    CREATE INDEX IF NOT EXISTS idx_rules_worker ON filter_rules(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_rules_category ON filter_rules(category);
+    CREATE INDEX IF NOT EXISTS idx_rules_enabled ON filter_rules(enabled);
+  `);
+  db.exec('PRAGMA foreign_keys=ON');
+  return { name, status: 'applied', message: 'forward category added to CHECK constraint' };
+}
+
+/**
+ * Migration: filter_rules unique index including forward_to (COALESCE)
+ */
+function migrateFilterRulesUniqueForwardTo(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.unique_forward_to';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  const newIndex = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='filter_rules' AND sql LIKE '%COALESCE(forward_to%'"
+  ).get() as { name: string } | undefined;
+  if (newIndex) {
+    return { name, status: 'skipped', message: 'Unique index with forward_to already exists' };
+  }
+  // Drop legacy unique index without forward_to
+  const legacy = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='filter_rules' AND sql LIKE '%worker_id, category, match_type, match_mode, pattern)%' AND sql NOT LIKE '%forward_to%'"
+  ).all() as { name: string }[];
+  for (const idx of legacy) {
+    db.exec(`DROP INDEX IF EXISTS ${idx.name}`);
+  }
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_rules_unique_forward ON filter_rules(worker_id, category, match_type, match_mode, pattern, COALESCE(forward_to, ''))"
+  );
+  return { name, status: 'applied', message: 'Unique index with forward_to created' };
+}
+
+/**
+ * Migration: filter_rules.extract_verification column
+ * forward rules may flag extractVerification=true to trigger code/link
+ * extraction via the extraction-worker service binding.
+ */
+function migrateFilterRulesExtractVerification(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.extract_verification';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  if (columnExists(db, 'filter_rules', 'extract_verification')) {
+    return { name, status: 'skipped', message: 'Column extract_verification already exists' };
+  }
+  db.exec('ALTER TABLE filter_rules ADD COLUMN extract_verification INTEGER NOT NULL DEFAULT 0');
+  return { name, status: 'applied', message: 'Column extract_verification added' };
+}
+
+/**
+ * Migration: verification_codes table for extracted codes/links.
+ */
+function migrateCreateVerificationCodesTable(db: Database.Database): MigrationResult {
+  const name = 'verification_codes.create';
+  if (tableExists(db, 'verification_codes')) {
+    return { name, status: 'skipped', message: 'Table verification_codes already exists' };
+  }
+  db.exec(`
+    CREATE TABLE verification_codes (
+      id TEXT PRIMARY KEY,
+      worker_name TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      sender TEXT,
+      subject TEXT,
+      code TEXT,
+      link TEXT,
+      message_id TEXT,
+      received_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_verification_recipient ON verification_codes(recipient, received_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_verification_message_id ON verification_codes(message_id);
+    CREATE INDEX IF NOT EXISTS idx_verification_created ON verification_codes(created_at DESC);
+  `);
+  return { name, status: 'applied', message: 'verification_codes table created' };
+}
+
+/**
+ * Migration: Add extract_discount + code_pattern + link_anchor_pattern to filter_rules.
+ * Supports discount code extraction (extractDiscount flag) and user-configured
+ * extraction regex patterns for both verification and discount extraction.
+ */
+function migrateFilterRulesDiscountAndPatterns(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.discount_and_patterns';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  let applied = false;
+  if (!columnExists(db, 'filter_rules', 'extract_discount')) {
+    db.exec('ALTER TABLE filter_rules ADD COLUMN extract_discount INTEGER NOT NULL DEFAULT 0');
+    applied = true;
+  }
+  if (!columnExists(db, 'filter_rules', 'code_pattern')) {
+    db.exec('ALTER TABLE filter_rules ADD COLUMN code_pattern TEXT');
+    applied = true;
+  }
+  if (!columnExists(db, 'filter_rules', 'link_anchor_pattern')) {
+    db.exec('ALTER TABLE filter_rules ADD COLUMN link_anchor_pattern TEXT');
+    applied = true;
+  }
+  return { name, status: applied ? 'applied' : 'skipped', message: applied ? 'Columns added' : 'Columns already exist' };
+}
+
 function migrateFeatureSettings(db: Database.Database): MigrationResult {
   const name = 'feature_settings';
   let applied = false;
@@ -514,6 +692,13 @@ const migrations: MigrationFn[] = [
   migrateFeatureSettings,
   migrateCreateSubjectStatsTable,
   migrateSubjectStatsAddIgnored,
+  migrateFilterRulesForwardTo,
+  migrateWorkerRuleForwardEnabled,
+  migrateFilterRulesForwardCategory,
+  migrateFilterRulesUniqueForwardTo,
+  migrateFilterRulesExtractVerification,
+  migrateCreateVerificationCodesTable,
+  migrateFilterRulesDiscountAndPatterns,
 ];
 
 /**

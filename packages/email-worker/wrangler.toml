@@ -21,6 +21,13 @@ DEBUG_LOGGING = "false"
 [[send_email]]
 name = "SEB"
 
+# Service binding to extraction-worker for verification code/link extraction.
+# Optional: when absent, verification extraction is silently skipped.
+# The extraction-worker must be deployed first (it is the service target).
+[[services]]
+binding = "EXTRACTION_WORKER"
+service = "extraction-worker"
+
 # KV namespace for caching monitoring hits when VPS API is unavailable (optional)
 # To enable, create a KV namespace and uncomment the following:
 # [[kv_namespaces]]

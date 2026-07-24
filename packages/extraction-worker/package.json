@@ -1,0 +1,23 @@
+{
+  "name": "@email-filter/extraction-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "echo 'Skipping extraction-worker build (use deploy for Cloudflare)'",
+    "build:cf": "wrangler deploy --dry-run --outdir=dist",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "postal-mime": "^2.4.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.0",
+    "wrangler": "^3.114.15"
+  }
+}

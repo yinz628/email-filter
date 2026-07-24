@@ -27,6 +27,12 @@ export interface Env {
   VPS_API_BASE_URL?: string;
   /** KV namespace for caching monitoring hits when VPS API is unavailable (optional) */
   MONITORING_CACHE?: KVNamespace;
+  /**
+   * Service binding to the extraction-worker for verification code/link extraction.
+   * Optional: when absent, verification extraction is silently skipped.
+   * Configured via [[services]] in wrangler.toml.
+   */
+  EXTRACTION_WORKER?: Fetcher;
 }
 
 /** 
@@ -66,6 +72,12 @@ interface FilterDecision {
   action: 'forward' | 'drop';
   forwardTo?: string;
   reason?: string;
+  /** Extract verification code/link via extraction-worker. Mutually exclusive with discountRequired. */
+  verificationRequired?: boolean;
+  /** Extract discount code/link via extraction-worker. Mutually exclusive with verificationRequired. */
+  discountRequired?: boolean;
+  /** Matched forward rule ID, passed to extraction-worker to look up config. */
+  ruleId?: string;
 }
 
 /** Campaign tracking payload sent to VPS API */
@@ -104,6 +116,12 @@ const CACHE_TTL_SECONDS = 24 * 60 * 60;
 export const MISSING_SUBJECT_PLACEHOLDER = '[NO_SUBJECT]';
 /** Maximum header bytes to read when falling back to raw MIME headers */
 export const MAX_HEADER_BYTES = 64 * 1024;
+/**
+ * Maximum body bytes to read for verification-code extraction.
+ * Caps CPU usage on large emails; the code/link is almost always near the top.
+ * Phase 0 testing confirmed reading the full body does not break message.forward().
+ */
+export const MAX_EXTRACTION_BYTES = 256 * 1024;
 
 /**
  * Build minimal webhook payload by excluding null/undefined fields
@@ -248,6 +266,39 @@ export async function extractSubjectFromRawHeaders(message: ForwardableEmailMess
   }
 
   return undefined;
+}
+
+/**
+ * Read the full raw MIME source (headers + body) as a string, capped at
+ * MAX_EXTRACTION_BYTES. Used only when a forward rule requests verification
+ * extraction.
+ *
+ * Phase 0 testing (docs/specs/2026-07-23-phase0-raw-forward-compat-result.md)
+ * confirmed that consuming the entire message.raw stream does NOT prevent
+ * message.forward() from delivering the complete email afterwards.
+ *
+ * @returns the raw MIME text (possibly truncated) and whether it was truncated
+ */
+export async function readFullRaw(message: ForwardableEmailMessage): Promise<{ text: string; truncated: boolean }> {
+  const reader = message.raw.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let body = '';
+  let truncated = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value, { stream: true });
+      if (body.length > MAX_EXTRACTION_BYTES) {
+        truncated = true;
+        break;
+      }
+    }
+    body += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return { text: body, truncated };
 }
 
 export async function resolveSubject(message: ForwardableEmailMessage): Promise<{
@@ -664,6 +715,55 @@ async function getFilterDecision(
   }
 }
 
+/** Extraction result shape returned by the extraction-worker service binding */
+interface ExtractionResult {
+  code?: { value: string; source: string };
+  link?: string;
+  discountValue?: string;
+  extractedAt: string;
+}
+
+/**
+ * Call extraction-worker to extract a code/link from raw MIME and store in D1.
+ *
+ * This is the ASYNC part of extraction — it runs via ctx.waitUntil AFTER
+ * message.forward(), so it does not add latency to email delivery.
+ * The raw stream was already read into `rawMime` synchronously before forward.
+ *
+ * Best-effort: any failure (extraction-worker down, parse error) is logged
+ * and swallowed so it never affects email forwarding.
+ *
+ * @param rawMime  The full raw MIME source (already read from message.raw)
+ * @param env      Worker environment (needs EXTRACTION_WORKER binding)
+ * @param ruleId   The matched forward rule ID (worker looks up config from D1)
+ */
+export async function doExtraction(
+  rawMime: string,
+  env: Env,
+  ruleId: string | undefined
+): Promise<void> {
+  if (!env.EXTRACTION_WORKER) {
+    debugLog(env, '[DEBUG] extraction required but EXTRACTION_WORKER not bound — skipping');
+    return;
+  }
+
+  try {
+    const resp = await env.EXTRACTION_WORKER.fetch('https://extraction-worker/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawMime, ruleId }),
+    });
+    if (resp.ok) {
+      const result = (await resp.json()) as ExtractionResult;
+      debugLog(env, () => `[DEBUG] Extraction result: ${JSON.stringify(result)}`);
+    } else {
+      console.error(`[EXTRACTION] worker returned ${resp.status}`);
+    }
+  } catch (err) {
+    console.error('[EXTRACTION] error:', err instanceof Error ? err.message : String(err));
+  }
+}
+
 export default {
   /**
    * HTTP handler for health check endpoint
@@ -761,7 +861,7 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 
-  async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
     // Extract essential fields only (no body parsing to minimize CPU)
     const from = extractEmail(message.from);
     const to = message.to;
@@ -803,6 +903,27 @@ export default {
       return;
     }
 
+    // Verification extraction: when the matched forward rule set
+    // extractVerification=true, read the body and extract a code/link BEFORE
+    // forwarding (message.raw can only be consumed once). The body read does
+    // not affect forward delivery — confirmed by Phase 0 testing.
+    // See docs/specs/2026-07-23-phase0-raw-forward-compat-result.md.
+    // Extraction: when the matched forward rule has extractVerification or
+    // extractDiscount, read the raw body BEFORE forward (stream is single-use),
+    // then defer the extraction-worker call to ctx.waitUntil (after forward)
+    // so it does not add latency to email delivery.
+    // Phase 0 testing confirmed reading the full body does not break forward.
+    let rawMimeForExtraction: string | undefined;
+    if ((decision.verificationRequired || decision.discountRequired) && env.EXTRACTION_WORKER) {
+      debugLog(env, '[DEBUG] extraction required — reading body before forward');
+      try {
+        const { text } = await readFullRaw(message);
+        rawMimeForExtraction = text;
+      } catch (err) {
+        console.error('[EXTRACTION] failed to read raw:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
     // Execute the filter decision
     if (decision.action === 'forward') {
       const forwardTo = decision.forwardTo || env.DEFAULT_FORWARD_TO;
@@ -811,7 +932,11 @@ export default {
     } else {
       debugLog(env, `[DEBUG] Action: DROP (reason: ${decision.reason || 'no reason'})`);
     }
-    // For 'drop' action: do nothing (silent drop)
-    // Not calling any method causes the email to be silently discarded
+
+    // After forward: run extraction asynchronously (does not block delivery).
+    // The extraction-worker stores the result in its own D1 — no VPS round-trip.
+    if (rawMimeForExtraction !== undefined) {
+      ctx.waitUntil(doExtraction(rawMimeForExtraction, env, decision.ruleId));
+    }
   },
 };

@@ -25,6 +25,22 @@ export interface FilterRule {
   pattern: string;
   tags?: string[];  // Optional tags for organization
   forwardTo?: string;  // Override default forwarding address when rule matches
+  /**
+   * When true (forward rules only), the email-worker will extract a
+   * verification code/link from the message body via the extraction-worker.
+   * Mutually exclusive with extractDiscount.
+   */
+  extractVerification?: boolean;
+  /**
+   * When true (forward rules only), the email-worker will extract a discount
+   * code/link from the message body via the extraction-worker.
+   * Mutually exclusive with extractVerification.
+   */
+  extractDiscount?: boolean;
+  /** Optional user-configured regex for code extraction (verification or discount). */
+  codePattern?: string;
+  /** Optional user-configured regex for link anchor text matching. */
+  linkAnchorPattern?: string;
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -41,6 +57,10 @@ export interface CreateRuleDTO {
   pattern: string;
   tags?: string[];
   forwardTo?: string;
+  extractVerification?: boolean;
+  extractDiscount?: boolean;
+  codePattern?: string;
+  linkAnchorPattern?: string;
   enabled?: boolean;
 }
 
@@ -54,5 +74,9 @@ export interface UpdateRuleDTO {
   pattern?: string;
   tags?: string[];
   forwardTo?: string;
+  extractVerification?: boolean;
+  extractDiscount?: boolean;
+  codePattern?: string;
+  linkAnchorPattern?: string;
   enabled?: boolean;
 }

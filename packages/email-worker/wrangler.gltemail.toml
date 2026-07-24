@@ -1,0 +1,45 @@
+# Cloudflare Email Worker Configuration for gltemail.com (TEST instance)
+# Deploy with: npx wrangler deploy --config wrangler.gltemail.toml
+#
+# This worker targets the TEST VPS (hkwa-d5v4.feimails.com) so it can be
+# exercised end-to-end (verification extraction + reporting) without touching
+# production traffic. Use it to validate the verification-extraction feature
+# before rolling out to the production workers.
+
+name = "email-filter-forwarder-gltemail"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Environment variables for gltemail.com test worker
+[vars]
+VPS_API_URL = "https://hkwa-d5v4.feimails.com/api/webhook/email"
+VPS_API_TOKEN = "ccc3c74040b23f8049f081f17a46ff0ed449ea4df8f68aec"
+DEFAULT_FORWARD_TO = "wangshengshan5@gmail.com"
+# Unique worker name - must match the name registered in VPS API
+WORKER_NAME = "gltemail.com_worker"
+# Enable debug logging during testing (set to false for production)
+DEBUG_LOGGING = "true"
+
+# Email routing binding
+[[send_email]]
+name = "SEB"
+
+# Service binding to extraction-worker for verification code/link extraction.
+# Optional: when absent, verification extraction is silently skipped.
+# The extraction-worker must be deployed first (it is the service target).
+[[services]]
+binding = "EXTRACTION_WORKER"
+service = "extraction-worker"
+
+# Build configuration
+[build]
+command = ""
+
+# Development settings
+[dev]
+port = 8790
+local_protocol = "http"
+
+# Observability - enabled for test visibility
+[observability]
+enabled = true

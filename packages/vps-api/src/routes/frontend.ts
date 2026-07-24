@@ -281,6 +281,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" onclick="showTab('stats')">📊 统计信息</button>
       <button class="tab" id="campaign-tab-btn" onclick="showTab('campaign')">📈 营销分析</button>
       <button class="tab" onclick="showTab('subjects')">📧 邮件主题</button>
+      <button class="tab" onclick="showTab('verification')">🔐 验证码</button>
       <button class="tab" id="monitoring-tab-btn" onclick="showTab('monitoring')">📡 信号监控</button>
       <button class="tab" onclick="showTab('settings')">⚙️ 设置</button>
       <button class="tab admin-only hidden" id="users-tab-btn" onclick="showTab('users')">👥 用户管理</button>
@@ -1171,6 +1172,47 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Verification Tab -->
+    <div id="verification-tab" class="tab-content hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;">
+          <h2 style="margin:0;border:none;padding:0;">🔐 验证码提取</h2>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <input type="text" id="verification-recipient-filter" placeholder="收件邮箱" onkeyup="if(event.key==='Enter')resetVerificationPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:180px;">
+            <input type="text" id="verification-search-filter" placeholder="搜索 验证码/链接/主题" onkeyup="if(event.key==='Enter')resetVerificationPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:220px;">
+            <button class="btn btn-secondary" onclick="resetVerificationPageAndLoad()">🔍 筛选</button>
+            <button class="btn btn-secondary" onclick="clearVerificationFilters()">清除</button>
+            <button class="btn btn-secondary" onclick="loadVerification()">🔄 刷新</button>
+          </div>
+        </div>
+        <p style="color:#666;margin-bottom:15px">展示从邮件正文自动提取的验证码与验证链接（由 extraction-worker 解析、email-worker 上报）。点击验证码可一键复制。</p>
+        <div id="verification-empty" style="text-align:center;color:#999;padding:40px;display:none;">
+          暂无验证码记录
+        </div>
+        <div class="table-wrapper">
+          <table id="verification-table-container">
+            <thead>
+              <tr>
+                <th>收件邮箱</th>
+                <th>验证码</th>
+                <th>验证链接</th>
+                <th>发件人</th>
+                <th>主题</th>
+                <th>时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="verification-table"></tbody>
+          </table>
+        </div>
+        <div id="verification-pagination" style="display:flex;justify-content:center;align-items:center;gap:10px;padding:15px 0;border-top:1px solid #eee;margin-top:10px;">
+          <button class="btn btn-sm btn-secondary" onclick="prevVerificationPage()" id="verification-prev-btn" disabled>上一页</button>
+          <span id="verification-page-info" style="color:#666;font-size:13px;">第 1 页</span>
+          <button class="btn btn-sm btn-secondary" onclick="nextVerificationPage()" id="verification-next-btn">下一页</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content hidden">
       <div class="card">
@@ -1642,6 +1684,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="email" id="rule-forward-to" placeholder="second@example.com">
           <p style="color:#888;font-size:12px;margin-top:5px">转发名单必填；白名单选填，填写后覆写默认转发地址</p>
         </div>
+        <div class="form-group" id="add-extract-verification-group" style="display:none">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+            <input type="checkbox" id="rule-extract-verification" onchange="toggleExtractDiscountExclusive(this, 'rule-extract-discount')">
+            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（转发名单专属：自动从正文提取验证码并存档）</span></span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;margin-top:6px;">
+            <input type="checkbox" id="rule-extract-discount" onchange="toggleExtractDiscountExclusive(this, 'rule-extract-verification')">
+            <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥：自动从营销邮件提取折扣码）</span></span>
+          </label>
+          <div id="add-extract-patterns-group" style="display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-radius:4px;">
+            <label style="font-size:12px;font-weight:600;">验证码/折扣码正则（可选）</label>
+            <input type="text" id="rule-code-pattern" placeholder="如 \\d{6} 或 [A-Z0-9]{8,12}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
+            <label style="font-size:12px;font-weight:600;margin-top:6px;">链接锚文本正则（可选）</label>
+            <input type="text" id="rule-link-anchor-pattern" placeholder="如 I'M IN!|Join now|立即验证" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
+            <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「从样例生成」可自动生成正则。</p>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="openPatternGenerator()" style="margin-top:4px;">🔧 从样例生成</button>
+          </div>
+        </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
     </div>
@@ -1702,6 +1762,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <label>转发地址 <span style="color:red">*</span></label>
           <input type="email" id="edit-rule-forward-to" placeholder="second@example.com">
           <p style="color:#888;font-size:12px;margin-top:5px">转发名单必填；白名单选填，填写后覆写默认转发地址</p>
+        </div>
+        <div class="form-group" id="edit-extract-verification-group" style="display:none">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+            <input type="checkbox" id="edit-rule-extract-verification" onchange="toggleExtractDiscountExclusive(this, 'edit-rule-extract-discount')">
+            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（转发名单专属）</span></span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;margin-top:6px;">
+            <input type="checkbox" id="edit-rule-extract-discount" onchange="toggleExtractDiscountExclusive(this, 'edit-rule-extract-verification')">
+            <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥）</span></span>
+          </label>
+          <div id="edit-extract-patterns-group" style="display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-radius:4px;">
+            <label style="font-size:12px;font-weight:600;">验证码/折扣码正则（可选）</label>
+            <input type="text" id="edit-rule-code-pattern" placeholder="如 \\d{6}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
+            <label style="font-size:12px;font-weight:600;margin-top:6px;">链接锚文本正则（可选）</label>
+            <input type="text" id="edit-rule-link-anchor-pattern" placeholder="如 I'M IN!|Join now" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
+          </div>
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2274,6 +2350,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'stats') loadStats();
       if (name === 'campaign') loadCampaignAnalytics();
       if (name === 'subjects') loadSubjects();
+      if (name === 'verification') loadVerification();
       if (name === 'monitoring') loadMonitoringData();
       if (name === 'settings') { loadSettings(); loadBackups(); }
       if (name === 'users') loadUsers();
@@ -2586,8 +2663,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         return;
       }
       tbody.innerHTML = rules.map(r => {
-        const cat = '<span class="category category-' + r.category + '">' + 
-          (r.category === 'forward' ? '转发' : r.category === 'whitelist' ? '白名单' : r.category === 'blacklist' ? '黑名单' : '动态') + '</span>';
+        const cat = '<span class="category category-' + r.category + '">' +
+          (r.category === 'forward' ? '转发' : r.category === 'whitelist' ? '白名单' : r.category === 'blacklist' ? '黑名单' : '动态') + '</span>' +
+          (r.extractVerification ? ' <span style="font-size:11px;color:#0969da;" title="提取验证码/链接">🔐</span>' : '') +
+          (r.extractDiscount ? ' <span style="font-size:11px;color:#e8590c;" title="提取折扣码">🏷️</span>' : '');
         const status = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
         const worker = r.workerId ? (workers.find(w => w.id === r.workerId)?.name || '未知') : '全局';
         const matchType = {sender:'发件人',subject:'主题',domain:'域名'}[r.matchType] || r.matchType;
@@ -2610,6 +2689,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const category = document.getElementById('rule-category').value;
       const group = document.getElementById('add-forward-to-group');
       const input = document.getElementById('rule-forward-to');
+      const extractGroup = document.getElementById('add-extract-verification-group');
       if (category === 'forward' || category === 'whitelist') {
         group.style.display = 'block';
         input.required = (category === 'forward');
@@ -2618,12 +2698,18 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         input.required = false;
         input.value = '';
       }
+      // Extract-verification toggle only applies to forward rules
+      if (extractGroup) {
+        extractGroup.style.display = (category === 'forward') ? 'block' : 'none';
+      }
+      updatePatternsVisibility('add');
     }
 
     function toggleEditForwardToField() {
       const category = document.getElementById('edit-rule-category').value;
       const group = document.getElementById('edit-forward-to-group');
       const input = document.getElementById('edit-rule-forward-to');
+      const extractGroup = document.getElementById('edit-extract-verification-group');
       if (category === 'forward' || category === 'whitelist') {
         group.style.display = 'block';
         input.required = (category === 'forward');
@@ -2631,6 +2717,59 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         group.style.display = 'none';
         input.required = false;
       }
+      if (extractGroup) {
+        extractGroup.style.display = (category === 'forward') ? 'block' : 'none';
+      }
+      updatePatternsVisibility('edit');
+    }
+
+    /** Mutually exclusive: checking one extraction type unchecks the other. */
+    function toggleExtractDiscountExclusive(checkbox, otherId) {
+      if (checkbox.checked) {
+        const other = document.getElementById(otherId);
+        if (other) other.checked = false;
+      }
+      const prefix = checkbox.id.startsWith('edit-') ? 'edit' : 'add';
+      updatePatternsVisibility(prefix);
+    }
+
+    /** Show/hide the patterns group based on whether any extraction checkbox is checked. */
+    function updatePatternsVisibility(prefix) {
+      const verCheckbox = document.getElementById(prefix + '-rule-extract-verification');
+      const discCheckbox = document.getElementById(prefix + '-rule-extract-discount');
+      const patternsGroup = document.getElementById(prefix + '-extract-patterns-group');
+      if (!patternsGroup) return;
+      const anyChecked = (verCheckbox && verCheckbox.checked) || (discCheckbox && discCheckbox.checked);
+      patternsGroup.style.display = anyChecked ? 'block' : 'none';
+    }
+
+    /** Open the pattern generator dialog. */
+    async function openPatternGenerator() {
+      const sample = prompt('输入折扣码/验证码样例（如 SAVE20 或 482913）:');
+      if (!sample) return;
+      try {
+        const res = await fetch('/api/extraction/generate-pattern', {
+          method: 'POST', headers: getHeaders(),
+          body: JSON.stringify({ target: sample }),
+        });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        const suggestions = data.suggestions || [];
+        if (suggestions.length === 0) { showAlert('未生成候选正则', 'error'); return; }
+        let msg = '选择一个正则:\n\n';
+        suggestions.forEach((s, i) => { msg += (i + 1) + '. [' + s.confidence + '] ' + s.pattern + '\n    ' + s.description + '\n\n'; });
+        msg += '输入序号(1-' + suggestions.length + ')，或取消手填:';
+        const choice = prompt(msg);
+        if (choice) {
+          const idx = parseInt(choice, 10) - 1;
+          if (idx >= 0 && idx < suggestions.length) {
+            const prefix = document.getElementById('rule-code-pattern') ? '' : 'edit-';
+            const input = document.getElementById(prefix + 'rule-code-pattern');
+            if (input) input.value = suggestions[idx].pattern;
+            showAlert('已填入: ' + suggestions[idx].pattern);
+          }
+        }
+      } catch (e) { showAlert('生成失败', 'error'); }
     }
 
     document.getElementById('add-rule-form').addEventListener('submit', async (e) => {
@@ -2639,6 +2778,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : undefined;
       const category = document.getElementById('rule-category').value;
       const forwardToValue = document.getElementById('rule-forward-to').value.trim();
+      const extractVerificationChecked = document.getElementById('rule-extract-verification')?.checked && category === 'forward';
+      const extractDiscountChecked = document.getElementById('rule-extract-discount')?.checked && category === 'forward';
+      const codePatternValue = document.getElementById('rule-code-pattern')?.value.trim();
+      const linkAnchorValue = document.getElementById('rule-link-anchor-pattern')?.value.trim();
       const body = {
         workerId: document.getElementById('rule-worker').value || undefined,
         category: category,
@@ -2646,7 +2789,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         matchMode: document.getElementById('rule-match-mode').value,
         pattern: document.getElementById('rule-pattern').value,
         tags: tags,
-        forwardTo: forwardToValue || undefined
+        forwardTo: forwardToValue || undefined,
+        extractVerification: extractVerificationChecked || undefined,
+        extractDiscount: extractDiscountChecked || undefined,
+        codePattern: codePatternValue || undefined,
+        linkAnchorPattern: linkAnchorValue || undefined,
       };
       try {
         const res = await fetch('/api/rules', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
@@ -2718,7 +2865,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       document.getElementById('edit-rule-pattern').value = rule.pattern;
       document.getElementById('edit-rule-tags').value = rule.tags ? rule.tags.join(', ') : '';
       document.getElementById('edit-rule-forward-to').value = rule.forwardTo || '';
+      const evCheckbox = document.getElementById('edit-rule-extract-verification');
+      if (evCheckbox) evCheckbox.checked = !!rule.extractVerification;
+      const edCheckbox = document.getElementById('edit-rule-extract-discount');
+      if (edCheckbox) edCheckbox.checked = !!rule.extractDiscount;
+      const editCodePatternInput = document.getElementById('edit-rule-code-pattern');
+      if (editCodePatternInput) editCodePatternInput.value = rule.codePattern || '';
+      const editLinkAnchorInput = document.getElementById('edit-rule-link-anchor-pattern');
+      if (editLinkAnchorInput) editLinkAnchorInput.value = rule.linkAnchorPattern || '';
       toggleEditForwardToField();
+      updatePatternsVisibility('edit');
       
       // Update worker select options
       const workerSelect = document.getElementById('edit-rule-worker');
@@ -2734,14 +2890,23 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tagsInput = document.getElementById('edit-rule-tags').value.trim();
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
       const forwardToValue = document.getElementById('edit-rule-forward-to').value.trim();
+      const editCategory = document.getElementById('edit-rule-category').value;
+      const extractVerificationChecked = document.getElementById('edit-rule-extract-verification')?.checked && editCategory === 'forward';
+      const extractDiscountChecked = document.getElementById('edit-rule-extract-discount')?.checked && editCategory === 'forward';
+      const editCodePattern = document.getElementById('edit-rule-code-pattern')?.value.trim();
+      const editLinkAnchor = document.getElementById('edit-rule-link-anchor-pattern')?.value.trim();
       const body = {
         workerId: document.getElementById('edit-rule-worker').value || null,
-        category: document.getElementById('edit-rule-category').value,
+        category: editCategory,
         matchType: document.getElementById('edit-rule-match-type').value,
         matchMode: document.getElementById('edit-rule-match-mode').value,
         pattern: document.getElementById('edit-rule-pattern').value,
         tags: tags,
-        forwardTo: forwardToValue || null
+        forwardTo: forwardToValue || null,
+        extractVerification: extractVerificationChecked || false,
+        extractDiscount: extractDiscountChecked || false,
+        codePattern: editCodePattern || undefined,
+        linkAnchorPattern: editLinkAnchor || undefined,
       };
       try {
         const res = await fetch('/api/rules/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });
@@ -7032,9 +7197,138 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     window.addEventListener('beforeunload', stopAllAutoRefresh);
 
     // ============================================
+    // ============================================
+    // Verification Tab Functions
+    // ============================================
+
+    let verificationData = [];
+    let verificationPage = 1;
+    const verificationPageSize = 20;
+    let verificationTotalCount = 0;
+
+    function resetVerificationPageAndLoad() {
+      verificationPage = 1;
+      loadVerification();
+    }
+
+    function clearVerificationFilters() {
+      const rf = document.getElementById('verification-recipient-filter');
+      const sf = document.getElementById('verification-search-filter');
+      if (rf) rf.value = '';
+      if (sf) sf.value = '';
+      verificationPage = 1;
+      loadVerification();
+    }
+
+    async function loadVerification() {
+      if (!apiToken) return;
+      try {
+        const recipientFilter = (document.getElementById('verification-recipient-filter')?.value || '').trim();
+        const searchFilter = (document.getElementById('verification-search-filter')?.value || '').trim();
+        let url = '/api/extraction/codes?limit=' + verificationPageSize + '&offset=' + ((verificationPage - 1) * verificationPageSize);
+        if (recipientFilter) url += '&recipient=' + encodeURIComponent(recipientFilter);
+        if (searchFilter) url += '&search=' + encodeURIComponent(searchFilter);
+
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        // Worker D1 returns snake_case; map to camelCase for the frontend
+        verificationData = (data.records || []).map(r => ({
+          id: r.id,
+          recipient: r.recipient,
+          sender: r.sender || '',
+          subject: r.subject || '',
+          code: r.code,
+          link: r.link,
+          receivedAt: r.received_at,
+        }));
+        verificationTotalCount = data.pagination?.total || 0;
+        renderVerification();
+        updateVerificationPagination();
+      } catch (e) {
+        console.error('Error loading verification:', e);
+        showAlert('加载验证码失败', 'error');
+      }
+    }
+
+    function renderVerification() {
+      const tbody = document.getElementById('verification-table');
+      const emptyDiv = document.getElementById('verification-empty');
+      const tableContainer = document.getElementById('verification-table-container');
+      if (!tbody) return;
+
+      if (verificationData.length === 0) {
+        emptyDiv.style.display = 'block';
+        tableContainer.style.display = 'none';
+        tbody.innerHTML = '';
+        return;
+      }
+      emptyDiv.style.display = 'none';
+      tableContainer.style.display = '';
+
+      tbody.innerHTML = verificationData.map(r => {
+        const codeCell = r.code
+          ? '<span style="font-family:monospace;font-size:15px;font-weight:600;letter-spacing:1px;cursor:pointer;color:#0969da;" onclick="copyVerificationCode(\\'' + escapeHtml(r.code) + '\\')" title="点击复制">' + escapeHtml(r.code) + '</span>'
+          : '<span style="color:#999;">-</span>';
+        const linkDisplay = r.link ? (r.link.length > 50 ? r.link.slice(0, 50) + '…' : r.link) : '';
+        const linkCell = r.link
+          ? '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener" style="word-break:break-all;">' + escapeHtml(linkDisplay) + '</a>'
+          : '<span style="color:#999;">-</span>';
+        const time = r.receivedAt ? new Date(r.receivedAt).toLocaleString('zh-CN') : '-';
+        return '<tr>' +
+          '<td style="word-break:break-all;">' + escapeHtml(r.recipient) + '</td>' +
+          '<td>' + codeCell + '</td>' +
+          '<td>' + linkCell + '</td>' +
+          '<td style="word-break:break-all;">' + escapeHtml(r.sender || '-') + '</td>' +
+          '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.subject || '') + '">' + escapeHtml(r.subject || '-') + '</td>' +
+          '<td style="white-space:nowrap;color:#666;">' + time + '</td>' +
+          '<td><button class="btn btn-sm btn-danger" onclick="deleteVerificationRecord(\\'' + r.id + '\\')">🗑️</button></td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    function updateVerificationPagination() {
+      const prevBtn = document.getElementById('verification-prev-btn');
+      const nextBtn = document.getElementById('verification-next-btn');
+      const pageInfo = document.getElementById('verification-page-info');
+      const totalPages = Math.max(1, Math.ceil(verificationTotalCount / verificationPageSize));
+      if (prevBtn) prevBtn.disabled = verificationPage <= 1;
+      if (nextBtn) nextBtn.disabled = verificationPage >= totalPages;
+      if (pageInfo) pageInfo.textContent = '第 ' + verificationPage + ' / ' + totalPages + ' 页（共 ' + verificationTotalCount + ' 条）';
+    }
+
+    function prevVerificationPage() {
+      if (verificationPage > 1) { verificationPage--; loadVerification(); }
+    }
+    function nextVerificationPage() {
+      verificationPage++; loadVerification();
+    }
+
+    function copyVerificationCode(code) {
+      navigator.clipboard.writeText(code).then(() => {
+        showAlert('验证码已复制: ' + code, 'success');
+      }).catch(() => {
+        showAlert('复制失败', 'error');
+      });
+    }
+
+    async function deleteVerificationRecord(id) {
+      if (!confirm('确认删除该验证码记录？')) return;
+      try {
+        const res = await fetch('/api/extraction/codes/' + id, { method: 'DELETE', headers: getHeaders() });
+        if (!res.ok && res.status !== 204) throw new Error('Failed');
+        showAlert('已删除', 'success');
+        loadVerification();
+      } catch (e) {
+        console.error('Error deleting verification:', e);
+        showAlert('删除失败', 'error');
+      }
+    }
+
+    // ============================================
     // Subjects Tab Functions
     // ============================================
-    
+
     let subjectsData = [];
     let subjectsPage = 1;
     let subjectsPageSize = 20;

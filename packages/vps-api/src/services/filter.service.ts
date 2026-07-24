@@ -95,6 +95,22 @@ export interface FilterResult {
   matchedCategory?: RuleCategory;
   forwardTo?: string;
   reason?: string;
+  /**
+   * Set when the matched forward rule has extractVerification=true. Signals
+   * the email-worker to extract a verification code/link from the body via
+   * the extraction-worker service binding. Mutually exclusive with discountRequired.
+   */
+  verificationRequired?: boolean;
+  /**
+   * Set when the matched forward rule has extractDiscount=true.
+   * Mutually exclusive with verificationRequired.
+   */
+  discountRequired?: boolean;
+  /**
+   * The matched forward rule's ID, passed to extraction-worker to look up
+   * extraction config from D1.
+   */
+  ruleId?: string;
 }
 
 /**
@@ -140,6 +156,11 @@ export function filterEmail(
       matchedCategory: 'forward',
       forwardTo: forwardMatch.forwardTo || defaultForwardTo,
       reason: `Matched forward rule: ${forwardMatch.pattern}`,
+      // Extraction flags are mutually exclusive (enforced by rules.ts).
+      // Only one of verification/discount can be set per rule.
+      verificationRequired: forwardMatch.extractVerification === true,
+      discountRequired: forwardMatch.extractDiscount === true,
+      ruleId: forwardMatch.id,
     };
   }
 
@@ -197,6 +218,9 @@ export function toFilterDecision(result: FilterResult): FilterDecision {
     action: result.action,
     forwardTo: result.forwardTo,
     reason: result.reason,
+    verificationRequired: result.verificationRequired,
+    discountRequired: result.discountRequired,
+    ruleId: result.ruleId,
   };
 }
 

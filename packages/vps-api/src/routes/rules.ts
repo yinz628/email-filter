@@ -11,8 +11,43 @@ import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { LogRepository } from '../db/log-repository.js';
 import { getDatabase } from '../db/index.js';
+import { config } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getRuleCache } from '../services/rule-cache.instance.js';
+
+/**
+ * Push extraction config to extraction-worker D1 when a rule with extraction
+ * flags is created or updated. Best-effort: failure is logged but does not
+ * block the rule save (the config can be re-pushed later).
+ */
+async function pushExtractionRule(
+  rule: { id: string; extractVerification?: boolean; extractDiscount?: boolean; codePattern?: string; linkAnchorPattern?: string }
+): Promise<void> {
+  const workerUrl = config.extractionWorkerUrl;
+  const workerToken = config.extractionWorkerToken;
+  if (!workerUrl || !workerToken) return; // extraction worker not configured
+
+  const hasExtraction = rule.extractVerification || rule.extractDiscount;
+  if (!hasExtraction) return;
+
+  const extractType = rule.extractDiscount ? 'discount' : 'verification';
+  const payload = {
+    id: rule.id,
+    extract_type: extractType,
+    code_pattern: rule.codePattern ?? null,
+    link_anchor_pattern: rule.linkAnchorPattern ?? null,
+  };
+
+  try {
+    await fetch(`${workerUrl}/api/rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${workerToken}` },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.error('[rules] failed to push extraction config to worker:', err instanceof Error ? err.message : String(err));
+  }
+}
 
 // Valid values for validation
 const VALID_CATEGORIES: RuleCategory[] = ['whitelist', 'blacklist', 'dynamic', 'forward'];
@@ -49,6 +84,36 @@ function validateCreateRule(body: unknown): { valid: boolean; error?: string; da
     return { valid: false, error: 'forwardTo is required for forward rules' };
   }
 
+  // extractVerification is an orthogonal action on forward rules only.
+  // Reject it on other categories to keep semantics explicit.
+  const extractVerification = data.extractVerification === true;
+  if (extractVerification && category !== 'forward') {
+    return { valid: false, error: 'extractVerification is only valid for forward rules' };
+  }
+
+  // extractDiscount: same constraint — forward rules only.
+  const extractDiscount = data.extractDiscount === true;
+  if (extractDiscount && category !== 'forward') {
+    return { valid: false, error: 'extractDiscount is only valid for forward rules' };
+  }
+
+  // Mutually exclusive: a rule can extract verification OR discount, not both.
+  if (extractVerification && extractDiscount) {
+    return { valid: false, error: 'extractVerification and extractDiscount are mutually exclusive' };
+  }
+
+  // codePattern / linkAnchorPattern: optional regex strings for extraction config.
+  const codePattern = typeof data.codePattern === 'string' && data.codePattern.trim() ? data.codePattern.trim() : undefined;
+  const linkAnchorPattern = typeof data.linkAnchorPattern === 'string' && data.linkAnchorPattern.trim() ? data.linkAnchorPattern.trim() : undefined;
+
+  // Validate regex compilability if provided.
+  if (codePattern) {
+    try { new RegExp(codePattern); } catch { return { valid: false, error: 'codePattern is not a valid regex' }; }
+  }
+  if (linkAnchorPattern) {
+    try { new RegExp(linkAnchorPattern); } catch { return { valid: false, error: 'linkAnchorPattern is not a valid regex' }; }
+  }
+
   return {
     valid: true,
     data: {
@@ -58,6 +123,10 @@ function validateCreateRule(body: unknown): { valid: boolean; error?: string; da
       pattern: data.pattern as string,
       enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
       forwardTo,
+      extractVerification,
+      extractDiscount,
+      codePattern,
+      linkAnchorPattern,
     },
   };
 }
@@ -106,6 +175,22 @@ function validateUpdateRule(body: unknown): { valid: boolean; error?: string; da
     } else {
       updateData.forwardTo = undefined;
     }
+  }
+  if (data.extractVerification !== undefined) {
+    updateData.extractVerification = data.extractVerification === true;
+  }
+  if (data.extractDiscount !== undefined) {
+    updateData.extractDiscount = data.extractDiscount === true;
+  }
+  if (data.codePattern !== undefined) {
+    const cp = typeof data.codePattern === 'string' && data.codePattern.trim() ? data.codePattern.trim() : undefined;
+    if (cp) { try { new RegExp(cp); } catch { return { valid: false, error: 'codePattern is not a valid regex' }; } }
+    updateData.codePattern = cp;
+  }
+  if (data.linkAnchorPattern !== undefined) {
+    const lap = typeof data.linkAnchorPattern === 'string' && data.linkAnchorPattern.trim() ? data.linkAnchorPattern.trim() : undefined;
+    if (lap) { try { new RegExp(lap); } catch { return { valid: false, error: 'linkAnchorPattern is not a valid regex' }; } }
+    updateData.linkAnchorPattern = lap;
   }
   if (data.tags !== undefined) {
     if (Array.isArray(data.tags)) {
@@ -272,7 +357,10 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
           workerId: workerId || null,
         },
       }, workerId || 'global');
-      
+
+      // Push extraction config to worker if this rule has extraction flags
+      void pushExtractionRule(rule);
+
       return reply.status(201).send(rule);
     } catch (error: any) {
       if (error.message === 'DUPLICATE_RULE') {
@@ -350,6 +438,9 @@ export async function rulesRoutes(fastify: FastifyInstance): Promise<void> {
           workerId: rule.workerId || null,
         },
       }, rule.workerId || 'global');
+
+      // Push extraction config to worker if this rule has extraction flags
+      void pushExtractionRule(rule);
 
       return reply.send(rule);
     } catch (error) {

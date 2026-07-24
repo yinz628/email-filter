@@ -11,6 +11,10 @@ interface RuleRow {
   pattern: string;
   tags: string | null;
   forward_to: string | null;
+  extract_verification: number;
+  extract_discount: number;
+  code_pattern: string | null;
+  link_anchor_pattern: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -41,6 +45,10 @@ export class RuleRepository {
       pattern: row.pattern,
       tags: row.tags ? JSON.parse(row.tags) : undefined,
       forwardTo: row.forward_to || undefined,
+      extractVerification: row.extract_verification === 1,
+      extractDiscount: row.extract_discount === 1,
+      codePattern: row.code_pattern || undefined,
+      linkAnchorPattern: row.link_anchor_pattern || undefined,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -91,11 +99,13 @@ export class RuleRepository {
     const tags = dto.tags ? JSON.stringify(dto.tags) : null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, forward_to, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, forward_to, extract_verification, extract_discount, code_pattern, link_anchor_pattern, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, dto.forwardTo || null, enabled ? 1 : 0, now, now);
+    const extractVerification = dto.extractVerification ? 1 : 0;
+    const extractDiscount = dto.extractDiscount ? 1 : 0;
+    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, dto.forwardTo || null, extractVerification, extractDiscount, dto.codePattern || null, dto.linkAnchorPattern || null, enabled ? 1 : 0, now, now);
 
     // Create associated stats record
     const statsStmt = this.db.prepare(`
@@ -113,6 +123,10 @@ export class RuleRepository {
       pattern: dto.pattern,
       tags: dto.tags,
       forwardTo: dto.forwardTo,
+      extractVerification: dto.extractVerification === true,
+      extractDiscount: dto.extractDiscount === true,
+      codePattern: dto.codePattern,
+      linkAnchorPattern: dto.linkAnchorPattern,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -244,6 +258,22 @@ export class RuleRepository {
     if (dto.forwardTo !== undefined) {
       updates.push('forward_to = ?');
       params.push(dto.forwardTo || null);
+    }
+    if (dto.extractVerification !== undefined) {
+      updates.push('extract_verification = ?');
+      params.push(dto.extractVerification ? 1 : 0);
+    }
+    if (dto.extractDiscount !== undefined) {
+      updates.push('extract_discount = ?');
+      params.push(dto.extractDiscount ? 1 : 0);
+    }
+    if (dto.codePattern !== undefined) {
+      updates.push('code_pattern = ?');
+      params.push(dto.codePattern || null);
+    }
+    if (dto.linkAnchorPattern !== undefined) {
+      updates.push('link_anchor_pattern = ?');
+      params.push(dto.linkAnchorPattern || null);
     }
 
     params.push(id);

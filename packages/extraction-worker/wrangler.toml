@@ -1,0 +1,36 @@
+# Extraction Worker — self-contained extraction service (D1 + API + panel)
+#
+# CALLEE of a Cloudflare service binding. email-worker calls:
+#   env.EXTRACTION_WORKER.fetch('https://extraction-worker/extract', {...})
+#
+# Capabilities:
+#   - D1 database: verification_codes, extraction_rules, discount_codes
+#   - POST /extract: read rule → extract → store D1 (service binding)
+#   - GET/DELETE /api/codes, /api/discounts: external read API (Bearer token)
+#   - POST /api/rules: VPS pushes extraction config
+#   - POST /api/generate-pattern, /api/test-pattern: regex generator
+#   - GET /admin: HTML panel
+#
+# Deploy FIRST (before email-worker) so the service binding target exists.
+#   npx wrangler deploy
+
+name = "extraction-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# D1 database for storing extraction results + rules
+[[d1_databases]]
+binding = "DB"
+database_name = "extraction-db"
+database_id = "b6818abd-63f0-43ea-97eb-e5d459a0d777"
+
+[vars]
+# Bearer token for /api/* and /admin authentication.
+# MUST be changed before production use.
+ADMIN_TOKEN = "change-me-in-production"
+
+[build]
+command = ""
+
+[observability]
+enabled = true

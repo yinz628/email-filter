@@ -33,3 +33,6 @@ export * from './auth.js';
 
 // Subject stats types
 export * from './subject-stats.js';
+
+// Verification extraction types
+export * from './extraction.js';

@@ -15,6 +15,7 @@ import {
   campaignRoutes,
   adminFeatureRoutes,
   subjectRoutes,
+  extractionProxyRoutes,
   monitoringRoutes,
   ratioMonitoringRoutes,
   telegramRoutes,
@@ -134,6 +135,8 @@ async function start() {
       fastify.log.info('Signal monitoring is disabled (SIGNAL_MONITORING_ENABLED=false)');
     }
     await fastify.register(telegramRoutes, { prefix: '/api/telegram' });
+    // Extraction proxy: forwards admin panel queries to extraction-worker D1.
+    await fastify.register(extractionProxyRoutes, { prefix: '/api/extraction' });
     await fastify.register(adminRoutes, { prefix: '/api/admin' });
     await fastify.register(adminFeatureRoutes, { prefix: '/api/admin/features' });
     await fastify.register(authRoutes, { prefix: '/api/auth' });

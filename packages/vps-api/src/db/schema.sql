@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS filter_rules (
   pattern TEXT NOT NULL,
   tags TEXT,
   forward_to TEXT,
+  extract_verification INTEGER NOT NULL DEFAULT 0,
+  extract_discount INTEGER NOT NULL DEFAULT 0,
+  code_pattern TEXT,
+  link_anchor_pattern TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -548,3 +552,21 @@ CREATE INDEX IF NOT EXISTS idx_subject_stats_worker ON subject_stats(worker_name
 CREATE INDEX IF NOT EXISTS idx_subject_stats_focused ON subject_stats(is_focused);
 CREATE INDEX IF NOT EXISTS idx_subject_stats_count ON subject_stats(email_count);
 CREATE INDEX IF NOT EXISTS idx_subject_stats_last_seen ON subject_stats(last_seen_at);
+
+-- 验证码记录表（由 extraction-worker 提取后经 email-worker 上报）
+CREATE TABLE IF NOT EXISTS verification_codes (
+  id TEXT PRIMARY KEY,
+  worker_name TEXT NOT NULL,             -- 处理邮件的 Worker 实例
+  recipient TEXT NOT NULL,               -- 收件地址（message.to）
+  sender TEXT,                            -- 发件人
+  subject TEXT,                           -- 邮件主题
+  code TEXT,                              -- 提取的验证码（可能为空）
+  link TEXT,                              -- 提取的验证链接（可能为空）
+  message_id TEXT,                        -- Message-ID（去重/追溯）
+  received_at TEXT NOT NULL,              -- 收件时间
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_recipient ON verification_codes(recipient, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verification_message_id ON verification_codes(message_id);
+CREATE INDEX IF NOT EXISTS idx_verification_created ON verification_codes(created_at DESC);

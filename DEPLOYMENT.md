@@ -211,28 +211,79 @@ sudo systemctl reload nginx
 
 ## Cloudflare Worker 配置
 
-`packages/email-worker/wrangler.toml` 中至少配置：
+系统包含两类 Cloudflare Worker：
+
+| Worker | 作用 | 部署 |
+| --- | --- | --- |
+| email-worker | 接收邮件、调 VPS 取决策、转发、触发提取 | 多实例（每域名一个 `wrangler.<name>.toml`） |
+| extraction-worker | 验证码/折扣码提取服务（D1 存储 + 正则生成器） | 单实例，作为 email-worker 的 service binding 被调用 |
+
+### email-worker 配置
+
+`packages/email-worker/wrangler.toml`（默认）或 `wrangler.<name>.toml`（每域名）至少配置：
 
 ```toml
-name = "email-filter-forwarder"
+name = "email-filter-forwarder"        # 每域名唯一，如 email-filter-forwarder-gltemail
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
 [vars]
 VPS_API_URL = "https://your-vps-domain.com/api/webhook/email"
-VPS_API_TOKEN = "与你的 API_TOKEN 相同"
+VPS_API_TOKEN = "与你的 API_TOKEN 相同"   # worker 用 Bearer 认证调 VPS webhook
 DEFAULT_FORWARD_TO = "your-email@gmail.com"
-WORKER_NAME = "my-domain-worker"
+WORKER_NAME = "my-domain-worker"        # 必须与 VPS /api/workers 注册的 name 一致
+DEBUG_LOGGING = "false"                 # 生产建议 false；调试提取时临时开 true
 
 [[send_email]]
 name = "SEB"
+
+# Service binding 到 extraction-worker（启用验证码/折扣码提取必需）
+# extraction-worker 必须先部署，否则 deploy 会失败
+[[services]]
+binding = "EXTRACTION_WORKER"
+service = "extraction-worker"
 ```
 
-部署：
+> **提取是可选且容错的**：`EXTRACTION_WORKER` binding 缺失时，email-worker 静默跳过提取，不影响转发。删除该 binding 即可关闭某域名的提取能力。
+
+### extraction-worker 配置
+
+```toml
+# packages/extraction-worker/wrangler.toml
+name = "extraction-worker"
+[[d1_databases]]
+binding = "DB"
+database_name = "extraction-db"
+[vars]
+ADMIN_TOKEN = "强随机令牌"   # 生产必须改！默认值 change-me-in-production 不安全
+```
+
+### 批量部署
 
 ```bash
 cd packages/email-worker
-wrangler deploy
+
+# 部署全部：先 extraction-worker（被调用方先就绪），再所有 email-worker 实例
+bash scripts/deploy-all.sh
+
+# 仅更新 email-worker（extraction-worker 已部署时）
+bash scripts/deploy-all.sh workers
+
+# 部署单个域名
+npx wrangler deploy --config wrangler.gltemail.toml
+```
+
+`deploy-all.sh` 自动跳过 `*test*` 配置。需先 `npx wrangler login` 登录到 worker 所在账户。
+
+> **Cloudflare Email Routing**：每个域名的 catch-all / 路由规则需在 Cloudflare Dashboard 指向对应的 `email-filter-forwarder-*` worker。
+
+### VPS 端 extraction 配置（可选）
+
+若需在管理面板查询提取结果或让 vps-api 推送提取规则，在 `.env` 配置（已含在 `.env.example` 与 `docker-compose.yml`）：
+
+```bash
+EXTRACTION_WORKER_URL=https://extraction-worker.<account>.workers.dev
+EXTRACTION_WORKER_TOKEN=与 extraction-worker 的 ADMIN_TOKEN 相同
 ```
 
 ## 数据与备份
@@ -275,6 +326,21 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 3. **管理入口**：规则的 `forward` 类别与 `forwardTo` 字段在管理面板的规则表单中配置；Worker 开关在 Worker 编辑表单中配置。
 
 > 相关规格文档见 `docs/specs/2026-07-23-rule-forward-override-{requirements,spec,task-list}.md`。
+
+### 验证码 / 折扣码提取
+
+仅 `forward` 类别规则可触发提取（与「规则转发覆写」开关无关，开关保持默认关闭即可）：
+
+| 配置项 | 说明 |
+| --- | --- |
+| `extractVerification` | 勾选后提取验证码（与 extractDiscount 互斥）|
+| `extractDiscount` | 勾选后提取折扣码 |
+| `codePattern` | 正则，如 `\d{6}`。留空则用通用提取逻辑 |
+| `linkAnchorPattern` | 链接锚文本正则（可选，提取验证/激活链接）|
+
+规则保存时 vps-api 自动把提取配置推送到 extraction-worker D1。提取结果存于 extraction-worker D1，经 `GET /api/extraction/codes`、`GET /api/extraction/discounts` 查询（管理面板「验证码/折扣码」页面）。
+
+> 生产排障提示：若规则命中但 D1 无记录，优先检查 `codePattern` 是否匹配邮件正文格式。通用逻辑（codePattern 留空）对非标准格式可能识别不到，建议配明确正则；可用管理面板「正则编辑器」从样例生成并测试。
 
 ## 排障
 

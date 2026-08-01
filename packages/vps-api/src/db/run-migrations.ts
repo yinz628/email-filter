@@ -495,8 +495,12 @@ function migrateFilterRulesForwardCategory(db: Database.Database): MigrationResu
   if (schema.sql && schema.sql.includes("'forward'")) {
     return { name, status: 'skipped', message: 'CHECK constraint already includes forward' };
   }
-  // Recreate table with updated constraint (existing data preserved via copy)
+  // Recreate table with updated constraint (existing data preserved via copy).
+  // Copy by explicit column list (not SELECT *) so legacy NULLs in NOT NULL
+  // columns are backfilled and column ordering differences are tolerated.
+  // A previous failed run may have left a residual filter_rules_new table; drop it first.
   db.exec('PRAGMA foreign_keys=OFF');
+  db.exec('DROP TABLE IF EXISTS filter_rules_new');
   db.exec(`
     CREATE TABLE filter_rules_new (
       id TEXT PRIMARY KEY,
@@ -513,7 +517,14 @@ function migrateFilterRulesForwardCategory(db: Database.Database): MigrationResu
       last_hit_at TEXT,
       FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
     );
-    INSERT INTO filter_rules_new SELECT * FROM filter_rules;
+    INSERT INTO filter_rules_new (id, worker_id, category, match_type, match_mode, pattern, tags, forward_to, enabled, created_at, updated_at, last_hit_at)
+    SELECT
+      id, worker_id, category, match_type, match_mode, pattern, tags, forward_to,
+      COALESCE(enabled, 1),
+      COALESCE(created_at, datetime('now')),
+      COALESCE(updated_at, datetime('now')),
+      last_hit_at
+    FROM filter_rules;
     DROP TABLE filter_rules;
     ALTER TABLE filter_rules_new RENAME TO filter_rules;
     CREATE INDEX IF NOT EXISTS idx_rules_worker ON filter_rules(worker_id);

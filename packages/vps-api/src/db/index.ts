@@ -37,14 +37,22 @@ export function initializeDatabase(dbPath?: string): Database.Database {
   
   // Enable foreign keys
   db.pragma('foreign_keys = ON');
-  
-  // Read and execute schema
+
+  // Run migrations BEFORE schema.sql. Migrations use ADD COLUMN / IF NOT EXISTS
+  // and are idempotent, so running them first is safe. This ordering is required
+  // because schema.sql defines indexes that reference columns added by migrations
+  // (e.g. CREATE INDEX ... COALESCE(forward_to, '')). On a legacy database that
+  // lacks those columns, executing schema.sql first would throw
+  // "no such column" before the migration that adds the column runs.
+  // CREATE TABLE IF NOT EXISTS in schema.sql is a no-op for existing tables, so
+  // there is no conflict with tables left untouched by migrations.
+  runMigrations(db);
+
+  // Read and execute schema (creates tables/indexes/constraints for any that
+  // migrations did not add; safe because all statements are IF NOT EXISTS).
   const schemaPath = join(__dirname, 'schema.sql');
   const schema = readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
-  
-  // Run migrations to ensure schema is up to date
-  runMigrations(db);
   
   // Verify and create missing indexes
   // Requirements: 6.1, 6.2, 6.3

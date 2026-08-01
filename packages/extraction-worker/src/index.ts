@@ -55,6 +55,20 @@ function checkAuth(request: Request, env: Env): boolean {
   return auth.substring(7) === env.ADMIN_TOKEN;
 }
 
+/**
+ * Browser-friendly auth for the admin panel.
+ * Browsers cannot set Authorization headers on a direct navigation, so /admin
+ * additionally accepts the token via the ?token= query param. The returned HTML
+ * persists it to localStorage so subsequent /api/* calls can use the header.
+ * /api/* routes keep header-only auth (programmatic callers always set headers).
+ */
+function checkAdminAuth(request: Request, env: Env): boolean {
+  if (checkAuth(request, env)) return true;
+  const url = new URL(request.url);
+  const queryToken = url.searchParams.get('token');
+  return !!queryToken && queryToken === env.ADMIN_TOKEN;
+}
+
 function unauthorized(): Response {
   return Response.json({ error: 'unauthorized' }, { status: 401 });
 }
@@ -324,9 +338,14 @@ export default {
       return handleExtract(request, env);
     }
 
-    // --- Auth-required routes (/api/* and /admin) ---
-    if (path.startsWith('/api/') || path === '/admin') {
+    // --- Auth-required routes ---
+    // /api/* — programmatic callers, header-only (no query token leakage in logs).
+    if (path.startsWith('/api/')) {
       if (!checkAuth(request, env)) return unauthorized();
+    }
+    // /admin — browser navigation, also accepts ?token= (browsers can't set headers).
+    if (path === '/admin') {
+      if (!checkAdminAuth(request, env)) return unauthorized();
     }
 
     // Admin panel

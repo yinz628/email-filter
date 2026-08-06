@@ -279,12 +279,14 @@ npx wrangler deploy --config wrangler.gltemail.toml
 
 ### VPS 端 extraction 配置（可选）
 
-若需在管理面板查询提取结果或让 vps-api 推送提取规则，在 `.env` 配置（已含在 `.env.example` 与 `docker-compose.yml`）：
+若需在管理面板查询提取结果或让 vps-api 推送提取规则，在 `.env` 配置：
 
 ```bash
 EXTRACTION_WORKER_URL=https://extraction-worker.<account>.workers.dev
 EXTRACTION_WORKER_TOKEN=与 extraction-worker 的 ADMIN_TOKEN 相同
 ```
+
+> **务必确认 `docker-compose.yml` 的 `environment` 段透传了这两个变量**（仅配 `.env` 而不透传，容器内读不到，面板会 503）。详见排障「验证码/折扣码面板加载失败（503）」。
 
 ## 数据与备份
 
@@ -309,16 +311,18 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 
 | 优先级 | 类别 | forwardTo | 行为 |
 |--------|------|-----------|------|
-| 最高 | 转发名单 (forward) | 必填 | 匹配后直接转发到指定地址 |
+| 最高 | 转发名单 (forward) | 选填 | 匹配后转发，填写则转指定地址，留空走默认地址 |
 | 高 | 白名单 (whitelist) | 选填 | 匹配后放行，填写后覆写默认转发地址 |
-| 中 | 黑名单 (blacklist) | 忽略 | 匹配后静默丢弃 |
-| 低 | 动态规则 (dynamic) | 忽略 | 系统自动生成，匹配后丢弃 |
+| 中 | 黑名单 (blacklist) | 选填 | 匹配后静默丢弃（地址不生效）|
+| 低 | 动态规则 (dynamic) | 选填 | 系统自动生成，匹配后丢弃（地址不生效）|
+
+> 所有类别的 `forwardTo` 均可选。留空时 forward/whitelist 转发到 Worker 的 `DEFAULT_FORWARD_TO`。
 
 ### 规则级转发地址覆写
 
 转发地址控制采用双层语义：
 
-1. **forward 规则的核心地址**：`forward` 类别规则的 `forwardTo` 属于核心语义（必填），在求值时始终生效，不受任何开关影响。这是最高优先级的定向转发，确保命中邮件转往指定地址。
+1. **forward 规则的核心地址**：`forward` 类别规则的 `forwardTo` 在求值时始终生效，不受任何开关影响（属核心语义）。**留空时**回退到 Worker 的 `DEFAULT_FORWARD_TO`。
 2. **其他规则的覆写地址**：白名单等规则的可选 `forwardTo` 属于「覆写」，受 Worker 实例的 `ruleForwardEnabled` 开关门控：
    - 在管理面板 Worker 编辑页开启「启用规则转发覆写」开关（数据库字段 `worker_instances.rule_forward_enabled`）
    - 创建白名单规则时填写「转发地址」字段，命中后优先使用该地址
@@ -329,7 +333,7 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 
 ### 验证码 / 折扣码提取
 
-仅 `forward` 类别规则可触发提取（与「规则转发覆写」开关无关，开关保持默认关闭即可）：
+**提取是与规则动作正交的独立能力**——任意类别（forward/whitelist/blacklist/dynamic）的规则都可勾选提取。提取在投递决策前读取正文（流单次消费），无论邮件最终转发还是丢弃，提取都会执行（如 blacklist + extractVerification：丢弃邮件但仍抽取验证码）。
 
 | 配置项 | 说明 |
 | --- | --- |
@@ -338,7 +342,9 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 | `codePattern` | 正则，如 `\d{6}`。留空则用通用提取逻辑 |
 | `linkAnchorPattern` | 链接锚文本正则（可选，提取验证/激活链接）|
 
-规则保存时 vps-api 自动把提取配置推送到 extraction-worker D1。提取结果存于 extraction-worker D1，经 `GET /api/extraction/codes`、`GET /api/extraction/discounts` 查询（管理面板「验证码/折扣码」页面）。
+规则保存时 vps-api 自动把提取配置推送到 extraction-worker D1。提取结果存于 extraction-worker D1，经 `GET /api/extraction/codes`、`GET /api/extraction/discounts` 查询（vps 管理面板「验证码」/「🏷️ 折扣码」页面，或 extraction-worker 独立面板 `/admin`）。
+
+**折扣码管理状态**：vps-api 的 `discount_code_states` 表（status/tags/favorite/note）与 worker 的 `discount_codes` 通过 `discount_id` 松耦合关联——worker 保持纯提取库，管理状态全在 vps 侧。详见 README「折扣码管理」。
 
 > 生产排障提示：若规则命中但 D1 无记录，优先检查 `codePattern` 是否匹配邮件正文格式。通用逻辑（codePattern 留空）对非标准格式可能识别不到，建议配明确正则；可用管理面板「正则编辑器」从样例生成并测试。
 
@@ -361,6 +367,21 @@ docker compose logs -f api
 ```bash
 sudo journalctl -u email-filter-api -f
 ```
+
+### 验证码/折扣码面板加载失败（503）
+
+管理面板「验证码」或「折扣码」tab 报 `503 Service Unavailable` / `{"error":"Extraction worker not configured"}`，通常是因为 `EXTRACTION_WORKER_URL` / `EXTRACTION_WORKER_TOKEN` 没传进容器：
+
+1. 确认 `.env` 里配了这两个变量（值同 extraction-worker 的 `wrangler.toml` 的 `ADMIN_TOKEN`）。
+2. **确认 `docker-compose.yml` 的 `environment` 段透传了它们**（关键易漏点）：
+   ```yaml
+   environment:
+     - EXTRACTION_WORKER_URL=${EXTRACTION_WORKER_URL:-}
+     - EXTRACTION_WORKER_TOKEN=${EXTRACTION_WORKER_TOKEN:-}
+   ```
+   只在 `.env` 配、而 compose 不透传，容器内 `process.env` 仍是空 → 503。
+3. 改完 compose 必须重建容器（`docker compose up -d`，环境变量改变不会热加载）。
+4. 验证容器内确实拿到：`docker compose exec api env | grep EXTRACTION`。
 
 ### better-sqlite3 编译问题
 

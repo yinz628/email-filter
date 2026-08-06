@@ -28,6 +28,8 @@ services:
       - HIT_LOG_RETENTION_HOURS=${HIT_LOG_RETENTION_HOURS:-72}
       - ALERT_RETENTION_DAYS=${ALERT_RETENTION_DAYS:-90}
       - RUN_HEARTBEAT_ON_START=${RUN_HEARTBEAT_ON_START:-false}
+      - EXTRACTION_WORKER_URL=${EXTRACTION_WORKER_URL:-}
+      - EXTRACTION_WORKER_TOKEN=${EXTRACTION_WORKER_TOKEN:-}
     restart: unless-stopped
     networks:
       - email-filter-network

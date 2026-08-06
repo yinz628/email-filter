@@ -31,6 +31,7 @@ import {
   getRule, upsertRule,
   insertCode, queryCodes, getLatestCode, getCodeById, deleteCode,
   insertDiscount, queryDiscounts, getDiscountById, deleteDiscount,
+  deleteDiscounts, queryAllDiscounts,
   type CodeFilter, type DiscountFilter,
 } from './db.js';
 import { generateFromTarget, validateRegex, testRegexMatch } from './regex-generator.js';
@@ -220,15 +221,24 @@ async function handleDeleteCode(id: string, env: Env): Promise<Response> {
 // API: discount codes
 // ============================================
 
-async function handleListDiscounts(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  const filter: DiscountFilter = {
+/** Parse shared discount filter params from query string (used by list + export). */
+function discountFilterFromQuery(url: URL, extra?: Partial<DiscountFilter>): DiscountFilter {
+  return {
     recipient: url.searchParams.get('recipient') || undefined,
     senderDomain: url.searchParams.get('sender_domain') || undefined,
+    subject: url.searchParams.get('subject') || undefined,
+    dateFrom: url.searchParams.get('date_from') || undefined,
+    dateTo: url.searchParams.get('date_to') || undefined,
     search: url.searchParams.get('search') || undefined,
     limit: url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')!, 10) : undefined,
     offset: url.searchParams.get('offset') ? parseInt(url.searchParams.get('offset')!, 10) : undefined,
+    ...extra,
   };
+}
+
+async function handleListDiscounts(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const filter = discountFilterFromQuery(url);
   const { rows, total } = await queryDiscounts(env.DB, filter);
   return Response.json({
     records: rows,
@@ -260,6 +270,76 @@ async function handleDeleteDiscount(id: string, env: Env): Promise<Response> {
   const deleted = await deleteDiscount(env.DB, parseInt(id, 10));
   if (!deleted) return Response.json({ error: 'not found' }, { status: 404 });
   return new Response(null, { status: 204 });
+}
+
+// ============================================
+// API: discount codes — bulk delete + export
+// ============================================
+
+/** Max ids accepted by bulk-delete. */
+const MAX_BULK_DELETE = 1000;
+
+async function handleBulkDeleteDiscounts(request: Request, env: Env): Promise<Response> {
+  let body: { ids?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'invalid JSON' }, { status: 400 });
+  }
+  const raw = body.ids;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return Response.json({ error: 'ids must be a non-empty array' }, { status: 400 });
+  }
+  if (raw.length > MAX_BULK_DELETE) {
+    return Response.json({ error: `too many ids (max ${MAX_BULK_DELETE})` }, { status: 400 });
+  }
+  const ids: number[] = [];
+  for (const v of raw) {
+    // Accept integers or numeric strings; reject anything else.
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+    if (!Number.isInteger(n) || n <= 0) {
+      return Response.json({ error: `invalid id: ${JSON.stringify(v)}` }, { status: 400 });
+    }
+    ids.push(n);
+  }
+  const deleted = await deleteDiscounts(env.DB, ids);
+  return Response.json({ deleted, requested: ids.length });
+}
+
+/** CSV column order for discount export. */
+const DISCOUNT_CSV_COLUMNS: Array<keyof import('./db.js').DiscountCodeRow> = [
+  'id', 'recipient', 'sender', 'sender_domain', 'subject',
+  'code', 'link', 'discount_value', 'message_id', 'received_at',
+];
+
+/** RFC 4180 CSV cell escaping: wrap in quotes if needed, double embedded quotes. */
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+async function handleExportDiscounts(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const filter = discountFilterFromQuery(url);
+  const rows = await queryAllDiscounts(env.DB, filter);
+
+  const lines: string[] = [DISCOUNT_CSV_COLUMNS.join(',')];
+  for (const row of rows) {
+    lines.push(DISCOUNT_CSV_COLUMNS.map((c) => csvCell(row[c])).join(','));
+  }
+  const csv = lines.join('\r\n');
+  // Leading BOM so Excel opens UTF-8 correctly.
+  const body = '\uFEFF' + csv;
+
+  return new Response(body, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="discounts.csv"`,
+      'Cache-Control': 'no-store',
+    },
+  });
 }
 
 // ============================================
@@ -370,9 +450,18 @@ export default {
     }
 
     // Discount codes API
+    // Specific paths (by-merchant, export, bulk-delete) MUST precede the
+    // generic /api/discounts/:id wildcard below, otherwise 'export' would be
+    // parsed as an :id.
     if (path.startsWith('/api/discounts/by-merchant/')) {
       const domain = path.replace('/api/discounts/by-merchant/', '');
       if (method === 'GET') return handleDiscountsByMerchant(domain, request, env);
+    }
+    if (path === '/api/discounts/export' && method === 'GET') {
+      return handleExportDiscounts(request, env);
+    }
+    if (path === '/api/discounts/bulk-delete' && method === 'POST') {
+      return handleBulkDeleteDiscounts(request, env);
     }
     if (path === '/api/discounts') {
       if (method === 'GET') return handleListDiscounts(request, env);

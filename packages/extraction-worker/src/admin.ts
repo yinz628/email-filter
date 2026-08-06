@@ -28,6 +28,15 @@ export function getAdminHtml(workerOrigin: string, _token: string): string {
   .filters input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
   .btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; background: #fff; font-size: 13px; }
   .btn:hover { background: #f0f0f0; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.danger { color: #cf222e; border-color: #cf222e; }
+  .btn.danger:hover { background: #cf222e; color: #fff; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar .sel-info { color: #666; font-size: 13px; }
+  .chk { width: 16px; height: 16px; cursor: pointer; }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; flex-wrap: wrap; font-size: 13px; color: #666; }
+  .pager .pg-info { margin: 0 4px; }
+  .pager input.pg-input { width: 60px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; text-align: center; }
   .hidden { display: none; }
   .link-cell a { color: #0969da; word-break: break-all; }
   .empty { text-align: center; color: #999; padding: 30px; }
@@ -57,15 +66,27 @@ export function getAdminHtml(workerOrigin: string, _token: string): string {
 <div id="discounts-panel" class="hidden">
   <div class="card">
     <div class="filters">
-      <input id="disc-recipient" placeholder="收件邮箱" onkeyup="if(event.key==='Enter')loadDiscounts()">
-      <input id="disc-domain" placeholder="商户域名" onkeyup="if(event.key==='Enter')loadDiscounts()">
-      <input id="disc-search" placeholder="搜索" onkeyup="if(event.key==='Enter')loadDiscounts()">
-      <button class="btn" onclick="loadDiscounts()">查询</button>
+      <input id="disc-recipient" placeholder="收件邮箱" onkeyup="if(event.key==='Enter')queryDiscounts()">
+      <input id="disc-domain" placeholder="商户域名" onkeyup="if(event.key==='Enter')queryDiscounts()">
+      <input id="disc-subject" placeholder="主题" onkeyup="if(event.key==='Enter')queryDiscounts()">
+      <input id="disc-search" placeholder="搜索" onkeyup="if(event.key==='Enter')queryDiscounts()">
+      <input id="disc-date-from" type="date" title="起始日期">
+      <input id="disc-date-to" type="date" title="结束日期">
+      <button class="btn" onclick="queryDiscounts()">查询</button>
+    </div>
+    <div class="toolbar">
+      <input type="checkbox" id="disc-select-all" class="chk" title="全选当前页" onchange="toggleAllDiscounts(this.checked)">
+      <label for="disc-select-all" style="font-size:13px;color:#666">全选</label>
+      <button id="disc-bulk-del" class="btn danger" onclick="bulkDeleteDiscounts()" disabled>批量删除</button>
+      <button class="btn" onclick="exportDiscounts()">导出 CSV</button>
+      <span id="disc-sel-info" class="sel-info">未选中</span>
+      <span class="sel-info" style="margin-left:auto">导出包含当前筛选条件下的全部记录</span>
     </div>
     <table>
-      <thead><tr><th>收件人</th><th>折扣码</th><th>折扣值</th><th>链接</th><th>商户</th><th>主题</th><th>时间</th><th></th></tr></thead>
+      <thead><tr><th></th><th>收件人</th><th>折扣码</th><th>折扣值</th><th>链接</th><th>商户</th><th>主题</th><th>时间</th><th></th></tr></thead>
       <tbody id="disc-tbody"></tbody>
     </table>
+    <div id="disc-pager" class="pager hidden"></div>
   </div>
 </div>
 
@@ -84,6 +105,30 @@ function switchTab(tab) {
 
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function copy(text) { navigator.clipboard.writeText(text).then(() => alert('已复制: ' + text)); }
+
+// Discount selection state — set of selected row ids (current page only).
+const discSelected = new Set();
+// Discount pagination state.
+const DISC_PAGE_SIZE = 50;
+let discPage = 1;
+let discTotal = 0;
+function refreshDiscSelUI() {
+  const n = discSelected.size;
+  document.getElementById('disc-sel-info').textContent = n ? '已选 ' + n + ' 条' : '未选中';
+  document.getElementById('disc-bulk-del').disabled = n === 0;
+}
+function toggleDisc(id, checked) {
+  if (checked) discSelected.add(id); else discSelected.delete(id);
+  refreshDiscSelUI();
+}
+function toggleAllDiscounts(checked) {
+  document.querySelectorAll('.disc-chk').forEach(el => {
+    el.checked = checked;
+    const id = Number(el.getAttribute('data-id'));
+    if (checked) discSelected.add(id); else discSelected.delete(id);
+  });
+  refreshDiscSelUI();
+}
 
 async function loadCodes() {
   const r = encodeURIComponent(document.getElementById('codes-recipient').value);
@@ -110,17 +155,35 @@ async function loadCodes() {
 async function loadDiscounts() {
   const r = encodeURIComponent(document.getElementById('disc-recipient').value);
   const d = encodeURIComponent(document.getElementById('disc-domain').value);
+  const sub = encodeURIComponent(document.getElementById('disc-subject').value);
   const s = encodeURIComponent(document.getElementById('disc-search').value);
-  let url = ORIGIN + '/api/discounts?limit=50';
+  const df = document.getElementById('disc-date-from').value;
+  const dt = document.getElementById('disc-date-to').value;
+  const offset = (discPage - 1) * DISC_PAGE_SIZE;
+  let url = ORIGIN + '/api/discounts?limit=' + DISC_PAGE_SIZE + '&offset=' + offset;
   if (r) url += '&recipient=' + r;
   if (d) url += '&sender_domain=' + d;
+  if (sub) url += '&subject=' + sub;
   if (s) url += '&search=' + s;
+  if (df) url += '&date_from=' + encodeURIComponent(df + ' 00:00:00');
+  if (dt) url += '&date_to=' + encodeURIComponent(dt + ' 23:59:59');
   const res = await fetch(url, { headers: { Authorization: AUTH } });
   const data = await res.json();
   const tbody = document.getElementById('disc-tbody');
   const records = data.records || [];
-  if (!records.length) { tbody.innerHTML = '<tr><td colspan=8 class="empty">暂无记录</td></tr>'; return; }
+  discTotal = (data.pagination && data.pagination.total) || 0;
+  // Reset selection + "select all" checkbox on each reload.
+  discSelected.clear();
+  const selectAll = document.getElementById('disc-select-all');
+  if (selectAll) selectAll.checked = false;
+  refreshDiscSelUI();
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan=9 class="empty">暂无记录</td></tr>';
+    renderDiscPager();
+    return;
+  }
   tbody.innerHTML = records.map(r => '<tr>'
+    + '<td><input type="checkbox" class="chk disc-chk" data-id="'+r.id+'" onchange="toggleDisc('+r.id+', this.checked)"></td>'
     + '<td>' + esc(r.recipient) + '</td>'
     + '<td>' + (r.code ? '<span class="code-val" onclick="copy(\\''+esc(r.code)+'\\')">'+esc(r.code)+'</span>' : '-') + '</td>'
     + '<td>' + esc(r.discount_value || '-') + '</td>'
@@ -130,6 +193,86 @@ async function loadDiscounts() {
     + '<td>' + esc(r.received_at) + '</td>'
     + '<td><button class="btn" onclick="del(\\'discounts\\','+r.id+')">🗑</button></td>'
     + '</tr>').join('');
+  renderDiscPager();
+}
+
+function renderDiscPager() {
+  const pager = document.getElementById('disc-pager');
+  if (!pager) return;
+  const totalPages = Math.max(1, Math.ceil(discTotal / DISC_PAGE_SIZE));
+  if (discTotal === 0) { pager.classList.add('hidden'); return; }
+  pager.classList.remove('hidden');
+  const from = (discPage - 1) * DISC_PAGE_SIZE + 1;
+  const to = Math.min(discPage * DISC_PAGE_SIZE, discTotal);
+  pager.innerHTML = ''
+    + '<button class="btn" onclick="goDiscPage(1)" ' + (discPage <= 1 ? 'disabled' : '') + '>«</button>'
+    + '<button class="btn" onclick="goDiscPage(' + (discPage - 1) + ')" ' + (discPage <= 1 ? 'disabled' : '') + '>上一页</button>'
+    + '<span class="pg-info">第 <input class="pg-input" value="' + discPage + '" onkeyup="if(event.key===\\'Enter\\') discGoPageInput(this.value)"> / ' + totalPages + ' 页</span>'
+    + '<button class="btn" onclick="goDiscPage(' + (discPage + 1) + ')" ' + (discPage >= totalPages ? 'disabled' : '') + '>下一页</button>'
+    + '<button class="btn" onclick="goDiscPage(' + totalPages + ')" ' + (discPage >= totalPages ? 'disabled' : '') + '>»</button>'
+    + '<span class="pg-info">' + from + '-' + to + ' / 共 ' + discTotal + ' 条</span>';
+}
+
+function goDiscPage(p) {
+  const totalPages = Math.max(1, Math.ceil(discTotal / DISC_PAGE_SIZE));
+  discPage = Math.min(Math.max(1, p), totalPages);
+  loadDiscounts();
+}
+
+function discGoPageInput(v) {
+  const n = parseInt(v, 10);
+  if (!isNaN(n)) goDiscPage(n);
+}
+
+// Run a fresh query from page 1 (bound to the 查询 button + Enter in filters).
+function queryDiscounts() {
+  discPage = 1;
+  loadDiscounts();
+}
+
+async function bulkDeleteDiscounts() {
+  const ids = Array.from(discSelected);
+  if (!ids.length) return;
+  if (!confirm('确认删除选中的 ' + ids.length + ' 条折扣码？此操作不可撤销。')) return;
+  const res = await fetch(ORIGIN + '/api/discounts/bulk-delete', {
+    method: 'POST',
+    headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert('批量删除失败: ' + (data.error || res.status)); return; }
+  alert('已删除 ' + data.deleted + ' 条（请求 ' + data.requested + ' 条）');
+  loadDiscounts();
+}
+
+async function exportDiscounts() {
+  const r = encodeURIComponent(document.getElementById('disc-recipient').value);
+  const d = encodeURIComponent(document.getElementById('disc-domain').value);
+  const sub = encodeURIComponent(document.getElementById('disc-subject').value);
+  const s = encodeURIComponent(document.getElementById('disc-search').value);
+  const df = document.getElementById('disc-date-from').value;
+  const dt = document.getElementById('disc-date-to').value;
+  let url = ORIGIN + '/api/discounts/export?';
+  const params = [];
+  if (r) params.push('recipient=' + r);
+  if (d) params.push('sender_domain=' + d);
+  if (sub) params.push('subject=' + sub);
+  if (s) params.push('search=' + s);
+  if (df) params.push('date_from=' + encodeURIComponent(df + ' 00:00:00'));
+  if (dt) params.push('date_to=' + encodeURIComponent(dt + ' 23:59:59'));
+  url += params.join('&');
+  const res = await fetch(url, { headers: { Authorization: AUTH } });
+  if (!res.ok) { alert('导出失败: ' + res.status); return; }
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  a.href = objUrl;
+  a.download = 'discounts-' + today + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
 }
 
 async function del(type, id) {

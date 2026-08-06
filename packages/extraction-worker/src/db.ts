@@ -61,6 +61,12 @@ export interface DiscountFilter {
   recipient?: string;
   senderDomain?: string;
   search?: string;
+  /** Subject substring filter (LIKE). */
+  subject?: string;
+  /** Inclusive lower bound on received_at (SQLite datetime string, e.g. '2026-08-01 00:00:00'). */
+  dateFrom?: string;
+  /** Inclusive upper bound on received_at. */
+  dateTo?: string;
   limit?: number;
   offset?: number;
 }
@@ -265,15 +271,10 @@ export async function insertDiscount(db: D1Database, data: InsertDiscountData): 
 }
 
 /**
- * Query discount codes with filtering and pagination.
+ * Build the WHERE clause + bind params shared by all discount queries
+ * (list, export). Keeps filter semantics in one place.
  */
-export async function queryDiscounts(
-  db: D1Database,
-  filter: DiscountFilter
-): Promise<{ rows: DiscountCodeRow[]; total: number }> {
-  const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
-  const offset = Math.max(filter.offset ?? 0, 0);
-
+export function buildDiscountWhere(filter: DiscountFilter): { clause: string; params: (string | number)[] } {
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -285,13 +286,40 @@ export async function queryDiscounts(
     where.push('sender_domain = ?');
     params.push(filter.senderDomain);
   }
+  if (filter.subject) {
+    where.push('subject LIKE ?');
+    params.push(`%${filter.subject}%`);
+  }
+  // received_at is stored as 'YYYY-MM-DD HH:MM:SS' (UTC, lexicographically
+  // ordered), so direct string comparison works for the date range.
+  if (filter.dateFrom) {
+    where.push('received_at >= ?');
+    params.push(filter.dateFrom);
+  }
+  if (filter.dateTo) {
+    where.push('received_at <= ?');
+    params.push(filter.dateTo);
+  }
   if (filter.search) {
     where.push('(code LIKE ? OR link LIKE ? OR subject LIKE ? OR discount_value LIKE ?)');
     const like = `%${filter.search}%`;
     params.push(like, like, like, like);
   }
 
-  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return { clause, params };
+}
+
+/**
+ * Query discount codes with filtering and pagination.
+ */
+export async function queryDiscounts(
+  db: D1Database,
+  filter: DiscountFilter
+): Promise<{ rows: DiscountCodeRow[]; total: number }> {
+  const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
+  const offset = Math.max(filter.offset ?? 0, 0);
+  const { clause: whereClause, params } = buildDiscountWhere(filter);
 
   const countResult = await db
     .prepare(`SELECT COUNT(*) as c FROM discount_codes ${whereClause}`)
@@ -328,4 +356,40 @@ export async function getDiscountById(db: D1Database, id: number): Promise<Disco
 export async function deleteDiscount(db: D1Database, id: number): Promise<boolean> {
   const result = await db.prepare('DELETE FROM discount_codes WHERE id = ?').bind(id).run();
   return (result.meta?.changes ?? 0) > 0;
+}
+
+/**
+ * Bulk-delete discount codes by IDs. Single statement → atomic.
+ * Returns the number of rows actually deleted (may be < ids.length if some
+ * ids didn't exist). Empty input returns 0 without hitting D1.
+ */
+export async function deleteDiscounts(db: D1Database, ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const result = await db
+    .prepare(`DELETE FROM discount_codes WHERE id IN (${placeholders})`)
+    .bind(...ids)
+    .run();
+  return result.meta?.changes ?? 0;
+}
+
+/**
+ * Query ALL discount codes matching the filter (no pagination), for export.
+ * Capped at maxRows (default 5000) as a defensive ceiling for D1.
+ */
+export async function queryAllDiscounts(
+  db: D1Database,
+  filter: DiscountFilter,
+  maxRows = 5000
+): Promise<DiscountCodeRow[]> {
+  const { clause: whereClause, params } = buildDiscountWhere(filter);
+  const rows = await db
+    .prepare(
+      `SELECT * FROM discount_codes ${whereClause}
+       ORDER BY received_at DESC
+       LIMIT ?`
+    )
+    .bind(...params, maxRows)
+    .all<DiscountCodeRow>();
+  return rows.results ?? [];
 }

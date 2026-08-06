@@ -55,9 +55,9 @@ const VALID_MATCH_TYPES = ['sender', 'subject', 'domain'];
 const VALID_MATCH_MODES = ['exact', 'contains', 'startsWith', 'endsWith', 'regex'];
 
 /**
- * Validate CreateRuleDTO
+ * Validate CreateRuleDTO (exported for unit testing).
  */
-function validateCreateRule(body: unknown): { valid: boolean; error?: string; data?: CreateRuleDTO } {
+export function validateCreateRule(body: unknown): { valid: boolean; error?: string; data?: CreateRuleDTO } {
   if (!body || typeof body !== 'object') {
     return { valid: false, error: 'Request body is required' };
   }
@@ -77,25 +77,18 @@ function validateCreateRule(body: unknown): { valid: boolean; error?: string; da
     return { valid: false, error: 'pattern is required and must be a non-empty string' };
   }
 
-  // Forward rules must specify a forwarding address
+  // forwardTo is optional for ALL categories. When omitted on a forward/whitelist
+  // rule, the decision layer falls back to the worker's DEFAULT_FORWARD_TO;
+  // on blacklist/dynamic it is irrelevant (the email is dropped).
   const category = data.category as RuleCategory;
   const forwardTo = typeof data.forwardTo === 'string' && data.forwardTo.trim() ? data.forwardTo : undefined;
-  if (category === 'forward' && !forwardTo) {
-    return { valid: false, error: 'forwardTo is required for forward rules' };
-  }
 
-  // extractVerification is an orthogonal action on forward rules only.
-  // Reject it on other categories to keep semantics explicit.
+  // Extraction flags are orthogonal to the rule's action/category: any rule can
+  // trigger extraction (verification OR discount). Extraction happens regardless
+  // of whether the email is forwarded or dropped (email-worker reads the raw body
+  // before acting on the decision).
   const extractVerification = data.extractVerification === true;
-  if (extractVerification && category !== 'forward') {
-    return { valid: false, error: 'extractVerification is only valid for forward rules' };
-  }
-
-  // extractDiscount: same constraint — forward rules only.
   const extractDiscount = data.extractDiscount === true;
-  if (extractDiscount && category !== 'forward') {
-    return { valid: false, error: 'extractDiscount is only valid for forward rules' };
-  }
 
   // Mutually exclusive: a rule can extract verification OR discount, not both.
   if (extractVerification && extractDiscount) {
@@ -132,9 +125,9 @@ function validateCreateRule(body: unknown): { valid: boolean; error?: string; da
 }
 
 /**
- * Validate UpdateRuleDTO
+ * Validate UpdateRuleDTO (exported for unit testing).
  */
-function validateUpdateRule(body: unknown): { valid: boolean; error?: string; data?: UpdateRuleDTO } {
+export function validateUpdateRule(body: unknown): { valid: boolean; error?: string; data?: UpdateRuleDTO } {
   if (!body || typeof body !== 'object') {
     return { valid: false, error: 'Request body is required' };
   }
@@ -198,6 +191,14 @@ function validateUpdateRule(body: unknown): { valid: boolean; error?: string; da
     } else {
       updateData.tags = [];
     }
+  }
+
+  // Mutually exclusive: a rule can extract verification OR discount, not both.
+  // Applies when either or both flags are present in this update.
+  const finalExtractVerification = updateData.extractVerification !== undefined ? updateData.extractVerification : null;
+  const finalExtractDiscount = updateData.extractDiscount !== undefined ? updateData.extractDiscount : null;
+  if (finalExtractVerification === true && finalExtractDiscount === true) {
+    return { valid: false, error: 'extractVerification and extractDiscount are mutually exclusive' };
   }
 
   return { valid: true, data: updateData };

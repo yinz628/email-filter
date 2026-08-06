@@ -404,4 +404,52 @@ describe('Migration Idempotency', () => {
     expect(idx.length).toBeGreaterThan(0);
     expect(idx[0].values.length).toBeGreaterThan(0);
   });
+
+  /**
+   * Test: discount_code_states table (VPS-side lightweight state overlay)
+   *
+   * This table stores status/tags/favorite/note keyed by the worker's
+   * discount_codes.id. It must exist after schema load and support the
+   * upsert pattern used by the extraction-proxy routes.
+   */
+  it('discount_code_states table is created by schema with correct shape', () => {
+    const schemaPath = join(__dirname, 'schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
+
+    expect(tableExists('discount_code_states')).toBe(true);
+    // Primary key + management columns
+    expect(columnExists('discount_code_states', 'discount_id')).toBe(true);
+    expect(columnExists('discount_code_states', 'status')).toBe(true);
+    expect(columnExists('discount_code_states', 'tags')).toBe(true);
+    expect(columnExists('discount_code_states', 'favorite')).toBe(true);
+    expect(columnExists('discount_code_states', 'note')).toBe(true);
+    expect(columnExists('discount_code_states', 'updated_at')).toBe(true);
+    // Supporting indexes
+    expect(indexExists('idx_discount_states_status')).toBe(true);
+    expect(indexExists('idx_discount_states_favorite')).toBe(true);
+  });
+
+  /**
+   * Test: upsert pattern works (INSERT ... ON CONFLICT DO UPDATE).
+   * Mirrors what the extraction-proxy PUT /discount-states/:id handler does.
+   */
+  it('discount_code_states supports upsert on discount_id', () => {
+    const schemaPath = join(__dirname, 'schema.sql');
+    const schema = readFileSync(schemaPath, 'utf-8');
+    db.run(schema);
+
+    // Initial insert
+    db.run(`INSERT INTO discount_code_states (discount_id, status, favorite) VALUES (10, 'active', 0)`);
+    // Upsert (same id, new status)
+    db.run(`INSERT INTO discount_code_states (discount_id, status, favorite)
+            VALUES (10, 'used', 1)
+            ON CONFLICT(discount_id) DO UPDATE SET status='used', favorite=1`);
+    const result = db.exec('SELECT status, favorite FROM discount_code_states WHERE discount_id = 10');
+    expect(result[0].values[0][0]).toBe('used');
+    expect(result[0].values[0][1]).toBe(1);
+    // Still only one row
+    const count = db.exec('SELECT COUNT(*) FROM discount_code_states');
+    expect(count[0].values[0][0]).toBe(1);
+  });
 });

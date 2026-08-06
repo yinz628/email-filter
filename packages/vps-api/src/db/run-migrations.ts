@@ -608,6 +608,35 @@ function migrateCreateVerificationCodesTable(db: Database.Database): MigrationRe
 }
 
 /**
+ * Migration: Create discount_code_states table.
+ *
+ * Lightweight VPS-side management state for discount codes stored in
+ * extraction-worker's D1. Only stores status/tags/favorite/note keyed by
+ * discount_id (the worker's discount_codes.id). Does NOT duplicate code
+ * content — the worker remains the L1 store. State rows are created on demand
+ * (upsert) only when a user acts on a code, avoiding drift with worker data.
+ */
+function migrateCreateDiscountCodeStatesTable(db: Database.Database): MigrationResult {
+  const name = 'discount_code_states.create';
+  if (tableExists(db, 'discount_code_states')) {
+    return { name, status: 'skipped', message: 'Table discount_code_states already exists' };
+  }
+  db.exec(`
+    CREATE TABLE discount_code_states (
+      discount_id INTEGER PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'active',
+      tags TEXT,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      note TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_discount_states_status ON discount_code_states(status);
+    CREATE INDEX IF NOT EXISTS idx_discount_states_favorite ON discount_code_states(favorite);
+  `);
+  return { name, status: 'applied', message: 'discount_code_states table created' };
+}
+
+/**
  * Migration: Add extract_discount + code_pattern + link_anchor_pattern to filter_rules.
  * Supports discount code extraction (extractDiscount flag) and user-configured
  * extraction regex patterns for both verification and discount extraction.
@@ -710,6 +739,7 @@ const migrations: MigrationFn[] = [
   migrateFilterRulesExtractVerification,
   migrateCreateVerificationCodesTable,
   migrateFilterRulesDiscountAndPatterns,
+  migrateCreateDiscountCodeStatesTable,
 ];
 
 /**

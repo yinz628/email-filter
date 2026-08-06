@@ -641,4 +641,77 @@ describe('FilterService', () => {
       expect(decision.verificationRequired).toBe(true);
     });
   });
+
+  /**
+   * Feature: extraction-independence — extraction flags are orthogonal to the
+   * rule's category/action. A whitelist/blacklist/dynamic rule may carry
+   * extractVerification/extractDiscount, and the decision must propagate those
+   * flags + ruleId regardless of whether the email is forwarded or dropped.
+   * Also: forwardTo is optional for ALL categories now.
+   */
+  describe('extraction independence from category/action', () => {
+    const makeRule = (overrides: Partial<FilterRule>): FilterRule => ({
+      id: crypto.randomUUID(),
+      category: 'blacklist',
+      matchType: 'sender',
+      matchMode: 'contains',
+      pattern: 'svc.com',
+      enabled: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+    const makePayload = (mid: string): EmailWebhookPayload => ({
+      from: 'noreply@svc.com',
+      to: 'me@example.com',
+      subject: 'x',
+      messageId: mid,
+      timestamp: 1,
+    });
+
+    it('whitelist rule with extractVerification forwards AND sets the flag', () => {
+      const rule = makeRule({ category: 'whitelist', extractVerification: true });
+      const result = filterEmail(makePayload('w-1'), [rule], 'default@example.com');
+      expect(result.action).toBe('forward');
+      expect(result.matchedCategory).toBe('whitelist');
+      expect(result.verificationRequired).toBe(true);
+      expect(result.ruleId).toBe(rule.id);
+    });
+
+    it('blacklist rule with extractDiscount drops BUT still sets the flag', () => {
+      // Extraction happens even when the email is dropped — the email-worker
+      // reads the raw body before applying the drop decision.
+      const rule = makeRule({ category: 'blacklist', extractDiscount: true });
+      const result = filterEmail(makePayload('b-1'), [rule], 'default@example.com');
+      expect(result.action).toBe('drop');
+      expect(result.matchedCategory).toBe('blacklist');
+      expect(result.discountRequired).toBe(true);
+      expect(result.ruleId).toBe(rule.id);
+    });
+
+    it('dynamic rule with extractVerification drops BUT still sets the flag', () => {
+      const rule = makeRule({ category: 'dynamic', extractVerification: true });
+      const result = filterEmail(makePayload('d-1'), [rule], 'default@example.com');
+      expect(result.action).toBe('drop');
+      expect(result.verificationRequired).toBe(true);
+      expect(result.ruleId).toBe(rule.id);
+    });
+
+    it('forward rule WITHOUT forwardTo falls back to default address', () => {
+      // forwardTo is now optional for every category, including forward.
+      const rule = makeRule({ category: 'forward' }); // no forwardTo
+      const result = filterEmail(makePayload('f-1'), [rule], 'default@example.com');
+      expect(result.action).toBe('forward');
+      expect(result.forwardTo).toBe('default@example.com');
+    });
+
+    it('rule without extraction flags yields no extraction signals', () => {
+      const rule = makeRule({ category: 'whitelist' });
+      const result = filterEmail(makePayload('n-1'), [rule], 'default@example.com');
+      expect(result.verificationRequired).not.toBe(true);
+      expect(result.discountRequired).not.toBe(true);
+      // ruleId is only meaningful for extraction, so it should be undefined here.
+      expect(result.ruleId).toBeUndefined();
+    });
+  });
 });

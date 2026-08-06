@@ -282,6 +282,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       <button class="tab" id="campaign-tab-btn" onclick="showTab('campaign')">📈 营销分析</button>
       <button class="tab" onclick="showTab('subjects')">📧 邮件主题</button>
       <button class="tab" onclick="showTab('verification')">🔐 验证码</button>
+      <button class="tab" onclick="showTab('discounts')">🏷️ 折扣码</button>
       <button class="tab" id="monitoring-tab-btn" onclick="showTab('monitoring')">📡 信号监控</button>
       <button class="tab" onclick="showTab('settings')">⚙️ 设置</button>
       <button class="tab admin-only hidden" id="users-tab-btn" onclick="showTab('users')">👥 用户管理</button>
@@ -1213,6 +1214,76 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Discounts Tab -->
+    <div id="discounts-tab" class="tab-content hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:1px solid #eee;padding-bottom:10px;flex-wrap:wrap;gap:10px;">
+          <h2 style="margin:0;border:none;padding:0;">🏷️ 折扣码管理</h2>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="discount-recipient-filter" placeholder="收件邮箱" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:150px;">
+            <select id="discount-domain-filter" onchange="resetDiscountPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:150px;"><option value="">全部商户</option></select>
+            <select id="discount-subject-filter" onchange="resetDiscountPageAndLoad()" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:160px;"><option value="">全部主题</option></select>
+            <input type="text" id="discount-search-filter" placeholder="搜索码/链接" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:140px;">
+            <select id="discount-status-filter" style="padding:6px;border:1px solid #ddd;border-radius:4px;">
+              <option value="">全部状态</option>
+              <option value="active">🟢 未用</option>
+              <option value="used">⚪ 已用</option>
+              <option value="expired">🔴 过期</option>
+              <option value="archived">📦 归档</option>
+            </select>
+            <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:3px;"><input type="checkbox" id="discount-favorite-filter">★仅收藏</label>
+            <input type="date" id="discount-date-from" title="起始日期" style="padding:5px;border:1px solid #ddd;border-radius:4px;">
+            <input type="date" id="discount-date-to" title="结束日期" style="padding:5px;border:1px solid #ddd;border-radius:4px;">
+            <button class="btn btn-secondary" onclick="resetDiscountPageAndLoad()">🔍 筛选</button>
+            <button class="btn btn-secondary" onclick="clearDiscountFilters()">清除</button>
+            <button class="btn btn-secondary" onclick="loadDiscounts()">🔄 刷新</button>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="checkbox" id="discount-select-all" onclick="toggleAllDiscounts(this.checked)" title="全选当前页">
+            <button class="btn btn-sm btn-danger" id="discount-bulk-delete-btn" onclick="bulkDeleteDiscounts()" disabled>🗑️ 批量删除</button>
+            <button class="btn btn-sm btn-secondary" id="discount-bulk-used-btn" onclick="bulkSetDiscountStatus('used')" disabled>标记已用</button>
+            <button class="btn btn-sm btn-secondary" id="discount-bulk-archive-btn" onclick="bulkSetDiscountStatus('archived')" disabled>归档</button>
+            <span id="discount-sel-info" style="color:#666;font-size:12px;"></span>
+          </div>
+          <button class="btn btn-secondary" onclick="exportDiscountsCsv()">📥 导出 CSV（当前筛选全部）</button>
+        </div>
+        <p style="color:#666;margin-bottom:15px;font-size:13px;">状态/收藏/标签存储在 VPS 本地表，与 extraction-worker 的码数据通过 ID 关联（worker 保持轻量）。</p>
+        <div id="discount-empty" style="text-align:center;color:#999;padding:40px;display:none;">暂无折扣码记录</div>
+        <div class="table-wrapper">
+          <table id="discount-table-container">
+            <thead>
+              <tr>
+                <th style="width:30px;"></th>
+                <th>收件邮箱</th>
+                <th>折扣码</th>
+                <th>折扣值</th>
+                <th>链接</th>
+                <th>商户</th>
+                <th>主题</th>
+                <th>状态</th>
+                <th>标签</th>
+                <th>时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="discount-table"></tbody>
+          </table>
+        </div>
+        <div id="discount-pagination" style="display:flex;justify-content:center;align-items:center;gap:10px;padding:15px 0;border-top:1px solid #eee;margin-top:10px;">
+          <button class="btn btn-sm btn-secondary" onclick="prevDiscountPage()" id="discount-prev-btn" disabled>上一页</button>
+          <span id="discount-page-info" style="color:#666;font-size:13px;">第 1 页</span>
+          <button class="btn btn-sm btn-secondary" onclick="nextDiscountPage()" id="discount-next-btn">下一页</button>
+          <select id="discount-page-size" onchange="changeDiscountPageSize()" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:13px;margin-left:10px;">
+            <option value="20">每页 20 条</option>
+            <option value="50" selected>每页 50 条</option>
+            <option value="100">每页 100 条</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="settings-tab" class="tab-content hidden">
       <div class="card">
@@ -1680,19 +1751,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="text" id="rule-tags" placeholder="例如：营销,广告,垃圾">
         </div>
         <div class="form-group" id="add-forward-to-group" style="display:none">
-          <label>转发地址 <span style="color:red">*</span></label>
-          <input type="email" id="rule-forward-to" placeholder="second@example.com">
-          <p style="color:#888;font-size:12px;margin-top:5px">转发名单必填；白名单选填，填写后覆写默认转发地址</p>
+          <label>转发地址</label>
+          <input type="email" id="rule-forward-to" placeholder="second@example.com（可选）">
+          <p style="color:#888;font-size:12px;margin-top:5px">所有类别均选填。留空时：转发/白名单→各 Worker 默认地址；黑名单/动态→仅拦截不转发</p>
         </div>
         <div class="form-group" id="add-extract-verification-group" style="display:none">
           <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
             <input type="checkbox" id="rule-extract-verification" onchange="toggleExtractDiscountExclusive(this, 'rule-extract-discount')">
-            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（转发名单专属：自动从正文提取验证码并存档）</span></span>
+            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（自动从正文提取验证码并存档）</span></span>
           </label>
           <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;margin-top:6px;">
             <input type="checkbox" id="rule-extract-discount" onchange="toggleExtractDiscountExclusive(this, 'rule-extract-verification')">
             <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥：自动从营销邮件提取折扣码）</span></span>
           </label>
+          <p style="color:#888;font-size:11px;margin-top:6px">提取与规则动作独立：转发或拦截均可提取，不影响邮件投递。</p>
           <div id="add-extract-patterns-group" style="display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-radius:4px;">
             <label style="font-size:12px;font-weight:600;">验证码/折扣码正则（可选）</label>
             <input type="text" id="rule-code-pattern" placeholder="如 \\d{6} 或 [A-Z0-9]{8,12}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
@@ -1759,19 +1831,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="text" id="edit-rule-tags" placeholder="例如：营销,广告,垃圾">
         </div>
         <div class="form-group" id="edit-forward-to-group" style="display:none">
-          <label>转发地址 <span style="color:red">*</span></label>
-          <input type="email" id="edit-rule-forward-to" placeholder="second@example.com">
-          <p style="color:#888;font-size:12px;margin-top:5px">转发名单必填；白名单选填，填写后覆写默认转发地址</p>
+          <label>转发地址</label>
+          <input type="email" id="edit-rule-forward-to" placeholder="second@example.com（可选）">
+          <p style="color:#888;font-size:12px;margin-top:5px">所有类别均选填。留空时：转发/白名单→各 Worker 默认地址；黑名单/动态→仅拦截不转发</p>
         </div>
         <div class="form-group" id="edit-extract-verification-group" style="display:none">
           <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
             <input type="checkbox" id="edit-rule-extract-verification" onchange="toggleExtractDiscountExclusive(this, 'edit-rule-extract-discount')">
-            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（转发名单专属）</span></span>
+            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（自动从正文提取验证码并存档）</span></span>
           </label>
           <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;margin-top:6px;">
             <input type="checkbox" id="edit-rule-extract-discount" onchange="toggleExtractDiscountExclusive(this, 'edit-rule-extract-verification')">
-            <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥）</span></span>
+            <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥：自动从营销邮件提取折扣码）</span></span>
           </label>
+          <p style="color:#888;font-size:11px;margin-top:6px">提取与规则动作独立：转发或拦截均可提取，不影响邮件投递。</p>
           <div id="edit-extract-patterns-group" style="display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-radius:4px;">
             <label style="font-size:12px;font-weight:600;">验证码/折扣码正则（可选）</label>
             <input type="text" id="edit-rule-code-pattern" placeholder="如 \\d{6}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
@@ -2401,6 +2474,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (name === 'campaign') loadCampaignAnalytics();
       if (name === 'subjects') loadSubjects();
       if (name === 'verification') loadVerification();
+      if (name === 'discounts') { ensureDiscountFilterOptions(); loadDiscounts(); }
       if (name === 'monitoring') loadMonitoringData();
       if (name === 'settings') { loadSettings(); loadBackups(); }
       if (name === 'users') loadUsers();
@@ -2740,17 +2814,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const group = document.getElementById('add-forward-to-group');
       const input = document.getElementById('rule-forward-to');
       const extractGroup = document.getElementById('add-extract-verification-group');
-      if (category === 'forward' || category === 'whitelist') {
-        group.style.display = 'block';
-        input.required = (category === 'forward');
-      } else {
-        group.style.display = 'none';
-        input.required = false;
-        input.value = '';
-      }
-      // Extract-verification toggle only applies to forward rules
+      // forwardTo is optional for ALL categories; always show the field so the
+      // user can override the default destination (only meaningful for
+      // forward/whitelist, but harmless elsewhere).
+      group.style.display = 'block';
+      input.required = false;
+      // Extraction is orthogonal to category — show the extract group always.
       if (extractGroup) {
-        extractGroup.style.display = (category === 'forward') ? 'block' : 'none';
+        extractGroup.style.display = 'block';
       }
       updatePatternsVisibility('add');
     }
@@ -2760,15 +2831,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const group = document.getElementById('edit-forward-to-group');
       const input = document.getElementById('edit-rule-forward-to');
       const extractGroup = document.getElementById('edit-extract-verification-group');
-      if (category === 'forward' || category === 'whitelist') {
-        group.style.display = 'block';
-        input.required = (category === 'forward');
-      } else {
-        group.style.display = 'none';
-        input.required = false;
-      }
+      group.style.display = 'block';
+      input.required = false;
       if (extractGroup) {
-        extractGroup.style.display = (category === 'forward') ? 'block' : 'none';
+        extractGroup.style.display = 'block';
       }
       updatePatternsVisibility('edit');
     }
@@ -2946,8 +3012,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : undefined;
       const category = document.getElementById('rule-category').value;
       const forwardToValue = document.getElementById('rule-forward-to').value.trim();
-      const extractVerificationChecked = document.getElementById('rule-extract-verification')?.checked && category === 'forward';
-      const extractDiscountChecked = document.getElementById('rule-extract-discount')?.checked && category === 'forward';
+      const extractVerificationChecked = document.getElementById('rule-extract-verification')?.checked;
+      const extractDiscountChecked = document.getElementById('rule-extract-discount')?.checked;
       const codePatternValue = document.getElementById('rule-code-pattern')?.value.trim();
       const linkAnchorValue = document.getElementById('rule-link-anchor-pattern')?.value.trim();
       const body = {
@@ -3059,8 +3125,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
       const forwardToValue = document.getElementById('edit-rule-forward-to').value.trim();
       const editCategory = document.getElementById('edit-rule-category').value;
-      const extractVerificationChecked = document.getElementById('edit-rule-extract-verification')?.checked && editCategory === 'forward';
-      const extractDiscountChecked = document.getElementById('edit-rule-extract-discount')?.checked && editCategory === 'forward';
+      const extractVerificationChecked = document.getElementById('edit-rule-extract-verification')?.checked;
+      const extractDiscountChecked = document.getElementById('edit-rule-extract-discount')?.checked;
       const editCodePattern = document.getElementById('edit-rule-code-pattern')?.value.trim();
       const editLinkAnchor = document.getElementById('edit-rule-link-anchor-pattern')?.value.trim();
       const body = {
@@ -7491,6 +7557,364 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         console.error('Error deleting verification:', e);
         showAlert('删除失败', 'error');
       }
+    }
+
+    // ============================================
+    // Discounts Tab Functions
+    // ============================================
+
+    let discountData = [];
+    let discountStates = {};          // { [discount_id]: { status, tags[], favorite, note } }
+    let discountPage = 1;
+    let discountPageSize = 50;
+    let discountTotalCount = 0;
+    const discountSelected = new Set();
+    const DISCOUNT_STATUS_META = {
+      active: { label: '🟢 未用', color: '#1a7f37' },
+      used: { label: '⚪ 已用', color: '#6e7781' },
+      expired: { label: '🔴 过期', color: '#cf222e' },
+      archived: { label: '📦 归档', color: '#8250df' },
+    };
+
+    // Populate the domain/subject dropdowns by aggregating distinct values
+    // from a large pull (limit=200). Called once when the tab is first opened,
+    // and again after bulk delete / refresh so the options stay in sync. The
+    // currently selected value is preserved across refills.
+    let discountFilterOptionsLoaded = false;
+    async function ensureDiscountFilterOptions(force = false) {
+      if (!apiToken) return;
+      if (discountFilterOptionsLoaded && !force) return;
+      try {
+        const res = await fetch('/api/extraction/discounts?limit=200&offset=0', { headers: getHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const recs = data.records || [];
+        // Distinct, sorted; "(无)" placeholder for missing values.
+        const domains = Array.from(new Set(recs.map(r => r.sender_domain || '').filter(Boolean))).sort();
+        const subjects = Array.from(new Set(recs.map(r => (r.subject || '').trim()).filter(Boolean))).sort();
+        fillDiscountSelect('discount-domain-filter', '全部商户', domains);
+        fillDiscountSelect('discount-subject-filter', '全部主题', subjects);
+        discountFilterOptionsLoaded = true;
+      } catch (e) { /* best-effort: dropdowns stay with just the "all" option */ }
+    }
+
+    function fillDiscountSelect(selectId, allLabel, values) {
+      const sel = document.getElementById(selectId);
+      if (!sel) return;
+      const cur = sel.value;  // preserve current selection
+      const opts = ['<option value="">' + escapeHtml(allLabel) + '</option>']
+        .concat(values.map(v => '<option value="' + escapeHtml(v) + '">' + escapeHtml(v.length > 50 ? v.slice(0,50) + '…' : v) + '</option>'));
+      sel.innerHTML = opts.join('');
+      sel.value = cur;
+    }
+
+    function resetDiscountPageAndLoad() {
+      discountPage = 1;
+      loadDiscounts();
+    }
+
+    function clearDiscountFilters() {
+      ['discount-recipient-filter','discount-domain-filter','discount-subject-filter','discount-search-filter','discount-date-from','discount-date-to'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      const sf = document.getElementById('discount-status-filter'); if (sf) sf.value = '';
+      const ff = document.getElementById('discount-favorite-filter'); if (ff) ff.checked = false;
+      discountPage = 1;
+      loadDiscounts();
+    }
+
+    async function loadDiscounts() {
+      if (!apiToken) return;
+      try {
+        const recipient = (document.getElementById('discount-recipient-filter')?.value || '').trim();
+        const domain = (document.getElementById('discount-domain-filter')?.value || '').trim();
+        const subject = (document.getElementById('discount-subject-filter')?.value || '').trim();
+        const search = (document.getElementById('discount-search-filter')?.value || '').trim();
+        const statusFilter = (document.getElementById('discount-status-filter')?.value || '').trim();
+        const favoriteOnly = document.getElementById('discount-favorite-filter')?.checked;
+        const dateFrom = (document.getElementById('discount-date-from')?.value || '').trim();
+        const dateTo = (document.getElementById('discount-date-to')?.value || '').trim();
+
+        let url = '/api/extraction/discounts?limit=' + discountPageSize + '&offset=' + ((discountPage - 1) * discountPageSize);
+        if (recipient) url += '&recipient=' + encodeURIComponent(recipient);
+        if (domain) url += '&sender_domain=' + encodeURIComponent(domain);
+        if (subject) url += '&subject=' + encodeURIComponent(subject);
+        if (search) url += '&search=' + encodeURIComponent(search);
+        if (dateFrom) url += '&date_from=' + encodeURIComponent(dateFrom + ' 00:00:00');
+        if (dateTo) url += '&date_to=' + encodeURIComponent(dateTo + ' 23:59:59');
+
+        const res = await fetch(url, { headers: getHeaders() });
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        discountData = (data.records || []).map(r => ({
+          id: r.id,
+          recipient: r.recipient,
+          sender: r.sender || '',
+          senderDomain: r.sender_domain || '',
+          subject: r.subject || '',
+          code: r.code,
+          link: r.link,
+          discountValue: r.discount_value || '',
+          receivedAt: r.received_at,
+        }));
+        discountTotalCount = data.pagination?.total || 0;
+
+        // Fetch states for the current page's discount ids (local VPS table).
+        if (discountData.length) {
+          const ids = discountData.map(r => r.id).join(',');
+          try {
+            const sres = await fetch('/api/extraction/discount-states?ids=' + ids, { headers: getHeaders() });
+            if (sres.ok) {
+              const sdata = await sres.json();
+              discountStates = sdata.states || {};
+            }
+          } catch (e) { /* states are best-effort */ }
+        } else {
+          discountStates = {};
+        }
+
+        // Client-side filters that depend on VPS-side state (status / favorite).
+        // These can't be done server-side because the worker doesn't know state.
+        let filtered = discountData;
+        if (statusFilter) {
+          filtered = filtered.filter(r => (discountStates[r.id]?.status || 'active') === statusFilter);
+        }
+        if (favoriteOnly) {
+          filtered = filtered.filter(r => discountStates[r.id]?.favorite === true);
+        }
+        discountData = filtered;
+
+        renderDiscounts();
+        updateDiscountPagination();
+      } catch (e) {
+        console.error('Error loading discounts:', e);
+        showAlert('加载折扣码失败', 'error');
+      }
+    }
+
+    function renderDiscounts() {
+      const tbody = document.getElementById('discount-table');
+      const emptyDiv = document.getElementById('discount-empty');
+      const tableContainer = document.getElementById('discount-table-container');
+      if (!tbody) return;
+
+      if (discountData.length === 0) {
+        emptyDiv.style.display = 'block';
+        tableContainer.style.display = 'none';
+        tbody.innerHTML = '';
+        discountSelected.clear();
+        refreshDiscountSelUI();
+        return;
+      }
+      emptyDiv.style.display = 'none';
+      tableContainer.style.display = '';
+      const selectAll = document.getElementById('discount-select-all');
+      if (selectAll) selectAll.checked = false;
+      discountSelected.clear();
+      refreshDiscountSelUI();
+
+      tbody.innerHTML = discountData.map(r => {
+        const st = discountStates[r.id] || { status: 'active', tags: [], favorite: false, note: '' };
+        const meta = DISCOUNT_STATUS_META[st.status] || DISCOUNT_STATUS_META.active;
+        const codeCell = r.code
+          ? '<span style="font-family:monospace;font-weight:600;color:#0969da;cursor:pointer;" onclick="copyDiscountCode(\\\'' + escapeHtml(r.code) + '\\\')" title="点击复制">' + escapeHtml(r.code) + '</span>'
+          : '<span style="color:#999;">-</span>';
+        const linkCell = r.link
+          ? '<a href="' + escapeHtml(r.link) + '" target="_blank" rel="noopener" style="word-break:break-all;">链接</a>'
+          : '<span style="color:#999;">-</span>';
+        const favBtn = '<span style="cursor:pointer;font-size:16px;color:' + (st.favorite ? '#f5a623' : '#ccc') + ';" onclick="toggleDiscountFavorite(' + r.id + ')">' + (st.favorite ? '★' : '☆') + '</span>';
+        const statusCell = '<span style="color:' + meta.color + ';font-weight:600;font-size:12px;">' + meta.label + '</span>';
+        const tagsCell = st.tags.length
+          ? '<span style="font-size:11px;background:#eef; padding:2px 6px; border-radius:3px;">' + escapeHtml(st.tags.join(', ')) + '</span>'
+          : '<span style="color:#ccc;font-size:11px;">无</span>';
+        const time = r.receivedAt ? r.receivedAt.replace('T',' ').replace('Z','').replace(/\.\d+$/,'') : '-';
+        const checked = discountSelected.has(r.id) ? 'checked' : '';
+        return '<tr>' +
+          '<td><input type="checkbox" class="discount-chk" data-id="' + r.id + '" ' + checked + ' onchange="toggleDiscountSelect(' + r.id + ', this.checked)"></td>' +
+          '<td style="word-break:break-all;font-size:12px;">' + escapeHtml(r.recipient) + '</td>' +
+          '<td>' + codeCell + '</td>' +
+          '<td style="font-size:12px;">' + escapeHtml(r.discountValue || '-') + '</td>' +
+          '<td>' + linkCell + '</td>' +
+          '<td style="font-size:12px;">' + escapeHtml(r.senderDomain || '-') + '</td>' +
+          '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="' + escapeHtml(r.subject) + '">' + escapeHtml(r.subject || '-') + '</td>' +
+          '<td>' + statusCell + '</td>' +
+          '<td>' + tagsCell + '</td>' +
+          '<td style="white-space:nowrap;color:#666;font-size:11px;">' + escapeHtml(time) + '</td>' +
+          '<td style="white-space:nowrap;">' +
+            '<select onchange="setDiscountStatus(' + r.id + ', this.value)" style="font-size:11px;padding:2px;border:1px solid #ddd;border-radius:3px;">' +
+              '<option value="">改状态…</option>' +
+              '<option value="active">未用</option><option value="used">已用</option><option value="expired">过期</option><option value="archived">归档</option>' +
+            '</select> ' +
+            '<button class="btn btn-sm btn-secondary" onclick="editDiscountTags(' + r.id + ')" title="编辑标签/备注" style="padding:2px 6px;">🏷️</button> ' +
+            favBtn + ' ' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteDiscountRecord(' + r.id + ')" style="padding:2px 6px;">🗑️</button>' +
+          '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    function refreshDiscountSelUI() {
+      const n = discountSelected.size;
+      const info = document.getElementById('discount-sel-info');
+      if (info) info.textContent = n ? '已选 ' + n + ' 条' : '';
+      const setBtn = (id) => { const b = document.getElementById(id); if (b) b.disabled = n === 0; };
+      setBtn('discount-bulk-delete-btn');
+      setBtn('discount-bulk-used-btn');
+      setBtn('discount-bulk-archive-btn');
+    }
+
+    function toggleDiscountSelect(id, checked) {
+      if (checked) discountSelected.add(id); else discountSelected.delete(id);
+      refreshDiscountSelUI();
+    }
+
+    function toggleAllDiscounts(checked) {
+      document.querySelectorAll('.discount-chk').forEach(el => {
+        el.checked = checked;
+        const id = Number(el.getAttribute('data-id'));
+        if (checked) discountSelected.add(id); else discountSelected.delete(id);
+      });
+      refreshDiscountSelUI();
+    }
+
+    function updateDiscountPagination() {
+      const prevBtn = document.getElementById('discount-prev-btn');
+      const nextBtn = document.getElementById('discount-next-btn');
+      const pageInfo = document.getElementById('discount-page-info');
+      const totalPages = Math.max(1, Math.ceil(discountTotalCount / discountPageSize));
+      if (prevBtn) prevBtn.disabled = discountPage <= 1;
+      if (nextBtn) nextBtn.disabled = discountPage >= totalPages;
+      if (pageInfo) pageInfo.textContent = '第 ' + discountPage + ' / ' + totalPages + ' 页（共 ' + discountTotalCount + ' 条）';
+    }
+
+    function prevDiscountPage() {
+      if (discountPage > 1) { discountPage--; loadDiscounts(); }
+    }
+    function nextDiscountPage() {
+      discountPage++; loadDiscounts();
+    }
+    function changeDiscountPageSize() {
+      discountPageSize = parseInt(document.getElementById('discount-page-size').value, 10) || 50;
+      discountPage = 1;  // 切换每页条数后回到第一页，避免越界
+      loadDiscounts();
+    }
+
+    function copyDiscountCode(code) {
+      navigator.clipboard.writeText(code).then(() => showAlert('折扣码已复制: ' + code, 'success')).catch(() => showAlert('复制失败', 'error'));
+    }
+
+    async function setDiscountStatus(id, status) {
+      if (!status) return;
+      try {
+        const res = await fetch('/api/extraction/discount-states/' + id, {
+          method: 'PUT', headers: getHeaders(),
+          body: JSON.stringify({ status }),
+        });
+        if (!res.ok) throw new Error();
+        showAlert('状态已更新', 'success');
+        loadDiscounts();
+      } catch (e) { showAlert('更新失败', 'error'); }
+    }
+
+    async function toggleDiscountFavorite(id) {
+      const cur = discountStates[id]?.favorite === true;
+      try {
+        const res = await fetch('/api/extraction/discount-states/' + id, {
+          method: 'PUT', headers: getHeaders(),
+          body: JSON.stringify({ favorite: !cur }),
+        });
+        if (!res.ok) throw new Error();
+        loadDiscounts();
+      } catch (e) { showAlert('操作失败', 'error'); }
+    }
+
+    async function editDiscountTags(id) {
+      const cur = discountStates[id] || { tags: [], note: '' };
+      const tagsStr = prompt('标签（逗号分隔）:', cur.tags.join(','));
+      if (tagsStr === null) return;
+      const note = prompt('备注:', cur.note || '');
+      if (note === null) return;
+      const tags = tagsStr.split(',').map(t => t.trim()).filter(Boolean);
+      try {
+        const res = await fetch('/api/extraction/discount-states/' + id, {
+          method: 'PUT', headers: getHeaders(),
+          body: JSON.stringify({ tags, note }),
+        });
+        if (!res.ok) throw new Error();
+        showAlert('已保存', 'success');
+        loadDiscounts();
+      } catch (e) { showAlert('保存失败', 'error'); }
+    }
+
+    async function deleteDiscountRecord(id) {
+      if (!confirm('确认删除该折扣码？（同时清除其状态记录）')) return;
+      try {
+        const res = await fetch('/api/extraction/discounts/' + id, { method: 'DELETE', headers: getHeaders() });
+        if (!res.ok && res.status !== 204) throw new Error();
+        showAlert('已删除', 'success');
+        loadDiscounts();
+      } catch (e) { showAlert('删除失败', 'error'); }
+    }
+
+    async function bulkDeleteDiscounts() {
+      const ids = Array.from(discountSelected);
+      if (!ids.length || !confirm('确认删除选中的 ' + ids.length + ' 条折扣码？')) return;
+      try {
+        const res = await fetch('/api/extraction/discounts/bulk-delete', {
+          method: 'POST', headers: getHeaders(),
+          body: JSON.stringify({ ids }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        showAlert('已删除 ' + (data.deleted ?? ids.length) + ' 条', 'success');
+        ensureDiscountFilterOptions(true);  // deleted merchants/subjects may now be gone → refresh options
+        loadDiscounts();
+      } catch (e) { showAlert('批量删除失败: ' + e.message, 'error'); }
+    }
+
+    async function bulkSetDiscountStatus(status) {
+      const ids = Array.from(discountSelected);
+      if (!ids.length) return;
+      const label = DISCOUNT_STATUS_META[status]?.label || status;
+      if (!confirm('将选中的 ' + ids.length + ' 条标记为「' + label + '」？')) return;
+      try {
+        const updates = ids.map(id => ({ discount_id: id, status }));
+        const res = await fetch('/api/extraction/discount-states/bulk', {
+          method: 'POST', headers: getHeaders(),
+          body: JSON.stringify({ updates }),
+        });
+        if (!res.ok) throw new Error();
+        showAlert('已批量更新', 'success');
+        loadDiscounts();
+      } catch (e) { showAlert('批量更新失败', 'error'); }
+    }
+
+    async function exportDiscountsCsv() {
+      try {
+        const recipient = (document.getElementById('discount-recipient-filter')?.value || '').trim();
+        const domain = (document.getElementById('discount-domain-filter')?.value || '').trim();
+        const subject = (document.getElementById('discount-subject-filter')?.value || '').trim();
+        const search = (document.getElementById('discount-search-filter')?.value || '').trim();
+        const dateFrom = (document.getElementById('discount-date-from')?.value || '').trim();
+        const dateTo = (document.getElementById('discount-date-to')?.value || '').trim();
+        const params = new URLSearchParams();
+        if (recipient) params.set('recipient', recipient);
+        if (domain) params.set('sender_domain', domain);
+        if (subject) params.set('subject', subject);
+        if (search) params.set('search', search);
+        if (dateFrom) params.set('date_from', dateFrom + ' 00:00:00');
+        if (dateTo) params.set('date_to', dateTo + ' 23:59:59');
+        const res = await fetch('/api/extraction/discounts/export?' + params.toString(), { headers: getHeaders() });
+        if (!res.ok) throw new Error();
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+        a.href = objUrl; a.download = 'discounts-' + today + '.csv';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+        showAlert('导出已开始下载', 'success');
+      } catch (e) { showAlert('导出失败', 'error'); }
     }
 
     // ============================================

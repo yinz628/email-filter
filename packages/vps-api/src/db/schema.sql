@@ -570,3 +570,19 @@ CREATE TABLE IF NOT EXISTS verification_codes (
 CREATE INDEX IF NOT EXISTS idx_verification_recipient ON verification_codes(recipient, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_verification_message_id ON verification_codes(message_id);
 CREATE INDEX IF NOT EXISTS idx_verification_created ON verification_codes(created_at DESC);
+
+-- 折扣码状态表（vps 侧轻量管理状态，与 extraction-worker 的 discount_codes 通过 discount_id 关联）
+-- 设计：extraction-worker 的 D1 是纯提取库（L1），本表只存「管理状态」(status/tags/favorite/note)，
+-- 不复制码内容。查询时前端把 worker 的折扣码记录与这里的状态按 discount_id 合并展示。
+-- 状态行按需创建（upsert）：只有被用户操作过的折扣码才有状态行，避免与 worker 数据漂移。
+CREATE TABLE IF NOT EXISTS discount_code_states (
+  discount_id INTEGER PRIMARY KEY,        -- 对应 extraction-worker D1 中 discount_codes.id
+  status TEXT NOT NULL DEFAULT 'active',  -- active | used | expired | archived
+  tags TEXT,                               -- 自由标签（逗号分隔）
+  favorite INTEGER NOT NULL DEFAULT 0,    -- 0/1 收藏标记
+  note TEXT,                               -- 备注
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_discount_states_status ON discount_code_states(status);
+CREATE INDEX IF NOT EXISTS idx_discount_states_favorite ON discount_code_states(favorite);

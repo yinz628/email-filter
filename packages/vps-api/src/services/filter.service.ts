@@ -96,21 +96,50 @@ export interface FilterResult {
   forwardTo?: string;
   reason?: string;
   /**
-   * Set when the matched forward rule has extractVerification=true. Signals
-   * the email-worker to extract a verification code/link from the body via
-   * the extraction-worker service binding. Mutually exclusive with discountRequired.
+   * Set when the matched rule (any category) has extractVerification=true.
+   * Signals the email-worker to extract a verification code/link from the body
+   * via the extraction-worker service binding. Mutually exclusive with
+   * discountRequired. Extraction is independent of the decision action: it
+   * happens for both forward and drop outcomes.
    */
   verificationRequired?: boolean;
   /**
-   * Set when the matched forward rule has extractDiscount=true.
+   * Set when the matched rule (any category) has extractDiscount=true.
    * Mutually exclusive with verificationRequired.
    */
   discountRequired?: boolean;
   /**
-   * The matched forward rule's ID, passed to extraction-worker to look up
-   * extraction config from D1.
+   * The matched rule's ID (any category), passed to extraction-worker to look
+   * up extraction config from D1.
    */
   ruleId?: string;
+}
+
+/**
+ * Extract the verification/discount flags + ruleId from a matched rule.
+ * Centralized so every decision branch (forward/whitelist/blacklist/dynamic)
+ * applies the same extraction semantics. Extraction is orthogonal to the
+ * rule's action — a drop rule can still trigger verification-code extraction.
+ *
+ * ruleId is only set when the rule actually requests extraction: it is the key
+ * the extraction-worker uses to look up its D1 config, so it is meaningless
+ * (and omitted) for rules that don't extract.
+ */
+function extractionFlagsFor(rule: FilterRule): {
+  verificationRequired?: boolean;
+  discountRequired?: boolean;
+  ruleId?: string;
+} {
+  const verificationRequired = rule.extractVerification === true;
+  const discountRequired = rule.extractDiscount === true;
+  if (!verificationRequired && !discountRequired) {
+    return {};
+  }
+  return {
+    verificationRequired,
+    discountRequired,
+    ruleId: rule.id,
+  };
 }
 
 /**
@@ -158,9 +187,7 @@ export function filterEmail(
       reason: `Matched forward rule: ${forwardMatch.pattern}`,
       // Extraction flags are mutually exclusive (enforced by rules.ts).
       // Only one of verification/discount can be set per rule.
-      verificationRequired: forwardMatch.extractVerification === true,
-      discountRequired: forwardMatch.extractDiscount === true,
-      ruleId: forwardMatch.id,
+      ...extractionFlagsFor(forwardMatch),
     };
   }
 
@@ -175,11 +202,16 @@ export function filterEmail(
       matchedCategory: 'whitelist',
       forwardTo,
       reason: `Matched whitelist rule: ${whitelistMatch.pattern}`,
+      // Extraction is orthogonal to category/action (see extractionFlagsFor).
+      ...extractionFlagsFor(whitelistMatch),
     };
   }
 
   // Step 2: Check blacklist - Requirements 4.2
-  // If email matches blacklist (and not whitelisted), drop it
+  // If email matches blacklist (and not whitelisted), drop it.
+  // Note: a blacklist rule may still carry extraction flags — the email is
+  // dropped, but the verification/discount code is extracted first (the
+  // email-worker reads the raw body before applying the drop decision).
   const blacklistMatch = matchesBlacklist(payload, grouped.blacklist);
   if (blacklistMatch) {
     return {
@@ -187,6 +219,7 @@ export function filterEmail(
       matchedRule: blacklistMatch,
       matchedCategory: 'blacklist',
       reason: `Matched blacklist rule: ${blacklistMatch.pattern}`,
+      ...extractionFlagsFor(blacklistMatch),
     };
   }
 
@@ -199,10 +232,12 @@ export function filterEmail(
       matchedRule: dynamicMatch,
       matchedCategory: 'dynamic',
       reason: `Matched dynamic rule: ${dynamicMatch.pattern}`,
+      ...extractionFlagsFor(dynamicMatch),
     };
   }
 
-  // Step 4: No match - forward to default destination - Requirements 4.4
+  // Step 4: No match - forward to default destination - Requirements 4.4.
+  // No rule matched, so there is no extraction config to apply.
   return {
     action: 'forward',
     forwardTo: defaultForwardTo,

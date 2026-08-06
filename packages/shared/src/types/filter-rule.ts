@@ -24,16 +24,18 @@ export interface FilterRule {
   matchMode: MatchMode;
   pattern: string;
   tags?: string[];  // Optional tags for organization
-  forwardTo?: string;  // Override default forwarding address when rule matches
+  forwardTo?: string;  // Override default forwarding address when rule matches. Optional for all categories; when omitted, the worker forwards to its DEFAULT_FORWARD_TO (for forward/whitelist) or drops (blacklist/dynamic).
   /**
-   * When true (forward rules only), the email-worker will extract a
-   * verification code/link from the message body via the extraction-worker.
+   * When true (any category), the email-worker will extract a verification
+   * code/link from the message body via the extraction-worker. Independent of
+   * the rule's action: extraction happens for both forward and drop decisions.
    * Mutually exclusive with extractDiscount.
    */
   extractVerification?: boolean;
   /**
-   * When true (forward rules only), the email-worker will extract a discount
-   * code/link from the message body via the extraction-worker.
+   * When true (any category), the email-worker will extract a discount
+   * code/link from the message body via the extraction-worker. Independent of
+   * the rule's action.
    * Mutually exclusive with extractVerification.
    */
   extractDiscount?: boolean;

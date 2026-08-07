@@ -10,7 +10,7 @@ Cloudflare Email Routing
 email-worker (Cloudflare Workers, 边缘轻量计算, <10ms CPU)
    ├─ POST /api/webhook/email → vps-api 取过滤决策 (forward/drop)
    ├─ message.forward() 转发邮件 / 或按决策丢弃
-   └─ [命中带提取标志的规则时] service binding 调 extraction-worker（与 forward/drop 无关）
+   └─ [命中 extract_* 类别规则时] service binding 调 extraction-worker（转发 + 提取）
         ↓ POST /extract (raw MIME + ruleId)
      extraction-worker (D1 存储: 解析 MIME → 正则提取验证码/折扣码 → 落库)
 vps-api (Fastify + SQLite, VPS 上唯一后端)
@@ -23,7 +23,7 @@ SQLite 持久化 + /admin 管理面板（验证码查询 + 折扣码分类管理
 
 - Worker 端有 4 秒超时，VPS 宕机时自动回退到默认转发，保证邮件不丢。
 - Webhook 采用两阶段处理：Phase 1 同步返回决策（<100ms 目标），Phase 2 异步落库与统计。
-- 提取与投递动作正交：丢弃的邮件也可提取验证码（blacklist + extractVerification）。
+- 提取是独立规则类别（extract_verification / extract_discount），命中即转发+提取；其他类别不提取。
 
 ## 包结构（pnpm workspace）
 
@@ -38,24 +38,34 @@ SQLite 持久化 + /admin 管理面板（验证码查询 + 折扣码分类管理
 ## 核心过滤优先级
 
 ```
-1. forward   (转发名单)   → 转发到 rule.forwardTo（选填，留空走默认地址，最高优先级）
-2. whitelist (白名单)     → 转发到 rule.forwardTo（若 Worker 开关开启）否则默认地址
-3. blacklist (黑名单)     → 静默丢弃
-4. dynamic   (动态规则)   → 静默丢弃（系统自动生成，超过阈值时拦截）
-5. 无匹配                  → 转发到默认地址
+1. forward             (转发名单)     → 转发到 rule.forwardTo（选填，留空走默认地址）
+2. extract_verification(提取验证码)   → 转发 + 提取验证码（类别即提取类型）
+3. extract_discount    (提取折扣码)   → 转发 + 提取折扣码（类别即提取类型）
+4. whitelist           (白名单)       → 转发到默认地址（不配转发地址）
+5. blacklist           (黑名单)       → 静默丢弃
+6. dynamic             (动态规则)     → 静默丢弃（系统自动生成，超过阈值时拦截）
+7. 无匹配                             → 转发到默认地址
 ```
 
 匹配维度：`sender` / `subject` / `domain` × `exact` / `contains` / `startsWith` / `endsWith` / `regex`。
 
-**forwardTo 全类别可选**：所有类别规则的「转发地址」均为选填。留空时，forward/whitelist 转发到 Worker 的 `DEFAULT_FORWARD_TO`；blacklist/dynamic 本就丢弃，地址不生效。
+**字段显隐矩阵**（管理面板规则表单按类别控制）：
+
+| 类别 | 转发地址 | 提取正则设置 |
+|------|---------|-------------|
+| 提取验证码 / 提取折扣码 | 选填（留空走默认地址）| ✅ 显示 |
+| 转发名单 | 选填（留空走默认地址）| ❌ |
+| 白名单 / 黑名单 | ❌（不配置）| ❌ |
+
+> 动态规则由系统自动生成，不出现在添加规则表单。
 
 **规则级转发覆写**：白名单等规则可携带 `forwardTo` 覆写默认地址，受 Worker 实例的 `ruleForwardEnabled` 开关门控（默认关闭）。详见 [`docs/specs/2026-07-23-rule-forward-override-spec.md`](docs/specs/2026-07-23-rule-forward-override-spec.md)。
 
 ## 验证码 / 折扣码提取
 
-**提取是与规则动作正交的独立能力**——任何类别（forward/whitelist/blacklist/dynamic）的规则都可勾选提取，提取在邮件投递决策**之前**读取正文（流单次消费），无论邮件最终是转发还是丢弃，提取都会执行（如：拦截垃圾邮件的同时抽取其中的验证码）。
+**提取是与转发/白名单/黑名单平级的独立规则类别**——通过「提取验证码」(`extract_verification`) 或「提取折扣码」(`extract_discount`) 类别实现。类别本身决定提取类型（单一数据源），无需额外勾选标志。其他类别（forward/whitelist/blacklist/dynamic）**不再具备提取能力**，每个类别单一职责。
 
-- **触发条件**：任意规则勾选 `extractVerification`（验证码）或 `extractDiscount`（折扣码），二者互斥。
+- **触发条件**：规则类别为 `extract_verification` 或 `extract_discount`。命中后邮件转发到默认/指定地址，并异步提取对应类型的码。
 - **提取方式**：
   - 填写 `codePattern` 正则 → 精确匹配（推荐，如 `\d{6}` 匹配 6 位验证码）
   - 留空 → 使用通用提取逻辑（识别常见验证码/折扣码格式，覆盖面广但不如正则精准）
@@ -64,13 +74,13 @@ SQLite 持久化 + /admin 管理面板（验证码查询 + 折扣码分类管理
   - vps-api 管理面板「验证码」/「折扣码」页面（折扣码含状态/收藏/标签管理，详见下节）
   - extraction-worker 独立面板 `/admin`
   - API `GET /api/extraction/codes`、`GET /api/extraction/codes/latest/:recipient`、`GET /api/extraction/discounts`
-- **配置同步**：在管理面板保存/更新带提取标志的规则时，vps-api 自动将提取配置（`extract_type` / `code_pattern` / `link_anchor_pattern`）推送到 extraction-worker D1，无需手动同步。
+- **配置同步**：在管理面板保存/更新 extract_* 类别规则时，vps-api 自动将提取配置（`extract_type` / `code_pattern` / `link_anchor_pattern`）推送到 extraction-worker D1，无需手动同步。
 
-> **提取与转发地址无关**：提取不再绑定 forward 类别，也不要求填写 forwardTo。一个典型的「只要验证码、不要邮件」规则：blacklist + `extractVerification`，邮件被丢弃但验证码仍被提取。
+> **类别即提取语义**：`extract_verification` 规则的 `extractVerification` 标志由类别强制为 true（后端校验保证），`extract_discount` 同理。这避免了类别与标志不一致的风险。
 >
 > **正则生成器**：管理面板规则表单提供「正则编辑器」，可粘贴真实样例自动生成候选正则并测试匹配，标志固定为不区分大小写。
 >
-> 架构变更详情见 [`docs/specs/2026-08-06-extraction-independence-and-discount-management-spec.md`](docs/specs/2026-08-06-extraction-independence-and-discount-management-spec.md)。
+> 架构演进：提取最初绑死 forward 类别 → 曾改为任意类别可叠加 → 现定格为独立第一公民类别（每个类别单一职责）。详见 [`docs/specs/2026-08-07-extract-first-class-category-spec.md`](docs/specs/2026-08-07-extract-first-class-category-spec.md)。
 
 ### 折扣码管理（vps 中心化）
 

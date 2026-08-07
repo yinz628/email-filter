@@ -309,38 +309,40 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 
 ### 规则类别与优先级
 
-| 优先级 | 类别 | forwardTo | 行为 |
-|--------|------|-----------|------|
+| 优先级 | 类别 | 转发地址 | 行为 |
+|--------|------|---------|------|
 | 最高 | 转发名单 (forward) | 选填 | 匹配后转发，填写则转指定地址，留空走默认地址 |
-| 高 | 白名单 (whitelist) | 选填 | 匹配后放行，填写后覆写默认转发地址 |
-| 中 | 黑名单 (blacklist) | 选填 | 匹配后静默丢弃（地址不生效）|
-| 低 | 动态规则 (dynamic) | 选填 | 系统自动生成，匹配后丢弃（地址不生效）|
+| 高 | 提取验证码 (extract_verification) | 选填 | 转发 + 提取验证码（类别即提取类型）|
+| 高 | 提取折扣码 (extract_discount) | 选填 | 转发 + 提取折扣码（类别即提取类型）|
+| 中 | 白名单 (whitelist) | 不配置 | 匹配后放行到默认地址 |
+| 中 | 黑名单 (blacklist) | 不配置 | 匹配后静默丢弃 |
+| 低 | 动态规则 (dynamic) | 不配置 | 系统自动生成，匹配后丢弃 |
 
-> 所有类别的 `forwardTo` 均可选。留空时 forward/whitelist 转发到 Worker 的 `DEFAULT_FORWARD_TO`。
+> 管理面板「添加规则」按类别控制字段显隐：extract_* 与 forward 显示转发地址（选填）；extract_* 额外显示提取正则设置；whitelist/blacklist 不配置转发地址。动态规则由系统生成，不在添加表单出现。
 
 ### 规则级转发地址覆写
 
 转发地址控制采用双层语义：
 
-1. **forward 规则的核心地址**：`forward` 类别规则的 `forwardTo` 在求值时始终生效，不受任何开关影响（属核心语义）。**留空时**回退到 Worker 的 `DEFAULT_FORWARD_TO`。
+1. **forward / extract_* 规则的转发地址**：`forwardTo` 选填，留空回退到 Worker 的 `DEFAULT_FORWARD_TO`。`forward` 与 `extract_*` 的 `forwardTo` 始终生效，不受开关影响。
 2. **其他规则的覆写地址**：白名单等规则的可选 `forwardTo` 属于「覆写」，受 Worker 实例的 `ruleForwardEnabled` 开关门控：
    - 在管理面板 Worker 编辑页开启「启用规则转发覆写」开关（数据库字段 `worker_instances.rule_forward_enabled`）
-   - 创建白名单规则时填写「转发地址」字段，命中后优先使用该地址
-   - **关闭 Worker 级开关后（默认状态），所有白名单规则的 forwardTo 被剥离忽略，统一使用默认地址** —— 保证升级后行为不变
-3. **管理入口**：规则的 `forward` 类别与 `forwardTo` 字段在管理面板的规则表单中配置；Worker 开关在 Worker 编辑表单中配置。
+   - **关闭 Worker 级开关后（默认状态），白名单等规则的 forwardTo 被剥离忽略，统一使用默认地址**
+3. **管理入口**：规则类别与 `forwardTo` 字段在管理面板的规则表单中配置；Worker 开关在 Worker 编辑表单中配置。
 
 > 相关规格文档见 `docs/specs/2026-07-23-rule-forward-override-{requirements,spec,task-list}.md`。
 
 ### 验证码 / 折扣码提取
 
-**提取是与规则动作正交的独立能力**——任意类别（forward/whitelist/blacklist/dynamic）的规则都可勾选提取。提取在投递决策前读取正文（流单次消费），无论邮件最终转发还是丢弃，提取都会执行（如 blacklist + extractVerification：丢弃邮件但仍抽取验证码）。
+**提取是与转发/白名单/黑名单平级的独立规则类别**——通过 `extract_verification` 或 `extract_discount` 类别实现。类别本身决定提取类型（单一数据源），其他类别不再具备提取能力（每个类别单一职责）。
 
 | 配置项 | 说明 |
 | --- | --- |
-| `extractVerification` | 勾选后提取验证码（与 extractDiscount 互斥）|
-| `extractDiscount` | 勾选后提取折扣码 |
+| 规则类别 | `extract_verification`（提取验证码）/ `extract_discount`（提取折扣码），二者择一 |
 | `codePattern` | 正则，如 `\d{6}`。留空则用通用提取逻辑 |
 | `linkAnchorPattern` | 链接锚文本正则（可选，提取验证/激活链接）|
+
+> `extractVerification` / `extractDiscount` 标志由类别强制决定（后端校验保证一致），无需手动设置。
 
 规则保存时 vps-api 自动把提取配置推送到 extraction-worker D1。提取结果存于 extraction-worker D1，经 `GET /api/extraction/codes`、`GET /api/extraction/discounts` 查询（vps 管理面板「验证码」/「🏷️ 折扣码」页面，或 extraction-worker 独立面板 `/admin`）。
 

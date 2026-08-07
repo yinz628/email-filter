@@ -1,7 +1,27 @@
 /**
  * Filter rule category types
+ *
+ * `extract_verification` / `extract_discount` are first-class categories whose
+ * category alone determines the extraction type (no separate flag needed).
+ * Semantically they behave like `forward` (mail forwarded to default/override
+ * address) plus an implicit extraction flag — kept as distinct categories so
+ * the UI can present "extraction" as a peer of forward/whitelist/blacklist.
  */
-export type RuleCategory = 'whitelist' | 'blacklist' | 'dynamic' | 'forward';
+export type RuleCategory =
+  | 'whitelist'
+  | 'blacklist'
+  | 'dynamic'
+  | 'forward'
+  | 'extract_verification'
+  | 'extract_discount';
+
+/** Categories that imply extraction (their category encodes the extraction type). */
+export const EXTRACT_CATEGORIES: readonly RuleCategory[] = ['extract_verification', 'extract_discount'];
+
+/** Whether a category is one of the extract_* categories. */
+export function isExtractCategory(category: RuleCategory): boolean {
+  return EXTRACT_CATEGORIES.includes(category);
+}
 
 /**
  * Match type - what field to match against

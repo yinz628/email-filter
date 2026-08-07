@@ -333,7 +333,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <option value="blacklist">黑名单</option>
             <option value="dynamic">动态规则</option>
           </select>
-          <button class="btn btn-primary" onclick="showModal('add-rule-modal')">+ 添加规则</button>
+          <button class="btn btn-primary" onclick="showModal('add-rule-modal'); toggleForwardToField();">+ 添加规则</button>
         </div>
         <div class="table-wrapper">
         <table>
@@ -1718,9 +1718,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div class="form-group">
             <label>规则类型 *</label>
             <select id="rule-category" required onchange="toggleForwardToField()">
-              <option value="blacklist">黑名单（拦截）</option>
-              <option value="whitelist">白名单（放行）</option>
+              <option value="extract_verification">提取验证码（转发+提取）</option>
+              <option value="extract_discount">提取折扣码（转发+提取）</option>
               <option value="forward">转发名单（指定地址）</option>
+              <option value="whitelist">白名单（放行）</option>
+              <option value="blacklist">黑名单（拦截）</option>
             </select>
           </div>
           <div class="form-group">
@@ -1755,24 +1757,22 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="email" id="rule-forward-to" placeholder="second@example.com（可选）">
           <p style="color:#888;font-size:12px;margin-top:5px">所有类别均选填。留空时：转发/白名单→各 Worker 默认地址；黑名单/动态→仅拦截不转发</p>
         </div>
-        <div class="form-group" id="add-extract-verification-group" style="display:none">
-          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
-            <input type="checkbox" id="rule-extract-verification" onchange="toggleExtractDiscountExclusive(this, 'rule-extract-discount')">
-            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（自动从正文提取验证码并存档）</span></span>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;margin-top:6px;">
-            <input type="checkbox" id="rule-extract-discount" onchange="toggleExtractDiscountExclusive(this, 'rule-extract-verification')">
-            <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥：自动从营销邮件提取折扣码）</span></span>
-          </label>
-          <p style="color:#888;font-size:11px;margin-top:6px">提取与规则动作独立：转发或拦截均可提取，不影响邮件投递。</p>
-          <div id="add-extract-patterns-group" style="display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-radius:4px;">
-            <label style="font-size:12px;font-weight:600;">验证码/折扣码正则（可选）</label>
+        <div class="form-group" id="add-extract-verification-group" style="display:none;border:1px solid #e0e7ff;border-radius:6px;padding:12px;background:#f8faff;">
+          <div style="font-weight:600;font-size:13px;color:#3730a3;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            📧 提取设置 <span style="color:#888;font-weight:normal;font-size:11px">（提取类型已由上方规则类型决定）</span>
+          </div>
+          <p style="color:#666;font-size:11px;margin:0 0 8px 0;">命中此规则的邮件将转发到默认/指定地址，并自动从正文提取对应类型的码。</p>
+          <div id="add-extract-patterns-group" style="margin-top:8px;padding-top:8px;border-top:1px dashed #ddd;">
+            <label style="font-size:12px;font-weight:600;">提取正则（可选）</label>
             <input type="text" id="rule-code-pattern" placeholder="如 \\d{6} 或 [A-Z0-9]{8,12}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
             <label style="font-size:12px;font-weight:600;margin-top:6px;">链接锚文本正则（可选）</label>
             <input type="text" id="rule-link-anchor-pattern" placeholder="如 I'M IN!|Join now|立即验证" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
             <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「正则编辑器」可自动生成并测试正则。</p>
             <button type="button" class="btn btn-sm btn-secondary" onclick="openRegexEditor('add')" style="margin-top:4px;">🔧 正则编辑器</button>
           </div>
+          <!-- 隐藏的提取标志占位：类别决定提取类型，无需用户勾选。保留 hidden checkbox 以兼容旧提交逻辑 -->
+          <input type="checkbox" id="rule-extract-verification" style="display:none">
+          <input type="checkbox" id="rule-extract-discount" style="display:none">
         </div>
         <button type="submit" class="btn btn-success">创建</button>
       </form>
@@ -1798,9 +1798,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <div class="form-group">
             <label>规则类型 *</label>
             <select id="edit-rule-category" required onchange="toggleEditForwardToField()">
-              <option value="blacklist">黑名单（拦截）</option>
-              <option value="whitelist">白名单（放行）</option>
+              <option value="extract_verification">提取验证码（转发+提取）</option>
+              <option value="extract_discount">提取折扣码（转发+提取）</option>
               <option value="forward">转发名单（指定地址）</option>
+              <option value="whitelist">白名单（放行）</option>
+              <option value="blacklist">黑名单（拦截）</option>
             </select>
           </div>
           <div class="form-group">
@@ -1835,24 +1837,21 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <input type="email" id="edit-rule-forward-to" placeholder="second@example.com（可选）">
           <p style="color:#888;font-size:12px;margin-top:5px">所有类别均选填。留空时：转发/白名单→各 Worker 默认地址；黑名单/动态→仅拦截不转发</p>
         </div>
-        <div class="form-group" id="edit-extract-verification-group" style="display:none">
-          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
-            <input type="checkbox" id="edit-rule-extract-verification" onchange="toggleExtractDiscountExclusive(this, 'edit-rule-extract-discount')">
-            <span>提取验证码/链接 <span style="color:#888;font-size:12px">（自动从正文提取验证码并存档）</span></span>
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;margin-top:6px;">
-            <input type="checkbox" id="edit-rule-extract-discount" onchange="toggleExtractDiscountExclusive(this, 'edit-rule-extract-verification')">
-            <span>提取折扣码 <span style="color:#888;font-size:12px">（与验证码互斥：自动从营销邮件提取折扣码）</span></span>
-          </label>
-          <p style="color:#888;font-size:11px;margin-top:6px">提取与规则动作独立：转发或拦截均可提取，不影响邮件投递。</p>
-          <div id="edit-extract-patterns-group" style="display:none;margin-top:8px;padding:8px;background:#f8f9fa;border-radius:4px;">
-            <label style="font-size:12px;font-weight:600;">验证码/折扣码正则（可选）</label>
+        <div class="form-group" id="edit-extract-verification-group" style="display:none;border:1px solid #e0e7ff;border-radius:6px;padding:12px;background:#f8faff;">
+          <div style="font-weight:600;font-size:13px;color:#3730a3;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            📧 提取设置 <span style="color:#888;font-weight:normal;font-size:11px">（提取类型已由上方规则类型决定）</span>
+          </div>
+          <p style="color:#666;font-size:11px;margin:0 0 8px 0;">命中此规则的邮件将转发到默认/指定地址，并自动从正文提取对应类型的码。</p>
+          <div id="edit-extract-patterns-group" style="margin-top:8px;padding-top:8px;border-top:1px dashed #ddd;">
+            <label style="font-size:12px;font-weight:600;">提取正则（可选）</label>
             <input type="text" id="edit-rule-code-pattern" placeholder="如 \\d{6}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
             <label style="font-size:12px;font-weight:600;margin-top:6px;">链接锚文本正则（可选）</label>
             <input type="text" id="edit-rule-link-anchor-pattern" placeholder="如 I'M IN!|Join now" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
             <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「正则编辑器」可自动生成并测试正则。</p>
             <button type="button" class="btn btn-sm btn-secondary" onclick="openRegexEditor('edit')" style="margin-top:4px;">🔧 正则编辑器</button>
           </div>
+          <input type="checkbox" id="edit-rule-extract-verification" style="display:none">
+          <input type="checkbox" id="edit-rule-extract-discount" style="display:none">
         </div>
         <button type="submit" class="btn btn-primary">保存</button>
       </form>
@@ -2788,7 +2787,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
       tbody.innerHTML = rules.map(r => {
         const cat = '<span class="category category-' + r.category + '">' +
-          (r.category === 'forward' ? '转发' : r.category === 'whitelist' ? '白名单' : r.category === 'blacklist' ? '黑名单' : '动态') + '</span>' +
+          (r.category === 'forward' ? '转发' : r.category === 'whitelist' ? '白名单' : r.category === 'blacklist' ? '黑名单' : r.category === 'extract_verification' ? '提取验证码' : r.category === 'extract_discount' ? '提取折扣码' : '动态') + '</span>' +
           (r.extractVerification ? ' <span style="font-size:11px;color:#0969da;" title="提取验证码/链接">🔐</span>' : '') +
           (r.extractDiscount ? ' <span style="font-size:11px;color:#e8590c;" title="提取折扣码">🏷️</span>' : '');
         const status = r.enabled ? '<span class="status status-enabled">启用</span>' : '<span class="status status-disabled">禁用</span>';
@@ -2809,33 +2808,45 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }).join('');
     }
 
+    /** extract_* categories encode the extraction type in the category itself. */
+    function isExtractCat(v) { return v === 'extract_verification' || v === 'extract_discount'; }
+
+    /** Field-visibility matrix per category (single source of truth for the form):
+     *   extract_*      → forwardTo (optional) + extract settings (regex area)
+     *   forward        → forwardTo (optional)
+     *   whitelist      → (nothing extra)
+     *   blacklist      → (nothing extra)
+     * Extraction is ONLY available via the extract_* categories — forwarding /
+     * whitelist / blacklist no longer carry extraction. */
+    function applyCategoryVisibility(category, forwardToGroup, forwardToInput, extractGroup) {
+      const showForwardTo = category === 'forward' || isExtractCat(category);
+      forwardToGroup.style.display = showForwardTo ? 'block' : 'none';
+      forwardToInput.required = false;
+      if (!showForwardTo) forwardToInput.value = '';
+      if (extractGroup) {
+        extractGroup.style.display = isExtractCat(category) ? 'block' : 'none';
+      }
+    }
+
     function toggleForwardToField() {
       const category = document.getElementById('rule-category').value;
-      const group = document.getElementById('add-forward-to-group');
-      const input = document.getElementById('rule-forward-to');
-      const extractGroup = document.getElementById('add-extract-verification-group');
-      // forwardTo is optional for ALL categories; always show the field so the
-      // user can override the default destination (only meaningful for
-      // forward/whitelist, but harmless elsewhere).
-      group.style.display = 'block';
-      input.required = false;
-      // Extraction is orthogonal to category — show the extract group always.
-      if (extractGroup) {
-        extractGroup.style.display = 'block';
-      }
+      applyCategoryVisibility(
+        category,
+        document.getElementById('add-forward-to-group'),
+        document.getElementById('rule-forward-to'),
+        document.getElementById('add-extract-verification-group'),
+      );
       updatePatternsVisibility('add');
     }
 
     function toggleEditForwardToField() {
       const category = document.getElementById('edit-rule-category').value;
-      const group = document.getElementById('edit-forward-to-group');
-      const input = document.getElementById('edit-rule-forward-to');
-      const extractGroup = document.getElementById('edit-extract-verification-group');
-      group.style.display = 'block';
-      input.required = false;
-      if (extractGroup) {
-        extractGroup.style.display = 'block';
-      }
+      applyCategoryVisibility(
+        category,
+        document.getElementById('edit-forward-to-group'),
+        document.getElementById('edit-rule-forward-to'),
+        document.getElementById('edit-extract-verification-group'),
+      );
       updatePatternsVisibility('edit');
     }
 
@@ -2855,14 +2866,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     /** Show/hide the patterns group based on whether any extraction checkbox is checked.
      *  The add-form uses bare ids ('rule-extract-verification', 'add-extract-patterns-group');
      *  the edit-form prefixes everything with 'edit-'. */
-    function updatePatternsVisibility(prefix) {
-      const idPrefix = prefix === 'edit' ? 'edit-' : '';
-      const verCheckbox = document.getElementById(idPrefix + 'rule-extract-verification');
-      const discCheckbox = document.getElementById(idPrefix + 'rule-extract-discount');
-      const patternsGroup = document.getElementById(prefix + '-extract-patterns-group');
-      if (!patternsGroup) return;
-      const anyChecked = (verCheckbox && verCheckbox.checked) || (discCheckbox && discCheckbox.checked);
-      patternsGroup.style.display = anyChecked ? 'block' : 'none';
+    /** Patterns area visibility is now driven solely by the extract_* category:
+     * the whole extract block (incl. regex area) is shown/hidden together by
+     * applyCategoryVisibility, so this is a no-op kept for call-site stability. */
+    function updatePatternsVisibility(_prefix) {
+      /* no-op: regex area visibility follows the extract block as a whole */
     }
 
     // ============================================
@@ -3012,8 +3020,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : undefined;
       const category = document.getElementById('rule-category').value;
       const forwardToValue = document.getElementById('rule-forward-to').value.trim();
-      const extractVerificationChecked = document.getElementById('rule-extract-verification')?.checked;
-      const extractDiscountChecked = document.getElementById('rule-extract-discount')?.checked;
+      // Extraction is ONLY available via extract_* categories. The category alone
+      // determines the type; other categories never carry extraction flags.
+      const extractVerificationChecked = category === 'extract_verification';
+      const extractDiscountChecked = category === 'extract_discount';
       const codePatternValue = document.getElementById('rule-code-pattern')?.value.trim();
       const linkAnchorValue = document.getElementById('rule-link-anchor-pattern')?.value.trim();
       const body = {
@@ -3125,8 +3135,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(t => t) : [];
       const forwardToValue = document.getElementById('edit-rule-forward-to').value.trim();
       const editCategory = document.getElementById('edit-rule-category').value;
-      const extractVerificationChecked = document.getElementById('edit-rule-extract-verification')?.checked;
-      const extractDiscountChecked = document.getElementById('edit-rule-extract-discount')?.checked;
+      // Extraction is ONLY available via extract_* categories.
+      const extractVerificationChecked = editCategory === 'extract_verification';
+      const extractDiscountChecked = editCategory === 'extract_discount';
       const editCodePattern = document.getElementById('edit-rule-code-pattern')?.value.trim();
       const editLinkAnchor = document.getElementById('edit-rule-link-anchor-pattern')?.value.trim();
       const body = {
@@ -8207,13 +8218,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       // Open add rule modal
       showModal('add-rule-modal');
-      
+
       // Pre-fill form fields
       document.getElementById('rule-match-type').value = 'subject';
       document.getElementById('rule-match-mode').value = 'exact';
       document.getElementById('rule-pattern').value = subject;
       document.getElementById('rule-tags').value = baseDomain;
       document.getElementById('rule-category').value = 'blacklist';
+      toggleForwardToField();
     }
 
     // Helper function to extract base domain (same logic as backend)

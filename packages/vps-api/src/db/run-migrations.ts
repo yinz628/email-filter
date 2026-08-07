@@ -536,6 +536,88 @@ function migrateFilterRulesForwardCategory(db: Database.Database): MigrationResu
 }
 
 /**
+ * Migration: extract_verification / extract_discount categories for filter_rules
+ * CHECK constraint. Adds two new first-class categories by recreating the table
+ * (existing rows preserved via explicit-column copy). Mirrors the
+ * migrateFilterRulesForwardCategory pattern. The new table definition must
+ * include ALL columns added by later ALTER migrations (extract_* + patterns),
+ * otherwise those columns would be lost on rebuild.
+ */
+function migrateFilterRulesExtractCategory(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.extract_category';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  // If an extract_* rule already exists, the constraint is already updated.
+  const hasExtract = db.prepare(
+    "SELECT COUNT(*) as c FROM filter_rules WHERE category IN ('extract_verification','extract_discount')"
+  ).get() as { c: number };
+  if (hasExtract.c > 0) {
+    return { name, status: 'skipped', message: 'extract categories already in use' };
+  }
+  // Check if the CHECK constraint already includes the new categories.
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='filter_rules'").get() as { sql: string };
+  if (schema.sql && schema.sql.includes("'extract_verification'")) {
+    return { name, status: 'skipped', message: 'CHECK constraint already includes extract categories' };
+  }
+  // Recreate table with the expanded CHECK constraint. New-table column list
+  // matches the current full schema (incl. extract_* + patterns added via ALTER).
+  // A previous failed run may have left a residual _new table; drop it first.
+  db.exec('PRAGMA foreign_keys=OFF');
+  db.exec('DROP TABLE IF EXISTS filter_rules_new');
+  db.exec(`
+    CREATE TABLE filter_rules_new (
+      id TEXT PRIMARY KEY,
+      worker_id TEXT,
+      category TEXT NOT NULL CHECK(category IN ('whitelist', 'blacklist', 'dynamic', 'forward', 'extract_verification', 'extract_discount')),
+      match_type TEXT NOT NULL CHECK(match_type IN ('sender', 'subject', 'domain')),
+      match_mode TEXT NOT NULL CHECK(match_mode IN ('exact', 'contains', 'startsWith', 'endsWith', 'regex')),
+      pattern TEXT NOT NULL,
+      tags TEXT,
+      forward_to TEXT,
+      extract_verification INTEGER NOT NULL DEFAULT 0,
+      extract_discount INTEGER NOT NULL DEFAULT 0,
+      code_pattern TEXT,
+      link_anchor_pattern TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_hit_at TEXT,
+      FOREIGN KEY (worker_id) REFERENCES worker_instances(id) ON DELETE CASCADE
+    );
+    INSERT INTO filter_rules_new (
+      id, worker_id, category, match_type, match_mode, pattern, tags, forward_to,
+      extract_verification, extract_discount, code_pattern, link_anchor_pattern,
+      enabled, created_at, updated_at, last_hit_at
+    )
+    SELECT
+      id, worker_id, category, match_type, match_mode, pattern, tags, forward_to,
+      COALESCE(extract_verification, 0),
+      COALESCE(extract_discount, 0),
+      code_pattern,
+      link_anchor_pattern,
+      COALESCE(enabled, 1),
+      COALESCE(created_at, datetime('now')),
+      COALESCE(updated_at, datetime('now')),
+      last_hit_at
+    FROM filter_rules;
+    DROP TABLE filter_rules;
+    ALTER TABLE filter_rules_new RENAME TO filter_rules;
+  `);
+  // Recreate indexes (dropped with the old table).
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_filter_rules_worker ON filter_rules(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_rules_worker ON filter_rules(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_rules_category ON filter_rules(category);
+    CREATE INDEX IF NOT EXISTS idx_rules_enabled ON filter_rules(enabled);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_rules_unique_forward
+      ON filter_rules(worker_id, category, match_type, match_mode, pattern, COALESCE(forward_to, ''));
+  `);
+  db.exec('PRAGMA foreign_keys=ON');
+  return { name, status: 'applied', message: 'extract categories added to CHECK constraint' };
+}
+
+/**
  * Migration: filter_rules unique index including forward_to (COALESCE)
  */
 function migrateFilterRulesUniqueForwardTo(db: Database.Database): MigrationResult {
@@ -735,6 +817,7 @@ const migrations: MigrationFn[] = [
   migrateFilterRulesForwardTo,
   migrateWorkerRuleForwardEnabled,
   migrateFilterRulesForwardCategory,
+  migrateFilterRulesExtractCategory,
   migrateFilterRulesUniqueForwardTo,
   migrateFilterRulesExtractVerification,
   migrateCreateVerificationCodesTable,

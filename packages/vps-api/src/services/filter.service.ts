@@ -12,7 +12,7 @@ import type {
   FilterDecision,
   RuleCategory,
 } from '@email-filter/shared';
-import { matchesRuleWebhook, findMatchingRuleWebhook } from '@email-filter/shared';
+import { matchesRuleWebhook, findMatchingRuleWebhook, isExtractCategory } from '@email-filter/shared';
 
 /**
  * Filter rules grouped by category
@@ -22,6 +22,8 @@ export interface GroupedRules {
   whitelist: FilterRule[];
   blacklist: FilterRule[];
   dynamic: FilterRule[];
+  /** extract_verification + extract_discount (both behave as forward+extract). */
+  extract: FilterRule[];
 }
 
 /**
@@ -33,6 +35,7 @@ export function groupRulesByCategory(rules: FilterRule[]): GroupedRules {
     whitelist: [],
     blacklist: [],
     dynamic: [],
+    extract: [],
   };
 
   for (const rule of rules) {
@@ -44,6 +47,10 @@ export function groupRulesByCategory(rules: FilterRule[]): GroupedRules {
       grouped.blacklist.push(rule);
     } else if (rule.category === 'dynamic') {
       grouped.dynamic.push(rule);
+    } else if (isExtractCategory(rule.category)) {
+      // extract_verification / extract_discount — handled together; their
+      // category determines the extraction type (see extractionFlagsFor).
+      grouped.extract.push(rule);
     }
   }
 
@@ -87,6 +94,17 @@ export function matchesDynamicList(payload: EmailWebhookPayload, dynamicRules: F
 }
 
 /**
+ * Check if email matches any extract_* rule (extract_verification or
+ * extract_discount). These behave like forward rules (mail forwarded to the
+ * override/default address) but additionally trigger extraction — the type is
+ * encoded in the matched rule's category.
+ */
+export function matchesExtractList(payload: EmailWebhookPayload, extractRules: FilterRule[]): FilterRule | undefined {
+  const result = findMatchingRuleWebhook(payload, extractRules);
+  return result.matched ? result.rule : undefined;
+}
+
+/**
  * Filter result with detailed information
  */
 export interface FilterResult {
@@ -116,28 +134,18 @@ export interface FilterResult {
 }
 
 /**
- * Extract the verification/discount flags + ruleId from a matched rule.
- * Centralized so every decision branch (forward/whitelist/blacklist/dynamic)
- * applies the same extraction semantics. Extraction is orthogonal to the
- * rule's action — a drop rule can still trigger verification-code extraction.
- *
- * ruleId is only set when the rule actually requests extraction: it is the key
- * the extraction-worker uses to look up its D1 config, so it is meaningless
- * (and omitted) for rules that don't extract.
+ * Build extraction flags for a matched extract_* rule. The category alone
+ * determines the extraction type (single source of truth). Called only from
+ * the extract_* decision branch — other categories never extract.
  */
 function extractionFlagsFor(rule: FilterRule): {
   verificationRequired?: boolean;
   discountRequired?: boolean;
-  ruleId?: string;
+  ruleId: string;
 } {
-  const verificationRequired = rule.extractVerification === true;
-  const discountRequired = rule.extractDiscount === true;
-  if (!verificationRequired && !discountRequired) {
-    return {};
-  }
   return {
-    verificationRequired,
-    discountRequired,
+    verificationRequired: rule.category === 'extract_verification',
+    discountRequired: rule.category === 'extract_discount',
     ruleId: rule.id,
   };
 }
@@ -185,9 +193,22 @@ export function filterEmail(
       matchedCategory: 'forward',
       forwardTo: forwardMatch.forwardTo || defaultForwardTo,
       reason: `Matched forward rule: ${forwardMatch.pattern}`,
-      // Extraction flags are mutually exclusive (enforced by rules.ts).
-      // Only one of verification/discount can be set per rule.
-      ...extractionFlagsFor(forwardMatch),
+    };
+  }
+
+  // Step 1b: Check extract_* rules (extract_verification / extract_discount).
+  // These are the ONLY categories that trigger extraction. They forward the
+  // mail (to override/default address) AND carry extraction flags. Priority
+  // sits between forward and whitelist.
+  const extractMatch = matchesExtractList(payload, grouped.extract);
+  if (extractMatch) {
+    return {
+      action: 'forward',
+      matchedRule: extractMatch,
+      matchedCategory: extractMatch.category,
+      forwardTo: extractMatch.forwardTo || defaultForwardTo,
+      reason: `Matched ${extractMatch.category} rule: ${extractMatch.pattern}`,
+      ...extractionFlagsFor(extractMatch),
     };
   }
 
@@ -202,16 +223,11 @@ export function filterEmail(
       matchedCategory: 'whitelist',
       forwardTo,
       reason: `Matched whitelist rule: ${whitelistMatch.pattern}`,
-      // Extraction is orthogonal to category/action (see extractionFlagsFor).
-      ...extractionFlagsFor(whitelistMatch),
     };
   }
 
   // Step 2: Check blacklist - Requirements 4.2
   // If email matches blacklist (and not whitelisted), drop it.
-  // Note: a blacklist rule may still carry extraction flags — the email is
-  // dropped, but the verification/discount code is extracted first (the
-  // email-worker reads the raw body before applying the drop decision).
   const blacklistMatch = matchesBlacklist(payload, grouped.blacklist);
   if (blacklistMatch) {
     return {
@@ -219,7 +235,6 @@ export function filterEmail(
       matchedRule: blacklistMatch,
       matchedCategory: 'blacklist',
       reason: `Matched blacklist rule: ${blacklistMatch.pattern}`,
-      ...extractionFlagsFor(blacklistMatch),
     };
   }
 
@@ -232,7 +247,6 @@ export function filterEmail(
       matchedRule: dynamicMatch,
       matchedCategory: 'dynamic',
       reason: `Matched dynamic rule: ${dynamicMatch.pattern}`,
-      ...extractionFlagsFor(dynamicMatch),
     };
   }
 

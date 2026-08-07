@@ -7,6 +7,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { CreateRuleDTO, UpdateRuleDTO, RuleCategory } from '@email-filter/shared';
+import { isExtractCategory } from '@email-filter/shared';
 import { RuleRepository } from '../db/rule-repository.js';
 import { StatsRepository } from '../db/stats-repository.js';
 import { LogRepository } from '../db/log-repository.js';
@@ -50,7 +51,10 @@ async function pushExtractionRule(
 }
 
 // Valid values for validation
-const VALID_CATEGORIES: RuleCategory[] = ['whitelist', 'blacklist', 'dynamic', 'forward'];
+const VALID_CATEGORIES: RuleCategory[] = [
+  'whitelist', 'blacklist', 'dynamic', 'forward',
+  'extract_verification', 'extract_discount',
+];
 const VALID_MATCH_TYPES = ['sender', 'subject', 'domain'];
 const VALID_MATCH_MODES = ['exact', 'contains', 'startsWith', 'endsWith', 'regex'];
 
@@ -83,16 +87,21 @@ export function validateCreateRule(body: unknown): { valid: boolean; error?: str
   const category = data.category as RuleCategory;
   const forwardTo = typeof data.forwardTo === 'string' && data.forwardTo.trim() ? data.forwardTo : undefined;
 
-  // Extraction flags are orthogonal to the rule's action/category: any rule can
-  // trigger extraction (verification OR discount). Extraction happens regardless
-  // of whether the email is forwarded or dropped (email-worker reads the raw body
-  // before acting on the decision).
-  const extractVerification = data.extractVerification === true;
-  const extractDiscount = data.extractDiscount === true;
-
-  // Mutually exclusive: a rule can extract verification OR discount, not both.
-  if (extractVerification && extractDiscount) {
-    return { valid: false, error: 'extractVerification and extractDiscount are mutually exclusive' };
+  // Extraction is available ONLY via the extract_* categories (single source of
+  // truth: the category encodes the extraction type). forward/whitelist/blacklist
+  // /dynamic must NOT carry extraction flags — if provided they are rejected to
+  // keep the model unambiguous (each category has one job).
+  let extractVerification: boolean;
+  let extractDiscount: boolean;
+  if (isExtractCategory(category)) {
+    extractVerification = category === 'extract_verification';
+    extractDiscount = category === 'extract_discount';
+  } else {
+    if (data.extractVerification === true || data.extractDiscount === true) {
+      return { valid: false, error: 'extraction is only available via the extract_verification / extract_discount categories' };
+    }
+    extractVerification = false;
+    extractDiscount = false;
   }
 
   // codePattern / linkAnchorPattern: optional regex strings for extraction config.
@@ -191,6 +200,22 @@ export function validateUpdateRule(body: unknown): { valid: boolean; error?: str
     } else {
       updateData.tags = [];
     }
+  }
+
+  // Extraction is ONLY available via extract_* categories.
+  // - If category is being changed TO extract_*: force the matching flag on.
+  // - If category is being changed to a NON-extract category: forbid carrying
+  //   extraction flags (the model is single-purpose per category).
+  if (updateData.category && isExtractCategory(updateData.category)) {
+    updateData.extractVerification = updateData.category === 'extract_verification';
+    updateData.extractDiscount = updateData.category === 'extract_discount';
+  } else if (updateData.category) {
+    if (updateData.extractVerification === true || updateData.extractDiscount === true) {
+      return { valid: false, error: 'extraction is only available via the extract_verification / extract_discount categories' };
+    }
+    // Switching to a non-extract category clears any prior extraction flags.
+    updateData.extractVerification = false;
+    updateData.extractDiscount = false;
   }
 
   // Mutually exclusive: a rule can extract verification OR discount, not both.

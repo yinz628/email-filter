@@ -558,7 +558,7 @@ describe('FilterService', () => {
   describe('verificationRequired flag passing', () => {
     const customForward = 'verify-bucket@example.com';
 
-    it('forward rule with extractVerification=true sets verificationRequired', () => {
+    it('extract_verification rule sets verificationRequired', () => {
       const payload: EmailWebhookPayload = {
         from: 'noreply@svc.com',
         to: 'me@example.com',
@@ -566,27 +566,26 @@ describe('FilterService', () => {
         messageId: 'mid-1',
         timestamp: 1,
       };
-      const fwdRule: FilterRule = {
+      const rule: FilterRule = {
         id: crypto.randomUUID(),
-        category: 'forward',
+        category: 'extract_verification',
         matchType: 'sender',
         matchMode: 'contains',
         pattern: 'svc.com',
         forwardTo: customForward,
-        extractVerification: true,
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
-      const result = filterEmail(payload, [fwdRule], 'default@example.com');
+      const result = filterEmail(payload, [rule], 'default@example.com');
 
       expect(result.action).toBe('forward');
       expect(result.forwardTo).toBe(customForward);
       expect(result.verificationRequired).toBe(true);
     });
 
-    it('forward rule WITHOUT extractVerification does not set verificationRequired', () => {
+    it('forward rule does not set verificationRequired (extraction is extract_* only)', () => {
       const payload: EmailWebhookPayload = {
         from: 'noreply@svc.com',
         to: 'me@example.com',
@@ -601,7 +600,6 @@ describe('FilterService', () => {
         matchMode: 'contains',
         pattern: 'svc.com',
         forwardTo: customForward,
-        // extractVerification omitted / falsy
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -621,20 +619,19 @@ describe('FilterService', () => {
         messageId: 'mid-3',
         timestamp: 3,
       };
-      const fwdRule: FilterRule = {
+      const rule: FilterRule = {
         id: crypto.randomUUID(),
-        category: 'forward',
+        category: 'extract_verification',
         matchType: 'sender',
         matchMode: 'contains',
         pattern: 'svc.com',
         forwardTo: customForward,
-        extractVerification: true,
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
       const service = new FilterService('default@example.com');
-      const result = service.processEmail(payload, [fwdRule]);
+      const result = service.processEmail(payload, [rule]);
       const decision = service.toApiResponse(result);
 
       expect(decision.action).toBe('forward');
@@ -649,7 +646,7 @@ describe('FilterService', () => {
    * flags + ruleId regardless of whether the email is forwarded or dropped.
    * Also: forwardTo is optional for ALL categories now.
    */
-  describe('extraction independence from category/action', () => {
+  describe('extraction is exclusive to extract_* categories', () => {
     const makeRule = (overrides: Partial<FilterRule>): FilterRule => ({
       id: crypto.randomUUID(),
       category: 'blacklist',
@@ -669,49 +666,112 @@ describe('FilterService', () => {
       timestamp: 1,
     });
 
-    it('whitelist rule with extractVerification forwards AND sets the flag', () => {
-      const rule = makeRule({ category: 'whitelist', extractVerification: true });
+    it('forward rule does NOT extract (even if a stale flag is present on the row)', () => {
+      // Extraction is decided by category alone now; a leftover flag on a
+      // non-extract category must be ignored.
+      const rule = makeRule({ category: 'forward', extractVerification: true });
+      const result = filterEmail(makePayload('f-1'), [rule], 'default@example.com');
+      expect(result.action).toBe('forward');
+      expect(result.verificationRequired).not.toBe(true);
+      expect(result.ruleId).toBeUndefined();
+    });
+
+    it('whitelist rule does NOT extract', () => {
+      const rule = makeRule({ category: 'whitelist' });
       const result = filterEmail(makePayload('w-1'), [rule], 'default@example.com');
       expect(result.action).toBe('forward');
-      expect(result.matchedCategory).toBe('whitelist');
-      expect(result.verificationRequired).toBe(true);
-      expect(result.ruleId).toBe(rule.id);
+      expect(result.verificationRequired).not.toBe(true);
+      expect(result.ruleId).toBeUndefined();
     });
 
-    it('blacklist rule with extractDiscount drops BUT still sets the flag', () => {
-      // Extraction happens even when the email is dropped — the email-worker
-      // reads the raw body before applying the drop decision.
-      const rule = makeRule({ category: 'blacklist', extractDiscount: true });
+    it('blacklist rule does NOT extract', () => {
+      const rule = makeRule({ category: 'blacklist' });
       const result = filterEmail(makePayload('b-1'), [rule], 'default@example.com');
       expect(result.action).toBe('drop');
-      expect(result.matchedCategory).toBe('blacklist');
-      expect(result.discountRequired).toBe(true);
-      expect(result.ruleId).toBe(rule.id);
-    });
-
-    it('dynamic rule with extractVerification drops BUT still sets the flag', () => {
-      const rule = makeRule({ category: 'dynamic', extractVerification: true });
-      const result = filterEmail(makePayload('d-1'), [rule], 'default@example.com');
-      expect(result.action).toBe('drop');
-      expect(result.verificationRequired).toBe(true);
-      expect(result.ruleId).toBe(rule.id);
+      expect(result.discountRequired).not.toBe(true);
+      expect(result.ruleId).toBeUndefined();
     });
 
     it('forward rule WITHOUT forwardTo falls back to default address', () => {
-      // forwardTo is now optional for every category, including forward.
       const rule = makeRule({ category: 'forward' }); // no forwardTo
-      const result = filterEmail(makePayload('f-1'), [rule], 'default@example.com');
+      const result = filterEmail(makePayload('f-2'), [rule], 'default@example.com');
       expect(result.action).toBe('forward');
       expect(result.forwardTo).toBe('default@example.com');
     });
+  });
 
-    it('rule without extraction flags yields no extraction signals', () => {
-      const rule = makeRule({ category: 'whitelist' });
-      const result = filterEmail(makePayload('n-1'), [rule], 'default@example.com');
-      expect(result.verificationRequired).not.toBe(true);
+  /**
+   * Feature: extract_* first-class categories. Their category alone determines
+   * the extraction type; they forward the mail (to override/default address)
+   * and trigger extraction. Priority sits between forward and whitelist.
+   */
+  describe('extract_* first-class categories', () => {
+    const makeRule = (overrides: Partial<FilterRule>): FilterRule => ({
+      id: crypto.randomUUID(),
+      category: 'extract_verification',
+      matchType: 'sender',
+      matchMode: 'contains',
+      pattern: 'svc.com',
+      enabled: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+    const makePayload = (mid: string): EmailWebhookPayload => ({
+      from: 'noreply@svc.com',
+      to: 'me@example.com',
+      subject: 'x',
+      messageId: mid,
+      timestamp: 1,
+    });
+
+    it('extract_verification forwards AND sets verificationRequired', () => {
+      const rule = makeRule({ category: 'extract_verification' });
+      const result = filterEmail(makePayload('ev-1'), [rule], 'default@example.com');
+      expect(result.action).toBe('forward');
+      expect(result.forwardTo).toBe('default@example.com'); // no forwardTo → default
+      expect(result.verificationRequired).toBe(true);
       expect(result.discountRequired).not.toBe(true);
-      // ruleId is only meaningful for extraction, so it should be undefined here.
-      expect(result.ruleId).toBeUndefined();
+      expect(result.ruleId).toBe(rule.id);
+    });
+
+    it('extract_discount forwards AND sets discountRequired', () => {
+      const rule = makeRule({ category: 'extract_discount', pattern: 'deals.com' });
+      const payload: EmailWebhookPayload = { from: 'deals@deals.com', to: 'me@example.com', subject: 'x', messageId: 'ed-1', timestamp: 1 };
+      const result = filterEmail(payload, [rule], 'default@example.com');
+      expect(result.action).toBe('forward');
+      expect(result.discountRequired).toBe(true);
+      expect(result.verificationRequired).not.toBe(true);
+    });
+
+    it('extract rule with forwardTo overrides the default address', () => {
+      const rule = makeRule({ forwardTo: 'bucket@example.com' });
+      const result = filterEmail(makePayload('ef-1'), [rule], 'default@example.com');
+      expect(result.forwardTo).toBe('bucket@example.com');
+    });
+
+    it('forward rule takes priority over extract rule', () => {
+      // Same sender matches both; forward (more specific routing) wins.
+      const fwd = makeRule({ id: crypto.randomUUID(), category: 'forward', pattern: 'svc.com' });
+      const ext = makeRule({ id: crypto.randomUUID(), category: 'extract_verification', pattern: 'svc.com' });
+      const result = filterEmail(makePayload('prio-1'), [fwd, ext], 'default@example.com');
+      expect(result.matchedCategory).toBe('forward');
+    });
+
+    it('extract rule takes priority over whitelist/blacklist', () => {
+      const ext = makeRule({ category: 'extract_verification', pattern: 'svc.com' });
+      const wl = makeRule({ id: crypto.randomUUID(), category: 'whitelist', pattern: 'svc.com' });
+      const result = filterEmail(makePayload('prio-2'), [ext, wl], 'default@example.com');
+      expect(result.matchedCategory).toBe('extract_verification');
+      expect(result.verificationRequired).toBe(true);
+    });
+
+    it('extraction type comes from category even if flags are not set on the row', () => {
+      // Defensive: category is the single source of truth; stale/missing flags
+      // must not suppress extraction for an extract_* category.
+      const rule = makeRule({ category: 'extract_verification', extractVerification: undefined });
+      const result = filterEmail(makePayload('def-1'), [rule], 'default@example.com');
+      expect(result.verificationRequired).toBe(true);
     });
   });
 });

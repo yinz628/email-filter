@@ -275,11 +275,12 @@ describe('findLinkByUrlPattern', () => {
     expect(result).toBe('https://app.io/verify?t=1');
   });
 
-  it('skips noise URLs even if they match the pattern', () => {
+  it('returns first match even if it looks like noise (user pattern is authoritative)', () => {
+    // When the user provides an explicit URL pattern, we trust their intent
+    // and do NOT apply the generic noise filter — the user's regex is precise.
     const urls = ['https://x.io/unsubscribe?t=1', 'https://app.io/verify?t=1'];
     const result = findLinkByUrlPattern(urls, '(unsubscribe|verify)');
-    // Should return verify, not unsubscribe (noise-filtered)
-    expect(result).toBe('https://app.io/verify?t=1');
+    expect(result).toBe('https://x.io/unsubscribe?t=1');
   });
 
   it('returns undefined when no URL matches', () => {

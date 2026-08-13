@@ -503,7 +503,10 @@ export function findLinkByUrlPattern(urls: string[], urlPattern: string): string
     return undefined;
   }
   for (const url of urls) {
-    if (re.test(url) && !LINK_NOISE_RE.test(url)) {
+    // When the user provides an explicit URL pattern, we trust their intent
+    // and do NOT apply LINK_NOISE_RE — the user's regex is precise enough.
+    // (The noise filter is only for the generic heuristic that guesses URLs.)
+    if (re.test(url)) {
       return url;
     }
   }

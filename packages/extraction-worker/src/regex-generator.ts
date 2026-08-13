@@ -90,6 +90,13 @@ export function suggestPatterns(target: string): PatternSuggestion[] {
   const suggestions: PatternSuggestion[] = [];
   const trimmed = target.trim();
 
+  // ========== 0. URL detection (early return — URL is fundamentally different) ==========
+  // URLs contain :// and path separators that make all code-pattern branches
+  // produce garbage. Delegate entirely to the URL-specific generator.
+  if (/^https?:\/\//i.test(trimmed)) {
+    return suggestUrlPatterns(trimmed);
+  }
+
   // ========== 1. Prefix detection (highest confidence) ==========
   for (const { regex, prefix, name } of PREFIX_ENTRIES) {
     const match = trimmed.match(regex);
@@ -221,11 +228,6 @@ export function suggestPatterns(target: string): PatternSuggestion[] {
       description: 'UUID 格式',
       confidence: 0.95,
     });
-  }
-
-  // ========== 8. URL (verification/discount links) ==========
-  if (/^https?:\/\//i.test(trimmed)) {
-    suggestions.push(...suggestUrlPatterns(trimmed));
   }
 
   // Sort + limit

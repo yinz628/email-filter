@@ -126,14 +126,14 @@ describe('suggestUrlPatterns', () => {
 });
 
 describe('suggestPatterns — URL integration', () => {
-  it('suggestPatterns detects URL and delegates to URL branch', () => {
+  it('suggestPatterns detects URL and delegates entirely to URL branch', () => {
     const url = 'https://app.io/verify?code=482913';
     const suggestions = suggestPatterns(url);
     // URL patterns should be present
     expect(suggestions.some((s) => s.pattern.includes('app\\.io'))).toBe(true);
-    // Top suggestion should be URL-specific (highest confidence), not a generic code pattern
-    const topPattern = suggestions[0].pattern;
-    expect(topPattern.includes('app\\.io') || topPattern.includes('code=')).toBe(true);
+    // Should NOT contain any code-style patterns (early return prevents mixing)
+    expect(suggestions.some((s) => s.pattern.includes('[A-Z0-9]{'))).toBe(false);
+    expect(suggestions.some((s) => s.description.includes('优惠码'))).toBe(false);
   });
 });
 

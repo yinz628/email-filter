@@ -326,4 +326,11 @@ describe('extract — linkUrlPattern integration', () => {
     const r = extract('Verify', undefined, html, 'verification', undefined, 'Confirm', 'app\\.io');
     expect(r.link).toBe('https://app.io/real-verify?t=1');
   });
+
+  it('unwraps awstrack tracking URL in extraction result', () => {
+    // The extracted link should be the decoded real URL, not the awstrack wrapper.
+    const text = 'https://s8qexllb.r.us-west-2.awstrack.me/L0/https:%2F%2Fwww.neimanmarcus.com%2Fmanage-accounts%2Fv1%2Fconfirm-user-email%3Fcode=385946/1/0101019ff88016b2/sig=474';
+    const r = extract('Verify', text, undefined, 'verification', undefined, undefined, 'confirm-user-email');
+    expect(r.link).toBe('https://www.neimanmarcus.com/manage-accounts/v1/confirm-user-email?code=385946');
+  });
 });

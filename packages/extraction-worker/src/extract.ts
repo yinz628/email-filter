@@ -26,6 +26,7 @@
  */
 
 import type { ExtractedCode, ExtractionResult, ExtractionSource } from './types.js';
+import { unwrapTrackingUrl } from './regex-generator.js';
 
 // ============================================
 // Prefix patterns (Layer 1 — strong signal)
@@ -692,7 +693,7 @@ export function extract(
     const extractedCode = code && source ? { value: code, source } : undefined;
     return {
       code: extractedCode,
-      link: effectiveLink,
+      link: effectiveLink ? unwrapTrackingUrl(effectiveLink) : effectiveLink,
       discountValue,
       extractedAt: new Date().toISOString(),
     };
@@ -727,7 +728,7 @@ export function extract(
   const extractedCode = code && source ? { value: code, source } : undefined;
   return {
     code: extractedCode,
-    link,
+    link: link ? unwrapTrackingUrl(link) : link,
     extractedAt: new Date().toISOString(),
   };
 }

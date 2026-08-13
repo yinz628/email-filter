@@ -341,14 +341,17 @@ cp /opt/email-filter/data/filter.db /opt/email-filter/backups/filter-$(date +%Y%
 | 规则类别 | `extract_verification`（提取验证码）/ `extract_discount`（提取折扣码），二者择一 |
 | `codePattern` | 正则，如 `\d{6}`。留空则用通用提取逻辑 |
 | `linkAnchorPattern` | 链接锚文本正则（可选，提取验证/激活链接）|
+| `linkUrlPattern` | 链接 URL 正则（可选，按 URL 形状精确匹配验证/激活链接。优先级介于 anchor 与通用启发式之间）|
 
 > `extractVerification` / `extractDiscount` 标志由类别强制决定（后端校验保证一致），无需手动设置。
+
+**链接提取优先级**：`linkAnchorPattern`（锚文本）> `linkUrlPattern`（URL 正则）> 通用启发式（URL 路径动词检测）。三个层次互为兜底，配置越多越精准。AWS SES `awstrack.me` 等跟踪包装 URL 会在正则生成和结果落库时自动解码为真实 URL。
 
 规则保存时 vps-api 自动把提取配置推送到 extraction-worker D1。提取结果存于 extraction-worker D1，经 `GET /api/extraction/codes`、`GET /api/extraction/discounts` 查询（vps 管理面板「验证码」/「🏷️ 折扣码」页面，或 extraction-worker 独立面板 `/admin`）。
 
 **折扣码管理状态**：vps-api 的 `discount_code_states` 表（status/tags/favorite/note）与 worker 的 `discount_codes` 通过 `discount_id` 松耦合关联——worker 保持纯提取库，管理状态全在 vps 侧。详见 README「折扣码管理」。
 
-> 生产排障提示：若规则命中但 D1 无记录，优先检查 `codePattern` 是否匹配邮件正文格式。通用逻辑（codePattern 留空）对非标准格式可能识别不到，建议配明确正则；可用管理面板「正则编辑器」从样例生成并测试。
+> 生产排障提示：若规则命中但 D1 无记录，优先检查 `codePattern` 是否匹配邮件正文格式。通用逻辑（codePattern 留空）对非标准格式可能识别不到，建议配明确正则；可用管理面板「正则编辑器」（支持验证码/折扣码与验证链接双模式）从样例生成并测试。
 
 ## 排障
 
@@ -384,6 +387,54 @@ sudo journalctl -u email-filter-api -f
    只在 `.env` 配、而 compose 不透传，容器内 `process.env` 仍是空 → 503。
 3. 改完 compose 必须重建容器（`docker compose up -d`，环境变量改变不会热加载）。
 4. 验证容器内确实拿到：`docker compose exec api env | grep EXTRACTION`。
+
+### 提取规则命中但 D1 无记录 / link_url_pattern 不生效
+
+规则命中且邮件转发成功，但提取结果为空或 `link_url_pattern` 不生效，常见原因是 **extraction-worker 的 D1 表缺少新增列**：
+
+- `CREATE TABLE IF NOT EXISTS` 对**已存在的表是 no-op**——Cloudflare D1 只在首次建表时执行 `schema.sql`，后续加列不会自动 ALTER。
+- 当 extraction-worker 的 `schema.sql` 新增了列（如 `link_url_pattern`）但表已存在时，需手动 ALTER：
+
+```bash
+cd packages/extraction-worker
+npx wrangler d1 execute extraction-db --remote --command \
+  "ALTER TABLE extraction_rules ADD COLUMN link_url_pattern TEXT"
+```
+
+验证列已存在：
+
+```bash
+npx wrangler d1 execute extraction-db --remote --command \
+  "PRAGMA table_info(extraction_rules)"
+```
+
+> 与 vps-api 不同，extraction-worker 目前没有幂等迁移机制（vps-api 的 `run-migrations.ts` 会检测列存在再 ALTER）。修改 extraction-worker schema 后，生产 D1 需手动同步。
+
+### 某域名的邮件不触发提取
+
+某个域名的邮件命中了 extract_* 规则但完全不触发提取（日志无 `[EXTRACTION]` 输出），通常是因为 **该域名的 email-worker 实例运行的是旧代码**：
+
+- 系统有多个 email-worker 实例（每个域名一个 `wrangler.<name>.toml`），每个需**单独部署**。
+- `deploy-all.sh` 部署全部，但若只部署了主 worker，其他域名仍是旧版本。
+- 排查：在 Cloudflare Dashboard → Workers → 对应的 `email-filter-forwarder-*` → 查看部署时间，确认是否为最新。
+
+```bash
+cd packages/email-worker
+# 部署单个域名（替换 <name>）
+npx wrangler deploy --config wrangler.<name>.toml
+# 或部署全部
+bash scripts/deploy-all.sh workers
+```
+
+确认 worker 配置中有 `EXTRACTION_WORKER` service binding（缺失时会静默跳过提取）：
+
+```bash
+grep -A2 "EXTRACTION_WORKER" wrangler.<name>.toml
+```
+
+### 提取到的链接是 awstrack.me 跟踪包装而非真实 URL
+
+若提取结果中的 link 形如 `https://xxx.r.us-west-2.awstrack.me/L0/https%3A...`，说明提取引擎未解码跟踪包装。`unwrapTrackingUrl()` 在 `extract()` 返回值处自动解码 AWS SES awstrack.me 格式。确认部署的是最新版 extraction-worker（2026-08-13 及之后的版本）。
 
 ### better-sqlite3 编译问题
 

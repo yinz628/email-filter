@@ -74,6 +74,40 @@
 /[.*+?^${}()|[\]\\/]/g → \$
 ```
 
+### 3.3 跟踪包装 URL 解码（`unwrapTrackingUrl`）
+
+邮件服务商（尤其 AWS SES）会把真实链接包装成跟踪 URL 再嵌入邮件。AWS SES 的 `awstrack.me` 格式：
+
+```
+https://{sub}.r.{region}.awstrack.me/L0/{percent-encoded-real-url}/{segment-number}/{tracking-uuid}/{signature}
+```
+
+`new URL()` 只能解析这种 URL，但会把 percent-encoded 真实链接放进 `pathname`（而非 query），导致后续基于 pathname 的正则生成匹配到编码后的乱码。
+
+`unwrapTrackingUrl(rawUrl)` 在两处使用，确保用户始终面对真实 URL：
+
+| 使用点 | 文件 | 作用 |
+|--------|------|------|
+| 正则候选生成前 | `regex-generator.ts` → `suggestUrlPatterns()` | 解码后再分析域名/路径/参数，生成的候选针对真实 URL |
+| 提取结果返回时 | `extract.ts` → `extract()` 返回值 | 落库的 link 是解码后的真实 URL，而非 awstrack 包装 |
+
+```ts
+export function unwrapTrackingUrl(rawUrl: string): string {
+  const m = rawUrl.match(
+    /^https?:\/\/[^/]+\.r\.[a-z]+-[a-z]+-\d\.awstrack\.me\/L0\/(.+?)\/\d+\//i
+  );
+  if (m) {
+    try {
+      const decoded = decodeURIComponent(m[1]);
+      if (/^https?:\/\//i.test(decoded)) return decoded;
+    } catch { /* fall through */ }
+  }
+  return rawUrl;
+}
+```
+
+> **awstrack 尾段不是链接内容**：`/L0/{url}/1/{uuid}/{sig}` 中的 `/{n}/{uuid}/{sig}` 是 AWS SES 的投递追踪元数据（分片号/投递 ID/签名），不属于真实链接。保留 query 参数的 URL 若拼接这些尾段会破坏 `?key=value` 解析。因此解码时只取 `/L0/` 到 `/{number}/` 之间的段。
+
 ## 4. 提取优先级链
 
 `extract()` 的链接提取优先级更新为三层：
@@ -89,11 +123,20 @@
 ```ts
 export function findLinkByUrlPattern(urls: string[], urlPattern: string): string | undefined {
   // 编译用户正则（无效则返回 undefined）
-  // 遍历所有候选 URL，返回第一个匹配且非噪声的
+  // 遍历所有候选 URL，返回第一个匹配的
+  // 注意：不应用 LINK_NOISE_RE 过滤——用户正则是权威配置
 }
 ```
 
 与 `findLinkByAnchorPattern` 的区别：后者匹配锚**文本**，前者匹配 URL **本身**。
+
+**关键原则：用户正则是权威的。** `findLinkByUrlPattern` **不**应用 `LINK_NOISE_RE` 噪声过滤。原因是用户在正则编辑器里选中目标 URL 并生成正则后，该正则已经精确表达了意图——如果它匹配了某个含 "manage" / "account" 等所谓"噪声词"的 URL（如 Neiman Marcus 案例的 `/manage-accounts/v1/confirm-user-email`），那是用户**想要**的结果。通用启发式（`findVerificationLink`）保留噪声过滤，因为它需要从一堆 footer 链接中猜出真正的 CTA。
+
+| 函数 | 应用 LINK_NOISE_RE？ | 原因 |
+|------|---------------------|------|
+| `findLinkByUrlPattern` | ❌ 不应用 | 用户正则是权威配置，噪声过滤会误杀（如 "manage-accounts" 中的 "manage" 子串） |
+| `findLinkByAnchorPattern` | ✅ 应用 | 锚文本正则可能过宽，仍需噪声过滤辅助 |
+| `findVerificationLink`（通用） | ✅ 应用 | 无用户配置，需噪声过滤排除 footer 链接 |
 
 ### 4.2 `collectAllUrls(textBody, htmlBody)` — 共享 URL 收集器
 
@@ -193,13 +236,13 @@ textarea.addEventListener('mouseup', function () {
 ## 9. 实施文件清单
 
 ### extraction-worker
-- `src/regex-generator.ts` — `suggestUrlPatterns()` + `escapeUrlSegment()` + `URL_ACTION_KEYWORDS`
-- `src/extract.ts` — `collectAllUrls()` + `findLinkByUrlPattern()` + `extract()` 新增 `linkUrlPattern` 参数
+- `src/regex-generator.ts` — `suggestUrlPatterns()` + `escapeUrlSegment()` + `URL_ACTION_KEYWORDS` + `unwrapTrackingUrl()`
+- `src/extract.ts` — `collectAllUrls()` + `findLinkByUrlPattern()`（无噪声过滤）+ `extract()` 新增 `linkUrlPattern` 参数 + 返回值 `unwrapTrackingUrl` 解码
 - `src/db.ts` — `ExtractionRuleRow` + `upsertRule` 新增 `link_url_pattern`
 - `src/index.ts` — `handleExtract` + `handlePushRule` 新增字段
 - `schema.sql` — `extraction_rules` 加列
-- `src/regex-generator.test.ts` — URL 候选生成测试
-- `src/extract.test.ts` — `collectAllUrls` + `findLinkByUrlPattern` + `extract` 集成测试
+- `src/regex-generator.test.ts` — URL 候选生成测试 + awstrack 解码测试 + URL 提前返回测试
+- `src/extract.test.ts` — `collectAllUrls` + `findLinkByUrlPattern`（含"用户正则权威"测试）+ `extract` 集成测试 + awstrack 解码集成测试
 
 ### shared
 - `src/types/filter-rule.ts` — `linkUrlPattern?: string`（3 处接口）
@@ -209,4 +252,48 @@ textarea.addEventListener('mouseup', function () {
 - `src/db/run-migrations.ts` — `migrateFilterRulesLinkUrlPattern`
 - `src/db/rule-repository.ts` — `RuleRow` + `rowToRule` + `create` + `update`
 - `src/routes/rules.ts` — 验证 + `pushExtractionRule` 透传
-- `src/routes/frontend.ts` — 表单新字段 + 正则编辑器升级 + 提交逻辑
+- `src/routes/frontend.ts` — 表单新字段 + 正则编辑器升级 + 提交逻辑 + 规则筛选下拉补齐 extract_* 选项
+
+## 10. 生产排障经验（实施过程中发现的问题）
+
+本节记录实施过程中在生产环境遇到的实际问题及修复，供未来维护参考。
+
+### 10.1 `suggestPatterns()` 对 URL 输入混入优惠码候选
+
+**现象**：输入 URL 样例，候选列表却包含 `\b(优惠码|折扣码|...)\b` 等通用前缀正则。
+
+**根因**：`suggestPatterns()` 入口未对 URL 做提前返回，走到最后的通用前缀兜底分支。
+
+**修复**：函数入口加 `if (/^https?:\/\//i.test(trimmed)) return suggestUrlPatterns(trimmed);` 提前返回，URL 与 code 走完全独立的生成路径。
+
+### 10.2 D1 已有表不会因 `CREATE TABLE IF NOT EXISTS` 加列
+
+**现象**：extraction-worker 部署后 `extraction_rules` 表存在但缺 `link_url_pattern` 列，导致提取时读不到 URL 正则。
+
+**根因**：`schema.sql` 的 `CREATE TABLE IF NOT EXISTS` 对已存在的表是 no-op，不会 ALTER 加列。Cloudflare D1 的 `wrangler d1 execute` 只在首次建表时跑 schema。
+
+**修复**：手动 `wrangler d1 execute extraction-db --command "ALTER TABLE extraction_rules ADD COLUMN link_url_pattern TEXT"`。长期方案：extraction-worker 应像 vps-api 一样引入幂等迁移机制（检测列存在再 ALTER）。
+
+### 10.3 awstrack 包装链接未解码就落库
+
+**现象**：提取到的 link 是 `https://s8qexllb.r.us-west-2.awstrack.me/L0/https%3A...` 而非真实 URL。
+
+**根因**：`unwrapTrackingUrl` 最初只在正则生成器中使用，提取引擎 `extract()` 的返回值未调用。
+
+**修复**：`extract.ts` 导入 `unwrapTrackingUrl`，在两处返回点（verification / discount 分支）对 link 解码。
+
+### 10.4 `LINK_NOISE_RE` 误杀用户正则匹配
+
+**现象**：用户配了 `linkUrlPattern` 命中 `https://www.neimanmarcus.com/manage-accounts/...`，但提取结果为空。
+
+**根因**：`findLinkByUrlPattern` 原先也套了 `LINK_NOISE_RE`，而该正则的 `manage` 子串匹配到了路径中的 `manage-accounts`，把用户明确想要的结果当噪声过滤掉了。
+
+**修复**：移除 `findLinkByUrlPattern` 中的噪声过滤——用户正则是权威配置（见 §4.1）。
+
+### 10.5 `migrate.ts` / `run-migrations.ts` 重复代码漂移
+
+**现象**：vps-api 有两个迁移入口（`migrate.ts` CLI 和 `run-migrations.ts` 库函数），各自维护一份 947 行 vs 800 行的迁移副本，`migrate.ts` 漏了 5 个迁移。
+
+**根因**：历史演进中两份代码分别添加迁移，未保持同步。
+
+**修复**：`migrate.ts` 重写为 ~90 行的薄包装，全部委托 `runMigrations()`，彻底消除漂移风险。`runMigrations()` 返回值扩展为含 `results: MigrationResult[]`，`migrate.ts` 仅负责格式化输出。

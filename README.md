@@ -67,18 +67,19 @@ SQLite 持久化 + /admin 管理面板（验证码查询 + 折扣码分类管理
 
 - **触发条件**：规则类别为 `extract_verification` 或 `extract_discount`。命中后邮件转发到默认/指定地址，并异步提取对应类型的码。
 - **提取方式**：
-  - 填写 `codePattern` 正则 → 精确匹配（推荐，如 `\d{6}` 匹配 6 位验证码）
-  - 留空 → 使用通用提取逻辑（识别常见验证码/折扣码格式，覆盖面广但不如正则精准）
+  - 验证码/折扣码：填写 `codePattern` 正则 → 精确匹配（推荐，如 `\d{6}` 匹配 6 位验证码）；留空则用通用提取逻辑。
+  - 验证/激活链接：三层优先级 —— `linkAnchorPattern`（锚文本正则）> `linkUrlPattern`（URL 正则）> 通用启发式（URL 路径动词）。
+- **跟踪链接解码**：AWS SES 等邮件服务商会把真实链接包装成 `awstrack.me` 跟踪 URL。提取引擎在正则生成和结果落库两个阶段自动解码（`unwrapTrackingUrl`），用户和管理面板看到的始终是真实 URL。
 - **存储**：extraction-worker 的 D1（`verification_codes` / `discount_codes` 表），不经过 VPS，不影响转发延迟（`ctx.waitUntil` 异步执行）。
 - **查询**：
   - vps-api 管理面板「验证码」/「折扣码」页面（折扣码含状态/收藏/标签管理，详见下节）
   - extraction-worker 独立面板 `/admin`
   - API `GET /api/extraction/codes`、`GET /api/extraction/codes/latest/:recipient`、`GET /api/extraction/discounts`
-- **配置同步**：在管理面板保存/更新 extract_* 类别规则时，vps-api 自动将提取配置（`extract_type` / `code_pattern` / `link_anchor_pattern`）推送到 extraction-worker D1，无需手动同步。
+- **配置同步**：在管理面板保存/更新 extract_* 类别规则时，vps-api 自动将提取配置（`extract_type` / `code_pattern` / `link_anchor_pattern` / `link_url_pattern`）推送到 extraction-worker D1，无需手动同步。
 
 > **类别即提取语义**：`extract_verification` 规则的 `extractVerification` 标志由类别强制为 true（后端校验保证），`extract_discount` 同理。这避免了类别与标志不一致的风险。
 >
-> **正则生成器**：管理面板规则表单提供「正则编辑器」，可粘贴真实样例自动生成候选正则并测试匹配，标志固定为不区分大小写。
+> **统一正则编辑器**：管理面板规则表单提供「正则编辑器」，支持验证码/折扣码与验证链接两种模式。粘贴邮件纯文本 → 鼠标选中目标（码或 URL）→ 自动生成多个候选正则 → 测试命中 → 应用到规则。URL 模式会自动解码 awstrack.me 等跟踪包装。详见 [`docs/specs/2026-08-13-unified-regex-editor-spec.md`](docs/specs/2026-08-13-unified-regex-editor-spec.md)。
 >
 > 架构演进：提取最初绑死 forward 类别 → 曾改为任意类别可叠加 → 现定格为独立第一公民类别（每个类别单一职责）。详见 [`docs/specs/2026-08-07-extract-first-class-category-spec.md`](docs/specs/2026-08-07-extract-first-class-category-spec.md)。
 

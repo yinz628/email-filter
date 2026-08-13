@@ -96,7 +96,10 @@ CREATE TABLE extraction_rules (
 - `extract_type`：区分提取类型，决定用哪套提取逻辑和写哪张结果表。
 - `code_pattern`：提取码的正则。有命名组 `(?<code>...)` 优先取命名组，无则取第一个捕获组，再无取全文匹配。
 - `link_anchor_pattern`：匹配锚文本的正则。命中则取该 `<a>` 标签的 href。
+- `link_url_pattern`（2026-08-13 新增）：匹配 URL 本身的正则。优先级介于 `link_anchor_pattern` 与通用启发式之间。适用于纯文本邮件（无 `<a>` 标签）或锚文本不规范的场景。详见 `2026-08-13-unified-regex-editor-spec.md`。
 - 两者都为空 → 走对应类型的通用兜底逻辑（验证码用 PREFIX_PATTERNS + ANCHOR_ACTION_RE；折扣码用 DISCOUNT 前缀 + 字母数字混合验证器）。
+
+> **跟踪链接解码**（2026-08-13 新增）：AWS SES 等邮件服务商会把真实链接包装成 `awstrack.me` 跟踪 URL。`unwrapTrackingUrl()` 在正则候选生成前和提取结果落库前自动解码，确保用户和 D1 中始终是真实 URL。
 
 ### 3.2 verification_codes 表（验证码提取结果）
 
@@ -203,15 +206,19 @@ VPS 前端调 worker 的 `/api/generate-pattern` 和 `/api/test-pattern` 端点�
 
 ## 7. 提取逻辑（extraction-worker/src/extract.ts 改造）
 
-`extractVerification` 签名加 `codePattern?` 和 `linkAnchorPattern?` 参数：
+`extractVerification` 签名加 `codePattern?`、`linkAnchorPattern?` 和 `linkUrlPattern?` 参数：
 
 ```
 有 codePattern  → extractCodeWithPattern（编译用户正则，命名组优先）
 无 codePattern  → 通用前缀锚定 + 过滤兜底（已实现）
 
-有 linkAnchorPattern → findLinkByAnchorPattern（匹配锚文本取 href）
-无 linkAnchorPattern → 通用锚文本 + URL 动词（已实现）
+链接提取优先级链（2026-08-13 扩展为三层）：
+1. 有 linkAnchorPattern → findLinkByAnchorPattern（匹配锚文本取 href）
+2. 有 linkUrlPattern    → findLinkByUrlPattern（匹配 URL 本身，不应用噪声过滤——用户正则权威）
+3. 无以上两者           → 通用锚文本 + URL 动词（已实现）
 ```
+
+提取结果的 link 会经过 `unwrapTrackingUrl()` 解码（解码 awstrack.me 等跟踪包装为真实 URL）。
 
 ### ReDoS 防护
 - 内容截断 50KB（MAX_SCAN_CHARS）

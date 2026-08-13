@@ -155,18 +155,19 @@ CREATE INDEX idx_vps_discounts_domain ON discount_codes(sender_domain);
 ```
 /extract 收到 {rawMime, ruleId}
   ↓
-① 读 D1 规则（extract_type, code_pattern, link_anchor_pattern）
+① 读 D1 规则（extract_type, code_pattern, link_anchor_pattern, link_url_pattern）
 ② postal-mime 解析 → subject, textBody, htmlBody
 ③ buildSearchableText（text + 去标签html，不含 href URL）
 ④ 若 extract_type == 'discount':
      码提取:
        有 code_pattern → extractCodeWithPattern（用户正则）
        无 code_pattern → 折扣码通用兜底（DISCOUNT_PREFIX_PATTERNS + 字母数字验证器）
-     链接提取:
-       有 link_anchor_pattern → findLinkByAnchorPattern
-       无 → 折扣链接通用兜底（DISCOUNT_LINK_RE + 排除噪音）
+     链接提取（三层优先级，2026-08-13 扩展）:
+       有 link_anchor_pattern → findLinkByAnchorPattern（锚文本）
+       有 link_url_pattern    → findLinkByUrlPattern（URL 正则，不应用噪声过滤）
+       无以上两者             → 折扣链接通用兜底（DISCOUNT_LINK_RE + 排除噪音）
 ⑤ 验证提取结果（discountCode 验证器：拒绝纯数字/纯字母，要求字母数字混合）
-⑥ 若有结果: INSERT OR IGNORE discount_codes
+⑥ 若有结果: INSERT OR IGNORE discount_codes（link 经 unwrapTrackingUrl 解码）
 ```
 
 ### 5.2 折扣码前缀模板（DISCOUNT_PREFIX_PATTERNS）

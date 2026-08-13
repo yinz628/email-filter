@@ -45,6 +45,7 @@ export interface ExtractionRuleRow {
   extract_type: string;
   code_pattern: string | null;
   link_anchor_pattern: string | null;
+  link_url_pattern: string | null;
   updated_at: string;
 }
 
@@ -92,20 +93,28 @@ export async function getRule(db: D1Database, ruleId: string): Promise<Extractio
  */
 export async function upsertRule(
   db: D1Database,
-  rule: { id: string; extract_type: string; code_pattern?: string; link_anchor_pattern?: string }
+  rule: { id: string; extract_type: string; code_pattern?: string; link_anchor_pattern?: string; link_url_pattern?: string }
 ): Promise<void> {
   const now = new Date().toISOString();
   await db
     .prepare(
-      `INSERT INTO extraction_rules (id, extract_type, code_pattern, link_anchor_pattern, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO extraction_rules (id, extract_type, code_pattern, link_anchor_pattern, link_url_pattern, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          extract_type = excluded.extract_type,
          code_pattern = excluded.code_pattern,
          link_anchor_pattern = excluded.link_anchor_pattern,
+         link_url_pattern = excluded.link_url_pattern,
          updated_at = excluded.updated_at`
     )
-    .bind(rule.id, rule.extract_type, rule.code_pattern ?? null, rule.link_anchor_pattern ?? null, now)
+    .bind(
+      rule.id,
+      rule.extract_type,
+      rule.code_pattern ?? null,
+      rule.link_anchor_pattern ?? null,
+      rule.link_url_pattern ?? null,
+      now
+    )
     .run();
 }
 

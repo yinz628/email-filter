@@ -289,24 +289,13 @@ export function findVerificationLink(textBody: string, htmlBody: string | undefi
     }
   }
 
-  // Layer 2: URL-path verb detection from plain text + all hrefs
-  const urls = new Set<string>();
-  const plainUrlRe = /https?:\/\/[^\s"'<>]+/gi;
-  let m: RegExpExecArray | null;
-  while ((m = plainUrlRe.exec(textBody)) !== null) {
-    urls.add(m[0].replace(/[.,;:!?)]+$/, '')); // strip trailing punctuation
-  }
-  if (htmlBody) {
-    for (const u of extractHrefUrls(htmlBody)) {
-      urls.add(u);
-    }
-  }
-  const candidates: string[] = [];
+  // Layer 2: URL-path verb detection from collected URLs
+  const urls = collectAllUrls(textBody, htmlBody);
   for (const u of urls) {
     if (LINK_NOISE_RE.test(u)) continue;
-    if (LINK_ACTION_RE.test(u)) candidates.push(u);
+    if (LINK_ACTION_RE.test(u)) return u;
   }
-  return candidates[0];
+  return undefined;
 }
 
 // ============================================
@@ -469,6 +458,58 @@ export function findLinkByAnchorPattern(htmlBody: string, anchorPattern: string)
   return undefined;
 }
 
+/**
+ * Collect ALL candidate URLs from both text and HTML representations.
+ *
+ * Gathers plain-text URLs (from textBody) and href URLs (from htmlBody anchor
+ * tags), dedupes via a Set, and strips trailing punctuation. Used by both
+ * findLinkByUrlPattern and the generic link heuristics as a shared collector.
+ */
+export function collectAllUrls(textBody: string, htmlBody: string | undefined): string[] {
+  const urls = new Set<string>();
+  const plainUrlRe = /https?:\/\/[^\s"'<>]+/gi;
+  let m: RegExpExecArray | null;
+  while ((m = plainUrlRe.exec(textBody)) !== null) {
+    urls.add(m[0].replace(/[.,;:!?)]+$/, '')); // strip trailing punctuation
+  }
+  if (htmlBody) {
+    for (const u of extractHrefUrls(htmlBody)) {
+      urls.add(u);
+    }
+  }
+  return [...urls];
+}
+
+/**
+ * Find a verification/discount link by matching the URL itself against a
+ * user-supplied regex pattern.
+ *
+ * Unlike findLinkByAnchorPattern (which matches anchor *text*), this matches
+ * the URL string directly — useful for emails where the anchor text is neutral
+ * or absent (e.g. text-only emails with bare URLs).
+ *
+ * Scans all URLs collected from text + HTML, returns the first matching URL
+ * that is not a noise link (unsubscribe/social/etc.).
+ *
+ * @param urls       Pre-collected candidate URLs (from collectAllUrls)
+ * @param urlPattern User-supplied regex pattern string
+ */
+export function findLinkByUrlPattern(urls: string[], urlPattern: string): string | undefined {
+  if (!urlPattern || urlPattern.length > MAX_PATTERN_LENGTH) return undefined;
+  let re: RegExp;
+  try {
+    re = new RegExp(urlPattern, 'i');
+  } catch {
+    return undefined;
+  }
+  for (const url of urls) {
+    if (re.test(url) && !LINK_NOISE_RE.test(url)) {
+      return url;
+    }
+  }
+  return undefined;
+}
+
 // ============================================
 // Discount code extraction
 // ============================================
@@ -546,15 +587,7 @@ export function findDiscountLink(textBody: string, htmlBody: string | undefined)
     }
   }
   // Layer 2: URL-path with discount/promo keywords
-  const urls = new Set<string>();
-  const plainUrlRe = /https?:\/\/[^\s"'<>]+/gi;
-  let m: RegExpExecArray | null;
-  while ((m = plainUrlRe.exec(textBody)) !== null) {
-    urls.add(m[0].replace(/[.,;:!?)]+$/, ''));
-  }
-  if (htmlBody) {
-    for (const u of extractHrefUrls(htmlBody)) urls.add(u);
-  }
+  const urls = collectAllUrls(textBody, htmlBody);
   for (const u of urls) {
     if (LINK_NOISE_RE.test(u)) continue;
     if (/(?:promo|coupon|discount|deal|sale|offer|redeem|shop)/i.test(u)) return u;
@@ -614,6 +647,7 @@ function resolveDiscountCode(
  * @param extractType 'verification' | 'discount'
  * @param codePattern  Optional user regex for code extraction
  * @param linkAnchorPattern  Optional user regex for link anchor text
+ * @param linkUrlPattern  Optional user regex for matching the link URL itself
  */
 export function extract(
   subject: string | undefined,
@@ -621,15 +655,21 @@ export function extract(
   htmlBody: string | undefined,
   extractType: 'verification' | 'discount',
   codePattern?: string,
-  linkAnchorPattern?: string
+  linkAnchorPattern?: string,
+  linkUrlPattern?: string
 ): ExtractionResult {
   const searchableText = buildSearchableText(subject, textBody, htmlBody);
 
   if (extractType === 'discount') {
     // Discount extraction
-    const link = linkAnchorPattern && htmlBody
-      ? findLinkByAnchorPattern(htmlBody, linkAnchorPattern)
-      : undefined;
+    // Link priority: anchor pattern > URL pattern > generic heuristic
+    let link: string | undefined;
+    if (linkAnchorPattern && htmlBody) {
+      link = findLinkByAnchorPattern(htmlBody, linkAnchorPattern);
+    }
+    if (!link && linkUrlPattern) {
+      link = findLinkByUrlPattern(collectAllUrls(textBody ?? '', htmlBody), linkUrlPattern);
+    }
     const effectiveLink = link ?? findDiscountLink(textBody ?? '', htmlBody);
 
     let code: string | undefined;
@@ -656,10 +696,14 @@ export function extract(
   }
 
   // Verification extraction (default)
-  // Apply custom patterns first, then fall back to generic logic
+  // Apply custom patterns first, then fall back to generic logic.
+  // Link priority: anchor pattern > URL pattern > generic heuristic
   let link: string | undefined;
   if (linkAnchorPattern && htmlBody) {
     link = findLinkByAnchorPattern(htmlBody, linkAnchorPattern);
+  }
+  if (!link && linkUrlPattern) {
+    link = findLinkByUrlPattern(collectAllUrls(textBody ?? '', htmlBody), linkUrlPattern);
   }
   if (!link) {
     link = findVerificationLink(textBody ?? '', htmlBody);

@@ -14,6 +14,9 @@ import {
   buildSearchableText,
   findCodeByPrefix,
   findStandaloneCode,
+  collectAllUrls,
+  findLinkByUrlPattern,
+  extract,
 } from './extract.js';
 
 // isNoise is not exported by design; test it indirectly via findStandaloneCode.
@@ -234,5 +237,92 @@ describe('extractVerification — anchor-text link detection', () => {
     const r = extractVerification('Verify', text, undefined);
     expect(r.code?.value).toBe('482913');
     expect(r.link).toBe('https://app.io/verify?t=1');
+  });
+});
+
+describe('collectAllUrls', () => {
+  it('collects URLs from plain text', () => {
+    const text = 'Visit https://a.io/x and https://b.io/y';
+    const urls = collectAllUrls(text, undefined);
+    expect(urls).toContain('https://a.io/x');
+    expect(urls).toContain('https://b.io/y');
+  });
+
+  it('collects href URLs from HTML', () => {
+    const html = '<a href="https://c.io/z">link</a>';
+    const urls = collectAllUrls('', html);
+    expect(urls).toContain('https://c.io/z');
+  });
+
+  it('deduplicates URLs', () => {
+    const text = 'https://a.io/x https://a.io/x';
+    const urls = collectAllUrls(text, undefined);
+    expect(urls.filter((u) => u === 'https://a.io/x').length).toBe(1);
+  });
+
+  it('strips trailing punctuation', () => {
+    const text = 'Click https://a.io/x, or https://b.io/y.';
+    const urls = collectAllUrls(text, undefined);
+    expect(urls).toContain('https://a.io/x');
+    expect(urls).toContain('https://b.io/y');
+  });
+});
+
+describe('findLinkByUrlPattern', () => {
+  it('matches URL by user-supplied regex', () => {
+    const urls = ['https://a.io/home', 'https://app.io/verify?t=1', 'https://b.io/contact'];
+    const result = findLinkByUrlPattern(urls, 'app\\.io/verify');
+    expect(result).toBe('https://app.io/verify?t=1');
+  });
+
+  it('skips noise URLs even if they match the pattern', () => {
+    const urls = ['https://x.io/unsubscribe?t=1', 'https://app.io/verify?t=1'];
+    const result = findLinkByUrlPattern(urls, '(unsubscribe|verify)');
+    // Should return verify, not unsubscribe (noise-filtered)
+    expect(result).toBe('https://app.io/verify?t=1');
+  });
+
+  it('returns undefined when no URL matches', () => {
+    const urls = ['https://a.io/home', 'https://b.io/contact'];
+    expect(findLinkByUrlPattern(urls, 'verify')).toBeUndefined();
+  });
+
+  it('returns undefined for invalid regex', () => {
+    expect(findLinkByUrlPattern(['https://a.io/x'], '[')).toBeUndefined();
+  });
+
+  it('returns undefined for empty pattern', () => {
+    expect(findLinkByUrlPattern(['https://a.io/x'], '')).toBeUndefined();
+  });
+});
+
+describe('extract — linkUrlPattern integration', () => {
+  it('uses linkUrlPattern to match verification link', () => {
+    // Text-only email with multiple URLs — linkUrlPattern should pick the right one
+    const text = 'https://x.io/home\nhttps://app.io/verify?t=abc123\nhttps://b.io/help';
+    const r = extract('Verify', text, undefined, 'verification', undefined, undefined, 'app\\.io/verify');
+    expect(r.link).toBe('https://app.io/verify?t=abc123');
+  });
+
+  it('linkUrlPattern takes priority over generic heuristic', () => {
+    // Both URLs contain "verify" — generic heuristic would pick the first,
+    // but linkUrlPattern should pinpoint the exact endpoint.
+    const text = 'https://blog.io/verify-account https://app.io/verify?t=1';
+    const r = extract('Verify', text, undefined, 'verification', undefined, undefined, 'app\\.io');
+    expect(r.link).toBe('https://app.io/verify?t=1');
+  });
+
+  it('falls back to generic heuristic when linkUrlPattern matches nothing', () => {
+    const text = 'https://app.io/verify?t=1';
+    const r = extract('Verify', text, undefined, 'verification', undefined, undefined, 'nonexistent\\.path');
+    expect(r.link).toBe('https://app.io/verify?t=1');
+  });
+
+  it('linkAnchorPattern takes priority over linkUrlPattern', () => {
+    const html = '<a href="https://app.io/real-verify?t=1">Confirm</a><a href="https://other.io/fake">Confirm</a>';
+    // linkAnchorPattern matches both anchors; linkUrlPattern would also match.
+    // Anchor should win because it runs first in the priority chain.
+    const r = extract('Verify', undefined, html, 'verification', undefined, 'Confirm', 'app\\.io');
+    expect(r.link).toBe('https://app.io/real-verify?t=1');
   });
 });

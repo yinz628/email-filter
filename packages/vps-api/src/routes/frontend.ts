@@ -1769,7 +1769,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <input type="text" id="rule-code-pattern" placeholder="如 \\d{6} 或 [A-Z0-9]{8,12}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
             <label style="font-size:12px;font-weight:600;margin-top:6px;">链接锚文本正则（可选）</label>
             <input type="text" id="rule-link-anchor-pattern" placeholder="如 I'M IN!|Join now|立即验证" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
-            <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「正则编辑器」可自动生成并测试正则。</p>
+            <label style="font-size:12px;font-weight:600;margin-top:6px;">链接 URL 正则（可选）</label>
+            <input type="text" id="rule-link-url-pattern" placeholder="如 https?://app\\.io/verify" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
+            <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「正则编辑器」可自动生成并测试正则（支持验证码/折扣码/验证链接）。</p>
             <button type="button" class="btn btn-sm btn-secondary" onclick="openRegexEditor('add')" style="margin-top:4px;">🔧 正则编辑器</button>
           </div>
           <!-- 隐藏的提取标志占位：类别决定提取类型，无需用户勾选。保留 hidden checkbox 以兼容旧提交逻辑 -->
@@ -1849,7 +1851,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             <input type="text" id="edit-rule-code-pattern" placeholder="如 \\d{6}" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
             <label style="font-size:12px;font-weight:600;margin-top:6px;">链接锚文本正则（可选）</label>
             <input type="text" id="edit-rule-link-anchor-pattern" placeholder="如 I'M IN!|Join now" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
-            <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「正则编辑器」可自动生成并测试正则。</p>
+            <label style="font-size:12px;font-weight:600;margin-top:6px;">链接 URL 正则（可选）</label>
+            <input type="text" id="edit-rule-link-url-pattern" placeholder="如 https?://app\\.io/verify" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;margin-top:2px;">
+            <p style="color:#888;font-size:11px;margin-top:4px">留空使用通用提取逻辑。点击「正则编辑器」可自动生成并测试正则（支持验证码/折扣码/验证链接）。</p>
             <button type="button" class="btn btn-sm btn-secondary" onclick="openRegexEditor('edit')" style="margin-top:4px;">🔧 正则编辑器</button>
           </div>
           <input type="checkbox" id="edit-rule-extract-verification" style="display:none">
@@ -1860,25 +1864,42 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Regex Editor Modal — unified generator + tester for discount/verification patterns -->
+  <!-- Regex Editor Modal — unified generator + tester for code/link patterns -->
   <div id="regex-editor-modal" class="modal hidden">
-    <div class="modal-content" style="max-width:680px;">
+    <div class="modal-content" style="max-width:720px;">
       <div class="modal-header">
         <h3>🔧 正则编辑器</h3>
         <button class="modal-close" onclick="hideModal('regex-editor-modal')">&times;</button>
       </div>
-      <!-- ① Sample input -->
+      <!-- ⓪ Extract target mode: code vs link -->
       <div class="form-group">
-        <label style="font-size:13px;font-weight:600;">① 样例代码</label>
+        <label style="font-size:13px;font-weight:600;">提取目标</label>
+        <div style="display:flex;gap:12px;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
+            <input type="radio" name="regex-editor-mode" value="code" checked onchange="onRegexModeChange()"> 验证码/折扣码
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
+            <input type="radio" name="regex-editor-mode" value="link" onchange="onRegexModeChange()"> 验证链接
+          </label>
+        </div>
+        <p id="regex-mode-hint" style="color:#888;font-size:11px;margin-top:4px;">从邮件中复制验证码/折扣码，系统自动生成匹配正则。</p>
+      </div>
+      <!-- ① Email content paste area (used for both context and testing) -->
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;">① 邮件内容（粘贴纯文本，可选中目标）</label>
+        <textarea id="regex-editor-email-content" rows="5" placeholder="复制邮件纯文本粘贴此处。可直接在下方文本框中鼠标选中要提取的验证码/链接，自动填入样例。" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:12px;resize:vertical;"></textarea>
+      </div>
+      <!-- ② Sample input -->
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;">② 目标样例（选中自动填入，或手动输入）</label>
         <div style="display:flex;gap:6px;">
-          <input type="text" id="regex-editor-sample" placeholder="输入真实样例，如 SAVE20、482913、PROMO-ABC123" style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;">
+          <input type="text" id="regex-editor-sample" placeholder="如 SAVE20、482913 或 https://app.io/verify?t=1" style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;">
           <button type="button" class="btn btn-sm btn-secondary" onclick="generateCandidates()">生成候选</button>
         </div>
-        <p style="color:#888;font-size:11px;margin-top:4px;">从真实邮件中复制一个折扣码/验证码粘贴此处，系统自动生成匹配正则。</p>
       </div>
-      <!-- ② Candidate list (dynamic) -->
+      <!-- ③ Candidate list (dynamic) -->
       <div class="form-group">
-        <label style="font-size:13px;font-weight:600;">② 候选正则（点击选用）</label>
+        <label style="font-size:13px;font-weight:600;">③ 候选正则（点击选用）</label>
         <div id="regex-candidates" style="border:1px solid #eee;border-radius:4px;max-height:180px;overflow-y:auto;background:#fafafa;">
           <div style="text-align:center;color:#aaa;padding:16px;font-size:12px;">输入样例后点击「生成候选」</div>
         </div>
@@ -1888,17 +1909,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           #regex-candidates .regex-cand.selected { background:#d4edda; }
         </style>
       </div>
-      <!-- ③ Pattern input -->
+      <!-- ④ Pattern input -->
       <div class="form-group">
-        <label style="font-size:13px;font-weight:600;">③ 正则表达式（可手动修改）</label>
-        <input type="text" id="regex-editor-pattern" placeholder="如 (?<code>[A-Z0-9]{6})" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;">
-        <p style="color:#888;font-size:11px;margin-top:4px;">标志固定为 <code style="background:#f0f0f0;padding:1px 4px;border-radius:2px;">i</code>（不区分大小写），与生产提取行为一致。建议使用命名组 <code style="background:#f0f0f0;padding:1px 4px;border-radius:2px;">(?&lt;code&gt;...)</code> 或捕获组 <code style="background:#f0f0f0;padding:1px 4px;border-radius:2px;">(...)</code>。</p>
+        <label style="font-size:13px;font-weight:600;">④ 正则表达式（可手动修改）</label>
+        <input type="text" id="regex-editor-pattern" placeholder="如 (?<code>[A-Z0-9]{6}) 或 https?://app\\.io/verify" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;">
+        <p style="color:#888;font-size:11px;margin-top:4px;">标志固定为 <code style="background:#f0f0f0;padding:1px 4px;border-radius:2px;">i</code>（不区分大小写）。码正则建议用命名组 <code style="background:#f0f0f0;padding:1px 4px;border-radius:2px;">(?&lt;code&gt;...)</code>。</p>
       </div>
-      <!-- ④ Test against email content -->
+      <!-- ⑤ Test (reuses ① content) -->
       <div class="form-group">
-        <label style="font-size:13px;font-weight:600;">④ 测试（粘贴邮件纯文本正文）</label>
-        <textarea id="regex-test-content" rows="4" placeholder="粘贴邮件正文（纯文本），验证正则能否命中" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:12px;resize:vertical;"></textarea>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="testCurrentPattern()" style="margin-top:4px;">🧪 测试匹配</button>
+        <label style="font-size:13px;font-weight:600;">⑤ 测试匹配（使用①中的邮件内容）</label>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="testCurrentPattern()">🧪 测试匹配</button>
         <div id="regex-test-result" style="margin-top:8px;"></div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
@@ -2876,36 +2896,87 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     }
 
     // ============================================
-    // Regex Editor Modal — unified generator + tester
+    // Regex Editor Modal — unified generator + tester (code + link modes)
     // ============================================
 
-    /** Tracks which form ('add' or 'edit') opened the editor, so applyRegexToRule
-     *  writes to the correct input. Fixes the old bug where the target was always
-     *  guessed via DOM presence (which failed for the edit form). */
+    /** Tracks which form ('add' or 'edit') opened the editor. */
     let regexEditorTarget = 'add';
+    /** Tracks the current mode: 'code' (verification/discount code) or 'link' (URL). */
+    let regexEditorMode = 'code';
 
-    /** Open the regex editor, targeting the add or edit form's code-pattern input. */
+    /** Get the currently selected mode from the radio buttons. */
+    function getRegexMode() {
+      const checked = document.querySelector('input[name="regex-editor-mode"]:checked');
+      return checked ? checked.value : 'code';
+    }
+
+    /** Handle mode switch — update hint text and clear stale candidates. */
+    function onRegexModeChange() {
+      regexEditorMode = getRegexMode();
+      const hint = document.getElementById('regex-mode-hint');
+      const sampleInput = document.getElementById('regex-editor-sample');
+      if (regexEditorMode === 'link') {
+        hint.textContent = '从邮件中复制验证链接 URL，系统自动生成 URL 匹配正则。';
+        sampleInput.placeholder = '如 https://app.io/verify?t=1 或 https://www.brand.com/confirm?code=385946';
+      } else {
+        hint.textContent = '从邮件中复制验证码/折扣码，系统自动生成匹配正则。';
+        sampleInput.placeholder = '如 SAVE20、482913 或 PROMO-ABC123';
+      }
+      // Clear candidates since they were for the other mode
+      document.getElementById('regex-candidates').innerHTML = '<div style="text-align:center;color:#aaa;padding:16px;font-size:12px;">输入样例后点击「生成候选」</div>';
+      document.getElementById('regex-editor-pattern').value = '';
+    }
+
+    /** Wire up mouse selection in the email content textarea — when the user
+     *  selects text inside it, auto-fill the sample input. */
+    function setupEmailSelectionHandler() {
+      const textarea = document.getElementById('regex-editor-email-content');
+      if (!textarea) return;
+      textarea.addEventListener('mouseup', function () {
+        const sel = window.getSelection();
+        const text = sel ? sel.toString().trim() : '';
+        if (text.length > 0) {
+          document.getElementById('regex-editor-sample').value = text;
+        }
+      });
+      textarea.addEventListener('keyup', function () {
+        const sel = window.getSelection();
+        const text = sel ? sel.toString().trim() : '';
+        if (text.length > 0) {
+          document.getElementById('regex-editor-sample').value = text;
+        }
+      });
+    }
+
+    /** Open the regex editor, targeting the add or edit form. */
     function openRegexEditor(target) {
       regexEditorTarget = target === 'edit' ? 'edit' : 'add';
       // Reset state
+      document.getElementById('regex-editor-email-content').value = '';
       document.getElementById('regex-editor-sample').value = '';
       document.getElementById('regex-editor-pattern').value = '';
-      document.getElementById('regex-test-content').value = '';
       document.getElementById('regex-candidates').innerHTML = '<div style="text-align:center;color:#aaa;padding:16px;font-size:12px;">输入样例后点击「生成候选」</div>';
       document.getElementById('regex-test-result').innerHTML = '';
+      // Reset to code mode by default
+      const codeRadio = document.querySelector('input[name="regex-editor-mode"][value="code"]');
+      if (codeRadio) codeRadio.checked = true;
+      regexEditorMode = 'code';
+      onRegexModeChange();
       showModal('regex-editor-modal');
     }
 
-    /** Fetch candidate patterns from the worker's regex generator. */
+    /** Fetch candidate patterns from the worker's regex generator.
+     *  The generator auto-detects code vs URL from the sample string. */
     async function generateCandidates() {
       const sample = document.getElementById('regex-editor-sample').value.trim();
-      if (!sample) { showAlert('请先输入样例代码', 'error'); return; }
+      if (!sample) { showAlert('请先输入或选中样例', 'error'); return; }
+      const emailContent = document.getElementById('regex-editor-email-content').value;
       const container = document.getElementById('regex-candidates');
       container.innerHTML = '<div style="text-align:center;color:#888;padding:16px;font-size:12px;">生成中...</div>';
       try {
         const res = await fetch('/api/extraction/generate-pattern', {
           method: 'POST', headers: getHeaders(),
-          body: JSON.stringify({ target: sample }),
+          body: JSON.stringify({ target: sample, emailContent: emailContent }),
         });
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
@@ -2914,9 +2985,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           container.innerHTML = '<div style="text-align:center;color:#e74c3c;padding:16px;font-size:12px;">未生成候选正则，请尝试其他样例或手动填写</div>';
           return;
         }
-        // Render clickable candidate cards. Use CSS classes (.regex-cand / .selected)
-        // instead of inline onmouseover/onmouseout handlers — inline handlers require
-        // JS string escaping that conflicts with the outer HTML_TEMPLATE literal.
+        // Render clickable candidate cards.
         let html = '';
         suggestions.forEach((s, i) => {
           const conf = Math.round(s.confidence * 100);
@@ -2929,15 +2998,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             + '</div>';
         });
         container.innerHTML = html;
-        // Stash suggestions for selectCandidate
         window.__regexSuggestions = suggestions;
-        // Wire click handlers via event delegation (no inline onclick needed)
         container.querySelectorAll('.regex-cand').forEach((el) => {
           el.addEventListener('click', function () {
             const idx = parseInt(this.dataset.idx, 10);
             selectCandidate(idx);
           });
         });
+        // Auto-select the first (highest confidence) candidate
+        if (suggestions.length > 0) selectCandidate(0);
       } catch (e) {
         container.innerHTML = '<div style="text-align:center;color:#e74c3c;padding:16px;font-size:12px;">生成失败，请检查网络或 worker 配置</div>';
       }
@@ -2949,7 +3018,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (idx < 0 || idx >= suggestions.length) return;
       const chosen = suggestions[idx];
       document.getElementById('regex-editor-pattern').value = chosen.pattern;
-      // Highlight selected card via CSS class, clear others
       const container = document.getElementById('regex-candidates');
       container.querySelectorAll('.regex-cand').forEach((el) => {
         const isSel = parseInt(el.dataset.idx, 10) === idx;
@@ -2958,15 +3026,14 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       });
     }
 
-    /** Test the current pattern against pasted email content.
-     *  Uses flags='i' to match production extraction behavior exactly
-     *  (extractCodeWithPattern also uses 'i', single match). */
+    /** Test the current pattern against the email content from ①.
+     *  Uses flags='i' to match production extraction behavior exactly. */
     async function testCurrentPattern() {
       const pattern = document.getElementById('regex-editor-pattern').value.trim();
-      const content = document.getElementById('regex-test-content').value;
+      const content = document.getElementById('regex-editor-email-content').value;
       const resultDiv = document.getElementById('regex-test-result');
       if (!pattern) { resultDiv.innerHTML = '<div style="color:#e74c3c;font-size:12px;">⚠️ 请先填写正则表达式</div>'; return; }
-      if (!content.trim()) { resultDiv.innerHTML = '<div style="color:#e74c3c;font-size:12px;">⚠️ 请粘贴邮件正文进行测试</div>'; return; }
+      if (!content.trim()) { resultDiv.innerHTML = '<div style="color:#e74c3c;font-size:12px;">⚠️ 请在①中粘贴邮件内容进行测试</div>'; return; }
       resultDiv.innerHTML = '<div style="color:#888;font-size:12px;">测试中...</div>';
       try {
         const res = await fetch('/api/extraction/test-pattern', {
@@ -2984,16 +3051,15 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           resultDiv.innerHTML = '<div style="color:#e67e22;font-size:12px;">⚠️ 未命中任何内容。请检查正则或换一段邮件正文。</div>';
           return;
         }
-        // Show matches — note production takes the FIRST match only
         let html = '<div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:4px;padding:8px;font-size:12px;">'
           + '<strong style="color:#155724;">✅ 命中 ' + matches.length + ' 个</strong><br>';
         matches.slice(0, 5).forEach((m, i) => {
           const pos = data.positions && data.positions[i] !== undefined ? data.positions[i] : '?';
-          html += '<span style="display:inline-block;margin:2px 4px 0 0;padding:2px 6px;background:#fff;border:1px solid #28a745;border-radius:3px;font-family:monospace;">' + escapeHtml(m) + '</span>'
+          html += '<span style="display:inline-block;margin:2px 4px 0 0;padding:2px 6px;background:#fff;border:1px solid #28a745;border-radius:3px;font-family:monospace;word-break:break-all;">' + escapeHtml(m) + '</span>'
             + '<span style="color:#888;font-size:10px;">@' + pos + '</span>';
         });
         if (matches.length > 5) html += '<span style="color:#888;font-size:11px;"> ...还有 ' + (matches.length - 5) + ' 个</span>';
-        html += '<div style="margin-top:6px;color:#155724;font-size:11px;">ℹ️ 生产提取将取第一个命中值：<code style="background:#fff;padding:1px 4px;border-radius:2px;">' + escapeHtml(matches[0]) + '</code></div>';
+        html += '<div style="margin-top:6px;color:#155724;font-size:11px;">ℹ️ 生产提取将取第一个命中值：<code style="background:#fff;padding:1px 4px;border-radius:2px;word-break:break-all;">' + escapeHtml(matches[0]) + '</code></div>';
         html += '</div>';
         resultDiv.innerHTML = html;
       } catch (e) {
@@ -3001,17 +3067,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       }
     }
 
-    /** Apply the chosen pattern back to the source form's code-pattern input. */
+    /** Apply the chosen pattern back to the source form.
+     *  Code mode → code-pattern input; Link mode → link-url-pattern input. */
     function applyRegexToRule() {
       const pattern = document.getElementById('regex-editor-pattern').value.trim();
       if (!pattern) { showAlert('请先填写或选择一个正则', 'error'); return; }
-      const inputId = regexEditorTarget === 'edit' ? 'edit-rule-code-pattern' : 'rule-code-pattern';
-      const input = document.getElementById(inputId);
+      const mode = getRegexMode();
+      const suffix = regexEditorTarget === 'edit' ? 'edit-rule-' : 'rule-';
+      const fieldId = mode === 'link' ? suffix + 'link-url-pattern' : suffix + 'code-pattern';
+      const input = document.getElementById(fieldId);
       if (input) {
         input.value = pattern;
-        showAlert('已填入正则: ' + pattern);
+        showAlert('已填入' + (mode === 'link' ? '链接' : '码') + '正则: ' + pattern);
       } else {
-        showAlert('未找到目标输入框 (' + inputId + ')', 'error');
+        showAlert('未找到目标输入框 (' + fieldId + ')', 'error');
       }
       hideModal('regex-editor-modal');
     }
@@ -3028,6 +3097,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const extractDiscountChecked = category === 'extract_discount';
       const codePatternValue = document.getElementById('rule-code-pattern')?.value.trim();
       const linkAnchorValue = document.getElementById('rule-link-anchor-pattern')?.value.trim();
+      const linkUrlValue = document.getElementById('rule-link-url-pattern')?.value.trim();
       const body = {
         workerId: document.getElementById('rule-worker').value || undefined,
         category: category,
@@ -3040,6 +3110,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         extractDiscount: extractDiscountChecked || undefined,
         codePattern: codePatternValue || undefined,
         linkAnchorPattern: linkAnchorValue || undefined,
+        linkUrlPattern: linkUrlValue || undefined,
       };
       try {
         const res = await fetch('/api/rules', { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
@@ -3119,6 +3190,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       if (editCodePatternInput) editCodePatternInput.value = rule.codePattern || '';
       const editLinkAnchorInput = document.getElementById('edit-rule-link-anchor-pattern');
       if (editLinkAnchorInput) editLinkAnchorInput.value = rule.linkAnchorPattern || '';
+      const editLinkUrlInput = document.getElementById('edit-rule-link-url-pattern');
+      if (editLinkUrlInput) editLinkUrlInput.value = rule.linkUrlPattern || '';
       toggleEditForwardToField();
       updatePatternsVisibility('edit');
       
@@ -3142,6 +3215,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const extractDiscountChecked = editCategory === 'extract_discount';
       const editCodePattern = document.getElementById('edit-rule-code-pattern')?.value.trim();
       const editLinkAnchor = document.getElementById('edit-rule-link-anchor-pattern')?.value.trim();
+      const editLinkUrl = document.getElementById('edit-rule-link-url-pattern')?.value.trim();
       const body = {
         workerId: document.getElementById('edit-rule-worker').value || null,
         category: editCategory,
@@ -3154,6 +3228,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         extractDiscount: extractDiscountChecked || false,
         codePattern: editCodePattern || undefined,
         linkAnchorPattern: editLinkAnchor || undefined,
+        linkUrlPattern: editLinkUrl || undefined,
       };
       try {
         const res = await fetch('/api/rules/' + id, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });
@@ -10057,6 +10132,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       
       // Load initial data
       loadWorkers();
+
+      // Wire up regex editor's email-selection handler
+      setupEmailSelectionHandler();
       
       // Load user settings from server (Requirements: 8.2)
       loadUserSettings();

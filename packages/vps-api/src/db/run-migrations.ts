@@ -744,6 +744,24 @@ function migrateFilterRulesDiscountAndPatterns(db: Database.Database): Migration
   return { name, status: applied ? 'applied' : 'skipped', message: applied ? 'Columns added' : 'Columns already exist' };
 }
 
+/**
+ * Migration: Add link_url_pattern to filter_rules.
+ * Supports user-configured regex for matching the link URL itself (useful for
+ * text-only emails where anchor text is absent and the URL must be matched
+ * directly). Idempotent: skips if the column already exists.
+ */
+function migrateFilterRulesLinkUrlPattern(db: Database.Database): MigrationResult {
+  const name = 'filter_rules.link_url_pattern';
+  if (!tableExists(db, 'filter_rules')) {
+    return { name, status: 'skipped', message: 'Table filter_rules does not exist' };
+  }
+  if (!columnExists(db, 'filter_rules', 'link_url_pattern')) {
+    db.exec('ALTER TABLE filter_rules ADD COLUMN link_url_pattern TEXT');
+    return { name, status: 'applied', message: 'Column link_url_pattern added' };
+  }
+  return { name, status: 'skipped', message: 'Column link_url_pattern already exists' };
+}
+
 function migrateFeatureSettings(db: Database.Database): MigrationResult {
   const name = 'feature_settings';
   let applied = false;
@@ -823,6 +841,7 @@ const migrations: MigrationFn[] = [
   migrateCreateVerificationCodesTable,
   migrateFilterRulesDiscountAndPatterns,
   migrateCreateDiscountCodeStatesTable,
+  migrateFilterRulesLinkUrlPattern,
 ];
 
 /**

@@ -223,9 +223,137 @@ export function suggestPatterns(target: string): PatternSuggestion[] {
     });
   }
 
+  // ========== 8. URL (verification/discount links) ==========
+  if (/^https?:\/\//i.test(trimmed)) {
+    suggestions.push(...suggestUrlPatterns(trimmed));
+  }
+
   // Sort + limit
   suggestions.sort((a, b) => b.confidence - a.confidence);
   return suggestions.slice(0, 6);
+}
+
+// ============================================
+// URL pattern generation (verification/discount links)
+// ============================================
+
+/**
+ * Escape a URL segment for use in a regex pattern.
+ * Escapes regex specials AND the forward slash (ubiquitous in URL paths).
+ */
+function escapeUrlSegment(segment: string): string {
+  return segment.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
+/**
+ * Action keywords used to identify the "meaningful" path segment of a
+ * verification/discount URL (e.g. "confirm-user-email", "verify-account").
+ */
+const URL_ACTION_KEYWORDS = /(?:confirm|verify|activat|reset|unlock|auth|login|redeem|claim|apply|signup|register)/i;
+
+/**
+ * Generate candidate regex patterns from a sample URL.
+ *
+ * Design: URLs have predictable structure (scheme://host/path?query).
+ * We generalize each part progressively, from most specific to most loose:
+ *   1. Exact domain + exact path (highest specificity)
+ *   2. Any domain + path keyword (the meaningful path segment)
+ *   3. Domain only (for single-link-per-domain emails)
+ *   4. Query param name (if code=/token=/verify= present)
+ *   5. Literal full URL (always-safe fallback)
+ *
+ * All candidates use the named group `url` so the extractor can distinguish
+ * link matches from incidental URL mentions in the text.
+ *
+ * Exported for unit testing.
+ */
+export function suggestUrlPatterns(target: string): PatternSuggestion[] {
+  const suggestions: PatternSuggestion[] = [];
+  const trimmed = target.trim();
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return suggestions; // malformed URL → no suggestions
+  }
+
+  const escapedDomain = escapeUrlSegment(url.hostname);
+  const escapedPath = escapeUrlSegment(url.pathname);
+
+  // --- Candidate 1: scheme + exact domain + exact path (highest specificity) ---
+  // Matches this exact endpoint regardless of query params.
+  // e.g. https?://www\.neimanmarcus\.com/manage-accounts/v1/confirm-user-email
+  const fullPathRe = url.pathname && url.pathname !== '/'
+    ? `https?://${escapedDomain}${escapedPath}`
+    : `https?://${escapedDomain}`;
+  suggestions.push({
+    pattern: `(?<url>${fullPathRe})`,
+    description: `精确域名+路径 (${url.hostname}${url.pathname === '/' ? '' : url.pathname})`,
+    confidence: 0.95,
+  });
+
+  // --- Candidate 2: domain + path keyword (extract the meaningful segment) ---
+  // Takes the last path segment that looks like an action keyword, or the last
+  // sufficiently-long segment, as an anchor. This generalizes across different
+  // hosts while keeping the semantic signal.
+  const pathParts = url.pathname.split('/').filter((p) => p.length > 0);
+  let meaningfulSegment = '';
+  // Prefer action-keyword segment, else last long segment
+  for (let i = pathParts.length - 1; i >= 0; i--) {
+    if (URL_ACTION_KEYWORDS.test(pathParts[i])) {
+      meaningfulSegment = pathParts[i];
+      break;
+    }
+  }
+  if (!meaningfulSegment) {
+    for (let i = pathParts.length - 1; i >= 0; i--) {
+      if (pathParts[i].length >= 4) {
+        meaningfulSegment = pathParts[i];
+        break;
+      }
+    }
+  }
+
+  if (meaningfulSegment) {
+    const escapedSeg = escapeUrlSegment(meaningfulSegment);
+    suggestions.push({
+      pattern: `https?://[^/\\s]+/[^\\s]*${escapedSeg}[^\\s]*`,
+      description: `任意域名 + 路径含 "${meaningfulSegment}"`,
+      confidence: 0.85,
+    });
+  }
+
+  // --- Candidate 3: domain only (loosest, for single-link-per-domain emails) ---
+  suggestions.push({
+    pattern: `https?://${escapedDomain}\\b`,
+    description: `仅域名 (${url.hostname})`,
+    confidence: 0.70,
+  });
+
+  // --- Candidate 4: query param name (if URL has verification-like params) ---
+  // e.g. ?code=385946 → match any URL containing ?code= or &code=
+  const verifyParams = ['code', 'token', 'verify', 'activate', 'confirmation', 'auth', 'otp', 'pin'];
+  const allParams = url.searchParams ? [...url.searchParams.keys()] : [];
+  const foundParam = allParams.find((k) => verifyParams.includes(k.toLowerCase()));
+  if (foundParam) {
+    const escapedParam = escapeUrlSegment(foundParam);
+    suggestions.push({
+      pattern: `https?://[^\\s]*[?&]${escapedParam}=[^\\s&]+`,
+      description: `任意 URL 含 ?${foundParam}= 参数`,
+      confidence: 0.90,
+    });
+  }
+
+  // --- Candidate 5: literal full URL (escaped, always-safe fallback) ---
+  suggestions.push({
+    pattern: escapeSpecialChars(trimmed),
+    description: '完整 URL 字面匹配（不泛化，仅匹配完全相同的链接）',
+    confidence: 0.50,
+  });
+
+  suggestions.sort((a, b) => b.confidence - a.confidence);
+  return suggestions.slice(0, 5);
 }
 
 // ============================================

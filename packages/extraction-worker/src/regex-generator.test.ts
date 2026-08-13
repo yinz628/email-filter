@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   generateFromTarget,
   suggestPatterns,
+  suggestUrlPatterns,
   validateRegex,
   testRegexMatch,
   escapeSpecialChars,
@@ -62,6 +63,77 @@ describe('suggestPatterns', () => {
     for (let i = 1; i < suggestions.length; i++) {
       expect(suggestions[i - 1].confidence).toBeGreaterThanOrEqual(suggestions[i].confidence);
     }
+  });
+});
+
+describe('suggestUrlPatterns', () => {
+  it('generates candidates for a verification URL with path + query', () => {
+    const url = 'https://www.neimanmarcus.com/manage-accounts/v1/confirm-user-email?code=385946&id=abc&def=123';
+    const suggestions = suggestUrlPatterns(url);
+    expect(suggestions.length).toBeGreaterThan(0);
+    // Candidate 1 should be exact domain + path (highest confidence)
+    expect(suggestions[0].confidence).toBeGreaterThanOrEqual(0.90);
+    // Should contain the escaped domain
+    expect(suggestions.some((s) => s.pattern.includes('neimanmarcus\\.com'))).toBe(true);
+  });
+
+  it('includes a query-param candidate when URL has code=/token=', () => {
+    const url = 'https://app.io/verify?code=482913';
+    const suggestions = suggestUrlPatterns(url);
+    expect(suggestions.some((s) => s.pattern.includes('code='))).toBe(true);
+  });
+
+  it('includes a path-keyword candidate using the meaningful segment', () => {
+    const url = 'https://app.io/auth/confirm-email?t=abc';
+    const suggestions = suggestUrlPatterns(url);
+    expect(suggestions.some((s) => s.pattern.includes('confirm-email'))).toBe(true);
+  });
+
+  it('includes a domain-only candidate', () => {
+    const url = 'https://app.io/verify?t=1';
+    const suggestions = suggestUrlPatterns(url);
+    expect(suggestions.some((s) => s.pattern.includes('app\\.io\\b'))).toBe(true);
+  });
+
+  it('includes a literal-escaped fallback candidate', () => {
+    const url = 'https://app.io/verify?t=1';
+    const suggestions = suggestUrlPatterns(url);
+    // escapeSpecialChars escapes / and . but NOT ? (not in its char class).
+    // The literal candidate should contain the escaped domain.
+    expect(suggestions.some((s) => s.pattern.includes('app\\.io'))).toBe(true);
+  });
+
+  it('returns suggestions sorted by confidence descending', () => {
+    const url = 'https://app.io/verify?code=482913';
+    const suggestions = suggestUrlPatterns(url);
+    for (let i = 1; i < suggestions.length; i++) {
+      expect(suggestions[i - 1].confidence).toBeGreaterThanOrEqual(suggestions[i].confidence);
+    }
+  });
+
+  it('returns empty for malformed URL', () => {
+    expect(suggestUrlPatterns('not a url')).toEqual([]);
+    expect(suggestUrlPatterns('https://')).toEqual([]);
+  });
+
+  it('handles URLs without query params', () => {
+    const url = 'https://app.io/verify';
+    const suggestions = suggestUrlPatterns(url);
+    expect(suggestions.length).toBeGreaterThan(0);
+    // Should not include a query-param candidate
+    expect(suggestions.some((s) => s.description.includes('参数'))).toBe(false);
+  });
+});
+
+describe('suggestPatterns — URL integration', () => {
+  it('suggestPatterns detects URL and delegates to URL branch', () => {
+    const url = 'https://app.io/verify?code=482913';
+    const suggestions = suggestPatterns(url);
+    // URL patterns should be present
+    expect(suggestions.some((s) => s.pattern.includes('app\\.io'))).toBe(true);
+    // Top suggestion should be URL-specific (highest confidence), not a generic code pattern
+    const topPattern = suggestions[0].pattern;
+    expect(topPattern.includes('app\\.io') || topPattern.includes('code=')).toBe(true);
   });
 });
 

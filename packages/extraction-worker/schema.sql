@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS extraction_rules (
   extract_type TEXT NOT NULL,           -- 'verification' | 'discount'
   code_pattern TEXT,                    -- regex for code extraction (optional, falls back to generic)
   link_anchor_pattern TEXT,             -- regex for link anchor text (optional)
+  link_url_pattern TEXT,                -- regex for matching link URL itself (optional)
   updated_at TEXT NOT NULL
 );
 

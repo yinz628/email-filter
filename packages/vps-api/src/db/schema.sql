@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS filter_rules (
   extract_discount INTEGER NOT NULL DEFAULT 0,
   code_pattern TEXT,
   link_anchor_pattern TEXT,
+  link_url_pattern TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

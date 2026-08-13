@@ -123,6 +123,7 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
   let extractType: 'verification' | 'discount' = 'verification';
   let codePattern: string | undefined;
   let linkAnchorPattern: string | undefined;
+  let linkUrlPattern: string | undefined;
 
   if (ruleId) {
     const rule = await getRule(env.DB, ruleId);
@@ -130,11 +131,12 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
       extractType = rule.extract_type === 'discount' ? 'discount' : 'verification';
       codePattern = rule.code_pattern ?? undefined;
       linkAnchorPattern = rule.link_anchor_pattern ?? undefined;
+      linkUrlPattern = rule.link_url_pattern ?? undefined;
     }
   }
 
   // Extract
-  const result = extract(subject, textBody, htmlBody, extractType, codePattern, linkAnchorPattern);
+  const result = extract(subject, textBody, htmlBody, extractType, codePattern, linkAnchorPattern, linkUrlPattern);
 
   // Store in D1 (only if something was extracted)
   if (extractType === 'discount') {
@@ -347,7 +349,7 @@ async function handleExportDiscounts(request: Request, env: Env): Promise<Respon
 // ============================================
 
 async function handlePushRule(request: Request, env: Env): Promise<Response> {
-  let body: { id: string; extract_type: string; code_pattern?: string; link_anchor_pattern?: string };
+  let body: { id: string; extract_type: string; code_pattern?: string; link_anchor_pattern?: string; link_url_pattern?: string };
   try {
     body = await request.json();
   } catch {

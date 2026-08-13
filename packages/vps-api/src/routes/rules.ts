@@ -22,7 +22,7 @@ import { getRuleCache } from '../services/rule-cache.instance.js';
  * block the rule save (the config can be re-pushed later).
  */
 async function pushExtractionRule(
-  rule: { id: string; extractVerification?: boolean; extractDiscount?: boolean; codePattern?: string; linkAnchorPattern?: string }
+  rule: { id: string; extractVerification?: boolean; extractDiscount?: boolean; codePattern?: string; linkAnchorPattern?: string; linkUrlPattern?: string }
 ): Promise<void> {
   const workerUrl = config.extractionWorkerUrl;
   const workerToken = config.extractionWorkerToken;
@@ -37,6 +37,7 @@ async function pushExtractionRule(
     extract_type: extractType,
     code_pattern: rule.codePattern ?? null,
     link_anchor_pattern: rule.linkAnchorPattern ?? null,
+    link_url_pattern: rule.linkUrlPattern ?? null,
   };
 
   try {
@@ -104,9 +105,10 @@ export function validateCreateRule(body: unknown): { valid: boolean; error?: str
     extractDiscount = false;
   }
 
-  // codePattern / linkAnchorPattern: optional regex strings for extraction config.
+  // codePattern / linkAnchorPattern / linkUrlPattern: optional regex strings for extraction config.
   const codePattern = typeof data.codePattern === 'string' && data.codePattern.trim() ? data.codePattern.trim() : undefined;
   const linkAnchorPattern = typeof data.linkAnchorPattern === 'string' && data.linkAnchorPattern.trim() ? data.linkAnchorPattern.trim() : undefined;
+  const linkUrlPattern = typeof data.linkUrlPattern === 'string' && data.linkUrlPattern.trim() ? data.linkUrlPattern.trim() : undefined;
 
   // Validate regex compilability if provided.
   if (codePattern) {
@@ -114,6 +116,9 @@ export function validateCreateRule(body: unknown): { valid: boolean; error?: str
   }
   if (linkAnchorPattern) {
     try { new RegExp(linkAnchorPattern); } catch { return { valid: false, error: 'linkAnchorPattern is not a valid regex' }; }
+  }
+  if (linkUrlPattern) {
+    try { new RegExp(linkUrlPattern); } catch { return { valid: false, error: 'linkUrlPattern is not a valid regex' }; }
   }
 
   return {
@@ -129,6 +134,7 @@ export function validateCreateRule(body: unknown): { valid: boolean; error?: str
       extractDiscount,
       codePattern,
       linkAnchorPattern,
+      linkUrlPattern,
     },
   };
 }
@@ -193,6 +199,11 @@ export function validateUpdateRule(body: unknown): { valid: boolean; error?: str
     const lap = typeof data.linkAnchorPattern === 'string' && data.linkAnchorPattern.trim() ? data.linkAnchorPattern.trim() : undefined;
     if (lap) { try { new RegExp(lap); } catch { return { valid: false, error: 'linkAnchorPattern is not a valid regex' }; } }
     updateData.linkAnchorPattern = lap;
+  }
+  if (data.linkUrlPattern !== undefined) {
+    const lup = typeof data.linkUrlPattern === 'string' && data.linkUrlPattern.trim() ? data.linkUrlPattern.trim() : undefined;
+    if (lup) { try { new RegExp(lup); } catch { return { valid: false, error: 'linkUrlPattern is not a valid regex' }; } }
+    updateData.linkUrlPattern = lup;
   }
   if (data.tags !== undefined) {
     if (Array.isArray(data.tags)) {

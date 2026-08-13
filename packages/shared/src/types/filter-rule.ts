@@ -63,6 +63,8 @@ export interface FilterRule {
   codePattern?: string;
   /** Optional user-configured regex for link anchor text matching. */
   linkAnchorPattern?: string;
+  /** Optional user-configured regex for matching the link URL itself. */
+  linkUrlPattern?: string;
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -83,6 +85,7 @@ export interface CreateRuleDTO {
   extractDiscount?: boolean;
   codePattern?: string;
   linkAnchorPattern?: string;
+  linkUrlPattern?: string;
   enabled?: boolean;
 }
 
@@ -100,5 +103,6 @@ export interface UpdateRuleDTO {
   extractDiscount?: boolean;
   codePattern?: string;
   linkAnchorPattern?: string;
+  linkUrlPattern?: string;
   enabled?: boolean;
 }

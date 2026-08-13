@@ -15,6 +15,7 @@ interface RuleRow {
   extract_discount: number;
   code_pattern: string | null;
   link_anchor_pattern: string | null;
+  link_url_pattern: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -49,6 +50,7 @@ export class RuleRepository {
       extractDiscount: row.extract_discount === 1,
       codePattern: row.code_pattern || undefined,
       linkAnchorPattern: row.link_anchor_pattern || undefined,
+      linkUrlPattern: row.link_url_pattern || undefined,
       enabled: row.enabled === 1,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -99,13 +101,13 @@ export class RuleRepository {
     const tags = dto.tags ? JSON.stringify(dto.tags) : null;
 
     const stmt = this.db.prepare(`
-      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, forward_to, extract_verification, extract_discount, code_pattern, link_anchor_pattern, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO filter_rules (id, worker_id, category, match_type, match_mode, pattern, tags, forward_to, extract_verification, extract_discount, code_pattern, link_anchor_pattern, link_url_pattern, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const extractVerification = dto.extractVerification ? 1 : 0;
     const extractDiscount = dto.extractDiscount ? 1 : 0;
-    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, dto.forwardTo || null, extractVerification, extractDiscount, dto.codePattern || null, dto.linkAnchorPattern || null, enabled ? 1 : 0, now, now);
+    stmt.run(id, workerId || null, dto.category, dto.matchType, dto.matchMode, dto.pattern, tags, dto.forwardTo || null, extractVerification, extractDiscount, dto.codePattern || null, dto.linkAnchorPattern || null, dto.linkUrlPattern || null, enabled ? 1 : 0, now, now);
 
     // Create associated stats record
     const statsStmt = this.db.prepare(`
@@ -127,6 +129,7 @@ export class RuleRepository {
       extractDiscount: dto.extractDiscount === true,
       codePattern: dto.codePattern,
       linkAnchorPattern: dto.linkAnchorPattern,
+      linkUrlPattern: dto.linkUrlPattern,
       enabled,
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -274,6 +277,10 @@ export class RuleRepository {
     if (dto.linkAnchorPattern !== undefined) {
       updates.push('link_anchor_pattern = ?');
       params.push(dto.linkAnchorPattern || null);
+    }
+    if (dto.linkUrlPattern !== undefined) {
+      updates.push('link_url_pattern = ?');
+      params.push(dto.linkUrlPattern || null);
     }
 
     params.push(id);

@@ -328,6 +328,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </select>
           <select id="rule-category-filter" onchange="loadRules()">
             <option value="">全部类型</option>
+            <option value="extract_verification">提取验证码</option>
+            <option value="extract_discount">提取折扣码</option>
             <option value="forward">转发名单</option>
             <option value="whitelist">白名单</option>
             <option value="blacklist">黑名单</option>

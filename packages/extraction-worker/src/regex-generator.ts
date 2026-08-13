@@ -254,6 +254,42 @@ function escapeUrlSegment(segment: string): string {
 const URL_ACTION_KEYWORDS = /(?:confirm|verify|activat|reset|unlock|auth|login|redeem|claim|apply|signup|register)/i;
 
 /**
+ * Detect and unwrap ESP tracking-wrapper URLs to recover the real target URL.
+ *
+ * Many verification emails wrap the real link behind a tracking redirect.
+ * The most important case is AWS SES (awstrack.me), which encodes the real
+ * URL as a percent-encoded segment in the path:
+ *   https://{sub}.r.{region}.awstrack.me/L0/{percent-encoded-real-url}/{n}/{token}/{sig}
+ *
+ * We extract and decode the real URL so the generated regex matches the
+ * meaningful endpoint, not the opaque tracking wrapper.
+ *
+ * Returns the original URL if it's not a tracking URL or can't be decoded.
+ * Exported for unit testing.
+ */
+export function unwrapTrackingUrl(rawUrl: string): string {
+  // AWS SES awstrack.me format:
+  // /L0/{encoded-url}/{n}/{tracking-id}/{signature}
+  // The encoded URL is percent-encoded (https%3A%2F%2F...) and runs until
+  // the next path segment boundary (the /{n}/ part after it).
+  const awstrackMatch = rawUrl.match(
+    /^https?:\/\/[^/]+\.r\.[a-z]+-[a-z]+-\d\.awstrack\.me\/L0\/(.+?)\/\d+\//i
+  );
+  if (awstrackMatch) {
+    try {
+      const decoded = decodeURIComponent(awstrackMatch[1]);
+      // Safety: only accept if the decoded result is itself a valid http(s) URL
+      if (/^https?:\/\//i.test(decoded)) {
+        return decoded;
+      }
+    } catch {
+      // decodeURIComponent can throw on malformed input — fall through
+    }
+  }
+  return rawUrl;
+}
+
+/**
  * Generate candidate regex patterns from a sample URL.
  *
  * Design: URLs have predictable structure (scheme://host/path?query).
@@ -264,6 +300,9 @@ const URL_ACTION_KEYWORDS = /(?:confirm|verify|activat|reset|unlock|auth|login|r
  *   4. Query param name (if code=/token=/verify= present)
  *   5. Literal full URL (always-safe fallback)
  *
+ * Tracking-wrapper URLs (awstrack.me, etc.) are unwrapped FIRST so the
+ * generated regex targets the real endpoint, not the opaque wrapper.
+ *
  * All candidates use the named group `url` so the extractor can distinguish
  * link matches from incidental URL mentions in the text.
  *
@@ -273,9 +312,12 @@ export function suggestUrlPatterns(target: string): PatternSuggestion[] {
   const suggestions: PatternSuggestion[] = [];
   const trimmed = target.trim();
 
+  // Unwrap tracking URLs before parsing — the real target is what matters.
+  const unwrapped = unwrapTrackingUrl(trimmed);
+
   let url: URL;
   try {
-    url = new URL(trimmed);
+    url = new URL(unwrapped);
   } catch {
     return suggestions; // malformed URL → no suggestions
   }

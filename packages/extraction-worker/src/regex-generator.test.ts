@@ -7,6 +7,7 @@ import {
   generateFromTarget,
   suggestPatterns,
   suggestUrlPatterns,
+  unwrapTrackingUrl,
   validateRegex,
   testRegexMatch,
   escapeSpecialChars,
@@ -63,6 +64,43 @@ describe('suggestPatterns', () => {
     for (let i = 1; i < suggestions.length; i++) {
       expect(suggestions[i - 1].confidence).toBeGreaterThanOrEqual(suggestions[i].confidence);
     }
+  });
+});
+
+describe('unwrapTrackingUrl', () => {
+  it('decodes AWS SES awstrack.me wrapper to real URL', () => {
+    const wrapped = 'https://s8qexllb.r.us-west-2.awstrack.me/L0/https:%2F%2Fwww.neimanmarcus.com%2Fmanage-accounts%2Fv1%2Fconfirm-user-email%3Fcode=385946%26id=abc/1/0101019ff88016b2/token/sig=474';
+    const result = unwrapTrackingUrl(wrapped);
+    expect(result).toBe('https://www.neimanmarcus.com/manage-accounts/v1/confirm-user-email?code=385946&id=abc');
+  });
+
+  it('returns original URL for non-tracking URLs', () => {
+    const normal = 'https://app.io/verify?t=1';
+    expect(unwrapTrackingUrl(normal)).toBe(normal);
+  });
+
+  it('returns original URL when awstrack decode fails (malformed encoding)', () => {
+    const malformed = 'https://x.r.us-west-2.awstrack.me/L0/%invalid%/1/abc/';
+    expect(unwrapTrackingUrl(malformed)).toBe(malformed);
+  });
+
+  it('returns original URL when decoded result is not http(s)', () => {
+    // If somehow the decoded segment isn't a URL, don't use it
+    const nonHttp = 'https://x.r.us-west-2.awstrack.me/L0/just-text/1/abc/';
+    expect(unwrapTrackingUrl(nonHttp)).toBe(nonHttp);
+  });
+});
+
+describe('suggestUrlPatterns — awstrack unwrapping', () => {
+  it('generates patterns from the REAL target URL, not the tracking wrapper', () => {
+    const wrapped = 'https://s8qexllb.r.us-west-2.awstrack.me/L0/https:%2F%2Fwww.neimanmarcus.com%2Fmanage-accounts%2Fv1%2Fconfirm-user-email%3Fcode=385946/1/0101019ff88016b2/sig=474';
+    const suggestions = suggestUrlPatterns(wrapped);
+    // The top candidates (1-4) should target neimanmarcus.com, NOT awstrack.me.
+    // Candidate 5 (literal fallback) legitimately contains the original awstrack URL.
+    const nonLiteral = suggestions.filter((s) => s.confidence > 0.5);
+    expect(nonLiteral.some((s) => s.pattern.includes('neimanmarcus\\.com'))).toBe(true);
+    expect(nonLiteral.some((s) => s.pattern.includes('confirm-user-email'))).toBe(true);
+    expect(nonLiteral.some((s) => s.pattern.includes('awstrack'))).toBe(false);
   });
 });
 

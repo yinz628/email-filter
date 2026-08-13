@@ -46,7 +46,7 @@ export function indexExists(db: Database.Database, indexName: string): boolean {
 // Migration Interface
 // ============================================
 
-interface MigrationResult {
+export interface MigrationResult {
   name: string;
   status: 'applied' | 'skipped' | 'error';
   message: string;
@@ -847,12 +847,12 @@ const migrations: MigrationFn[] = [
 /**
  * Run all database migrations
  * This function is idempotent and can be called multiple times safely.
- * 
+ *
  * @param db - Database instance
  * @param silent - If true, suppress console output
- * @returns Migration summary
+ * @returns Migration summary + per-migration results (for CLI display)
  */
-export function runMigrations(db: Database.Database, silent = false): { applied: number; skipped: number; errors: number } {
+export function runMigrations(db: Database.Database, silent = false): { applied: number; skipped: number; errors: number; results: MigrationResult[] } {
   if (!silent) {
     console.log(`[Migrations] Running ${migrations.length} migrations...`);
   }
@@ -860,19 +860,22 @@ export function runMigrations(db: Database.Database, silent = false): { applied:
   let applied = 0;
   let skipped = 0;
   let errors = 0;
+  const results: MigrationResult[] = [];
 
   for (const migration of migrations) {
     try {
       const result = migration(db);
-      
+      results.push(result);
+
       if (!silent && result.status === 'applied') {
         console.log(`[Migrations] ✓ ${result.name}: ${result.message}`);
       }
-      
+
       if (result.status === 'applied') applied++;
       else if (result.status === 'skipped') skipped++;
       else errors++;
     } catch (error) {
+      results.push({ name: 'unknown', status: 'error', message: error instanceof Error ? error.message : String(error) });
       if (!silent) {
         console.error(`[Migrations] ✗ Migration failed:`, error);
       }
@@ -888,5 +891,5 @@ export function runMigrations(db: Database.Database, silent = false): { applied:
     }
   }
 
-  return { applied, skipped, errors };
+  return { applied, skipped, errors, results };
 }

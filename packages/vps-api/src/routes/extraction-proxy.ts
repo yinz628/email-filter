@@ -8,6 +8,7 @@
  * Mounted at /api/extraction:
  *   GET  /codes            — proxy to worker /api/codes
  *   GET  /codes/latest/:r  — proxy to worker /api/codes/latest/:r
+ *   POST /codes/bulk-delete — proxy to worker /api/codes/bulk-delete
  *   DEL  /codes/:id        — proxy to worker /api/codes/:id
  *   GET  /discounts        — proxy to worker /api/discounts
  *   GET  /discounts/by-merchant/:d — proxy to worker /api/discounts/by-merchant/:d
@@ -80,6 +81,8 @@ export async function extractionProxyRoutes(fastify: FastifyInstance): Promise<v
     const { recipient } = request.params as { recipient: string };
     return proxyToWorker('GET', `/api/codes/latest/${encodeURIComponent(recipient)}`, request, reply);
   });
+  // Static path — declared before /codes/:id, mirroring the discount routes.
+  fastify.post('/codes/bulk-delete', async (request, reply) => proxyToWorker('POST', '/api/codes/bulk-delete', request, reply));
   fastify.delete('/codes/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     return proxyToWorker('DELETE', `/api/codes/${id}`, request, reply);

@@ -1189,6 +1189,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           </div>
         </div>
         <p style="color:#666;margin-bottom:15px">展示从邮件正文自动提取的验证码与验证链接（由 extraction-worker 解析、email-worker 上报）。点击验证码可一键复制。</p>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+          <input type="checkbox" id="verification-select-all" onclick="toggleAllVerifications(this.checked)" title="全选当前页">
+          <button class="btn btn-sm btn-danger" id="verification-bulk-delete-btn" onclick="bulkDeleteVerifications()" disabled>🗑️ 批量删除</button>
+          <span id="verification-sel-info" style="color:#666;font-size:12px;"></span>
+        </div>
         <div id="verification-empty" style="text-align:center;color:#999;padding:40px;display:none;">
           暂无验证码记录
         </div>
@@ -1196,6 +1201,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           <table id="verification-table-container">
             <thead>
               <tr>
+                <th style="width:30px;"></th>
                 <th>收件邮箱</th>
                 <th>验证码</th>
                 <th>验证链接</th>
@@ -7527,6 +7533,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     let verificationPage = 1;
     const verificationPageSize = 20;
     let verificationTotalCount = 0;
+    const verificationSelected = new Set();  // 批量选择：当前页已选行 id
 
     function resetVerificationPageAndLoad() {
       verificationPage = 1;
@@ -7579,6 +7586,12 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
       const tableContainer = document.getElementById('verification-table-container');
       if (!tbody) return;
 
+      // Reset selection + "select all" checkbox on each render (page change/filter/reload).
+      verificationSelected.clear();
+      const selectAll = document.getElementById('verification-select-all');
+      if (selectAll) selectAll.checked = false;
+      refreshVerificationSelUI();
+
       if (verificationData.length === 0) {
         emptyDiv.style.display = 'block';
         tableContainer.style.display = 'none';
@@ -7598,6 +7611,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           : '<span style="color:#999;">-</span>';
         const time = r.receivedAt ? new Date(r.receivedAt).toLocaleString('zh-CN') : '-';
         return '<tr>' +
+          '<td><input type="checkbox" class="verification-chk" data-id="' + r.id + '" onchange="toggleVerificationSelect(' + r.id + ', this.checked)"></td>' +
           '<td style="word-break:break-all;">' + escapeHtml(r.recipient) + '</td>' +
           '<td>' + codeCell + '</td>' +
           '<td>' + linkCell + '</td>' +
@@ -7645,6 +7659,43 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         console.error('Error deleting verification:', e);
         showAlert('删除失败', 'error');
       }
+    }
+
+    function refreshVerificationSelUI() {
+      const n = verificationSelected.size;
+      const info = document.getElementById('verification-sel-info');
+      if (info) info.textContent = n ? '已选 ' + n + ' 条' : '';
+      const btn = document.getElementById('verification-bulk-delete-btn');
+      if (btn) btn.disabled = n === 0;
+    }
+
+    function toggleVerificationSelect(id, checked) {
+      if (checked) verificationSelected.add(id); else verificationSelected.delete(id);
+      refreshVerificationSelUI();
+    }
+
+    function toggleAllVerifications(checked) {
+      document.querySelectorAll('.verification-chk').forEach(el => {
+        el.checked = checked;
+        const id = Number(el.getAttribute('data-id'));
+        if (checked) verificationSelected.add(id); else verificationSelected.delete(id);
+      });
+      refreshVerificationSelUI();
+    }
+
+    async function bulkDeleteVerifications() {
+      const ids = Array.from(verificationSelected);
+      if (!ids.length || !confirm('确认删除选中的 ' + ids.length + ' 条验证码？')) return;
+      try {
+        const res = await fetch('/api/extraction/codes/bulk-delete', {
+          method: 'POST', headers: getHeaders(),
+          body: JSON.stringify({ ids }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        showAlert('已删除 ' + (data.deleted ?? ids.length) + ' 条', 'success');
+        loadVerification();
+      } catch (e) { showAlert('批量删除失败: ' + e.message, 'error'); }
     }
 
     // ============================================

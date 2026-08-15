@@ -56,8 +56,14 @@ export function getAdminHtml(workerOrigin: string, _token: string): string {
       <input id="codes-search" placeholder="搜索" onkeyup="if(event.key==='Enter')loadCodes()">
       <button class="btn" onclick="loadCodes()">查询</button>
     </div>
+    <div class="toolbar">
+      <input type="checkbox" id="codes-select-all" class="chk" title="全选当前页" onchange="toggleAllCodes(this.checked)">
+      <label for="codes-select-all" style="font-size:13px;color:#666">全选</label>
+      <button id="codes-bulk-del" class="btn danger" onclick="bulkDeleteCodes()" disabled>批量删除</button>
+      <span id="codes-sel-info" class="sel-info">未选中</span>
+    </div>
     <table>
-      <thead><tr><th>收件人</th><th>验证码</th><th>链接</th><th>发件人</th><th>主题</th><th>时间</th><th></th></tr></thead>
+      <thead><tr><th></th><th>收件人</th><th>验证码</th><th>链接</th><th>发件人</th><th>主题</th><th>时间</th><th></th></tr></thead>
       <tbody id="codes-tbody"></tbody>
     </table>
   </div>
@@ -106,29 +112,53 @@ function switchTab(tab) {
 function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function copy(text) { navigator.clipboard.writeText(text).then(() => alert('已复制: ' + text)); }
 
-// Discount selection state — set of selected row ids (current page only).
-const discSelected = new Set();
+// Selection state factory — one instance per tab (codes / discounts).
+// Tracks selected row ids (current page only) and keeps the "已选 N 条"
+// info text + bulk-delete button in sync.
+function makeSelectionUi(infoId, deleteBtnId, selectAllId, chkClass) {
+  const selected = new Set();
+  function refresh() {
+    const n = selected.size;
+    const info = document.getElementById(infoId);
+    if (info) info.textContent = n ? '已选 ' + n + ' 条' : '未选中';
+    const btn = document.getElementById(deleteBtnId);
+    if (btn) btn.disabled = n === 0;
+  }
+  function toggle(id, checked) {
+    if (checked) selected.add(id); else selected.delete(id);
+    refresh();
+  }
+  function toggleAll(checked) {
+    document.querySelectorAll(chkClass).forEach(el => {
+      el.checked = checked;
+      const id = Number(el.getAttribute('data-id'));
+      if (checked) selected.add(id); else selected.delete(id);
+    });
+    refresh();
+  }
+  // Reset on each reload: clear ids + uncheck the "select all" box.
+  function reset() {
+    selected.clear();
+    const selectAll = document.getElementById(selectAllId);
+    if (selectAll) selectAll.checked = false;
+    refresh();
+  }
+  return { selected, toggle, toggleAll, reset };
+}
+
+const codesSel = makeSelectionUi('codes-sel-info', 'codes-bulk-del', 'codes-select-all', '.codes-chk');
+const discSel = makeSelectionUi('disc-sel-info', 'disc-bulk-del', 'disc-select-all', '.disc-chk');
+
+// Thin wrappers — the inline onchange handlers in rendered rows call these.
+function toggleCode(id, checked) { codesSel.toggle(id, checked); }
+function toggleAllCodes(checked) { codesSel.toggleAll(checked); }
+function toggleDisc(id, checked) { discSel.toggle(id, checked); }
+function toggleAllDiscounts(checked) { discSel.toggleAll(checked); }
+
 // Discount pagination state.
 const DISC_PAGE_SIZE = 50;
 let discPage = 1;
 let discTotal = 0;
-function refreshDiscSelUI() {
-  const n = discSelected.size;
-  document.getElementById('disc-sel-info').textContent = n ? '已选 ' + n + ' 条' : '未选中';
-  document.getElementById('disc-bulk-del').disabled = n === 0;
-}
-function toggleDisc(id, checked) {
-  if (checked) discSelected.add(id); else discSelected.delete(id);
-  refreshDiscSelUI();
-}
-function toggleAllDiscounts(checked) {
-  document.querySelectorAll('.disc-chk').forEach(el => {
-    el.checked = checked;
-    const id = Number(el.getAttribute('data-id'));
-    if (checked) discSelected.add(id); else discSelected.delete(id);
-  });
-  refreshDiscSelUI();
-}
 
 async function loadCodes() {
   const r = encodeURIComponent(document.getElementById('codes-recipient').value);
@@ -140,8 +170,10 @@ async function loadCodes() {
   const data = await res.json();
   const tbody = document.getElementById('codes-tbody');
   const records = data.records || [];
-  if (!records.length) { tbody.innerHTML = '<tr><td colspan=7 class="empty">暂无记录</td></tr>'; return; }
+  codesSel.reset();
+  if (!records.length) { tbody.innerHTML = '<tr><td colspan=8 class="empty">暂无记录</td></tr>'; return; }
   tbody.innerHTML = records.map(r => '<tr>'
+    + '<td><input type="checkbox" class="chk codes-chk" data-id="'+r.id+'" onchange="toggleCode('+r.id+', this.checked)"></td>'
     + '<td>' + esc(r.recipient) + '</td>'
     + '<td>' + (r.code ? '<span class="code-val" onclick="copy(\\''+esc(r.code)+'\\')">'+esc(r.code)+'</span>' : '-') + '</td>'
     + '<td class="link-cell">' + (r.link ? '<a href="'+esc(r.link)+'" target="_blank">'+esc(r.link.slice(0,40))+'...</a>' : '-') + '</td>'
@@ -172,11 +204,7 @@ async function loadDiscounts() {
   const tbody = document.getElementById('disc-tbody');
   const records = data.records || [];
   discTotal = (data.pagination && data.pagination.total) || 0;
-  // Reset selection + "select all" checkbox on each reload.
-  discSelected.clear();
-  const selectAll = document.getElementById('disc-select-all');
-  if (selectAll) selectAll.checked = false;
-  refreshDiscSelUI();
+  discSel.reset();
   if (!records.length) {
     tbody.innerHTML = '<tr><td colspan=9 class="empty">暂无记录</td></tr>';
     renderDiscPager();
@@ -230,11 +258,12 @@ function queryDiscounts() {
   loadDiscounts();
 }
 
-async function bulkDeleteDiscounts() {
-  const ids = Array.from(discSelected);
+// Shared bulk-delete flow: confirm → POST selected ids → report → reload.
+async function bulkDelete(path, label, selection, reload) {
+  const ids = Array.from(selection.selected);
   if (!ids.length) return;
-  if (!confirm('确认删除选中的 ' + ids.length + ' 条折扣码？此操作不可撤销。')) return;
-  const res = await fetch(ORIGIN + '/api/discounts/bulk-delete', {
+  if (!confirm('确认删除选中的 ' + ids.length + ' 条' + label + '？此操作不可撤销。')) return;
+  const res = await fetch(ORIGIN + path, {
     method: 'POST',
     headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
@@ -242,7 +271,15 @@ async function bulkDeleteDiscounts() {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { alert('批量删除失败: ' + (data.error || res.status)); return; }
   alert('已删除 ' + data.deleted + ' 条（请求 ' + data.requested + ' 条）');
-  loadDiscounts();
+  reload();
+}
+
+async function bulkDeleteCodes() {
+  await bulkDelete('/api/codes/bulk-delete', '验证码', codesSel, loadCodes);
+}
+
+async function bulkDeleteDiscounts() {
+  await bulkDelete('/api/discounts/bulk-delete', '折扣码', discSel, loadDiscounts);
 }
 
 async function exportDiscounts() {

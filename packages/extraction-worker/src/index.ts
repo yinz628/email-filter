@@ -29,7 +29,7 @@ import PostalMime from 'postal-mime';
 import { extract } from './extract.js';
 import {
   getRule, upsertRule,
-  insertCode, queryCodes, getLatestCode, getCodeById, deleteCode,
+  insertCode, queryCodes, getLatestCode, getCodeById, deleteCode, deleteCodes,
   insertDiscount, queryDiscounts, getDiscountById, deleteDiscount,
   deleteDiscounts, queryAllDiscounts,
   type CodeFilter, type DiscountFilter,
@@ -275,37 +275,58 @@ async function handleDeleteDiscount(id: string, env: Env): Promise<Response> {
 }
 
 // ============================================
-// API: discount codes — bulk delete + export
+// API: bulk delete (codes + discounts) + discount export
 // ============================================
 
 /** Max ids accepted by bulk-delete. */
 const MAX_BULK_DELETE = 1000;
 
-async function handleBulkDeleteDiscounts(request: Request, env: Env): Promise<Response> {
+/**
+ * Parse and validate a bulk-delete request: JSON body with a non-empty
+ * `ids` array of positive integers (numbers or numeric strings), at most
+ * MAX_BULK_DELETE entries. Shared by the codes and discounts endpoints.
+ * Returns the validated ids, or an error Response to return as-is.
+ */
+async function parseBulkDeleteRequest(
+  request: Request
+): Promise<{ ids: number[]; error?: undefined } | { ids?: undefined; error: Response }> {
   let body: { ids?: unknown };
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: 'invalid JSON' }, { status: 400 });
+    return { error: Response.json({ error: 'invalid JSON' }, { status: 400 }) };
   }
   const raw = body.ids;
   if (!Array.isArray(raw) || raw.length === 0) {
-    return Response.json({ error: 'ids must be a non-empty array' }, { status: 400 });
+    return { error: Response.json({ error: 'ids must be a non-empty array' }, { status: 400 }) };
   }
   if (raw.length > MAX_BULK_DELETE) {
-    return Response.json({ error: `too many ids (max ${MAX_BULK_DELETE})` }, { status: 400 });
+    return { error: Response.json({ error: `too many ids (max ${MAX_BULK_DELETE})` }, { status: 400 }) };
   }
   const ids: number[] = [];
   for (const v of raw) {
     // Accept integers or numeric strings; reject anything else.
     const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
     if (!Number.isInteger(n) || n <= 0) {
-      return Response.json({ error: `invalid id: ${JSON.stringify(v)}` }, { status: 400 });
+      return { error: Response.json({ error: `invalid id: ${JSON.stringify(v)}` }, { status: 400 }) };
     }
     ids.push(n);
   }
-  const deleted = await deleteDiscounts(env.DB, ids);
-  return Response.json({ deleted, requested: ids.length });
+  return { ids };
+}
+
+async function handleBulkDeleteCodes(request: Request, env: Env): Promise<Response> {
+  const parsed = await parseBulkDeleteRequest(request);
+  if (parsed.error) return parsed.error;
+  const deleted = await deleteCodes(env.DB, parsed.ids);
+  return Response.json({ deleted, requested: parsed.ids.length });
+}
+
+async function handleBulkDeleteDiscounts(request: Request, env: Env): Promise<Response> {
+  const parsed = await parseBulkDeleteRequest(request);
+  if (parsed.error) return parsed.error;
+  const deleted = await deleteDiscounts(env.DB, parsed.ids);
+  return Response.json({ deleted, requested: parsed.ids.length });
 }
 
 /** CSV column order for discount export. */
@@ -438,12 +459,18 @@ export default {
     }
 
     // Verification codes API
+    // Specific paths (bulk-delete) MUST precede the generic /api/codes/:id
+    // wildcard below, otherwise 'bulk-delete' would be parsed as an :id
+    // (same ordering constraint as the discount routes further down).
     if (path === '/api/codes') {
       if (method === 'GET') return handleListCodes(request, env);
     }
     if (path.startsWith('/api/codes/latest/')) {
       const recipient = path.replace('/api/codes/latest/', '');
       if (method === 'GET') return handleLatestCode(recipient, env);
+    }
+    if (path === '/api/codes/bulk-delete' && method === 'POST') {
+      return handleBulkDeleteCodes(request, env);
     }
     if (path.startsWith('/api/codes/')) {
       const id = path.replace('/api/codes/', '');

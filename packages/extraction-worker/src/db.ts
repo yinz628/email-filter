@@ -238,6 +238,21 @@ export async function deleteCode(db: D1Database, id: number): Promise<boolean> {
   return (result.meta?.changes ?? 0) > 0;
 }
 
+/**
+ * Bulk-delete verification codes by IDs. Single statement → atomic.
+ * Returns the number of rows actually deleted (may be < ids.length if some
+ * ids didn't exist). Empty input returns 0 without hitting D1.
+ */
+export async function deleteCodes(db: D1Database, ids: number[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const result = await db
+    .prepare(`DELETE FROM verification_codes WHERE id IN (${placeholders})`)
+    .bind(...ids)
+    .run();
+  return result.meta?.changes ?? 0;
+}
+
 // ============================================
 // Discount Codes
 // ============================================

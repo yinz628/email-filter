@@ -199,10 +199,15 @@ export class DynamicRuleService {
   /**
    * Normalize subject by removing common prefixes
    * This helps group similar subjects together
+   *
+   * If prefix stripping consumes the entire subject (e.g. a subject that is
+   * wholly wrapped in 【...】), fall back to the original subject so the
+   * resulting pattern is never empty — an empty 'contains' pattern matches
+   * every subject and would block all email.
    */
   private normalizeSubject(subject: string): string {
     let normalized = subject.trim();
-    
+
     // Apply prefix removal multiple times (for chained prefixes like "RE: Don't miss!")
     for (let i = 0; i < 3; i++) {
       const before = normalized;
@@ -211,9 +216,16 @@ export class DynamicRuleService {
       }
       if (normalized === before) break;
     }
-    
-    return normalized.trim();
+
+    const result = normalized.trim();
+    return result || subject.trim();
   }
+
+  /**
+   * Minimum pattern length for a dynamically created rule. Shorter patterns
+   * (empty string, single punctuation) would match far too many subjects.
+   */
+  private static readonly MIN_PATTERN_LENGTH = 2;
 
   /**
    * FNV-1a hash constants for 32-bit hash
@@ -357,13 +369,30 @@ export class DynamicRuleService {
         if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
           // Use normalized subject for rule pattern (removes common prefixes)
           const normalizedSubject = this.normalizeSubject(subject);
-          
+
+          // Never create a rule with an empty/too-short pattern — it would
+          // over-match unrelated subjects. normalizeSubject already falls
+          // back to the raw subject; this only trips for empty input.
+          if (normalizedSubject.trim().length < DynamicRuleService.MIN_PATTERN_LENGTH) {
+            return null;
+          }
+
           // Check if a dynamic rule for this subject already exists
           const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
           if (existingRule) {
             // Update lastHitAt for existing rule
             this.ruleRepository.updateLastHit(existingRule.id);
             return existingRule;
+          }
+
+          // A disabled rule with this exact pattern would make the create
+          // below throw DUPLICATE_RULE — re-arm it instead
+          const reArmed = this.rearmDisabledRuleByPattern(normalizedSubject);
+          if (reArmed) {
+            getRuleCache().invalidateAll();
+            getDynamicPatternCache().add(normalizedSubject);
+            this.cleanupSubjectTracker(subjectHash, windowStart);
+            return reArmed;
           }
 
           // Create new dynamic rule with normalized subject
@@ -480,7 +509,14 @@ export class DynamicRuleService {
         if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
           // Use normalized subject for rule pattern (removes common prefixes)
           const normalizedSubject = this.normalizeSubject(subject);
-          
+
+          // Never create a rule with an empty/too-short pattern — it would
+          // over-match unrelated subjects. normalizeSubject already falls
+          // back to the raw subject; this only trips for empty input.
+          if (normalizedSubject.trim().length < DynamicRuleService.MIN_PATTERN_LENGTH) {
+            return { rule: null };
+          }
+
           // Check if a dynamic rule for this subject already exists
           const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
           if (existingRule) {
@@ -498,6 +534,26 @@ export class DynamicRuleService {
           const detectionLatencyMs = receivedAt.getTime() - firstEmailTime.getTime();
           // Emails forwarded = count - 1 (current email will be blocked)
           const emailsForwardedBeforeBlock = count - 1;
+
+          // A disabled rule with this exact pattern would make the create
+          // below throw DUPLICATE_RULE — re-arm it instead
+          const reArmed = this.rearmDisabledRuleByPattern(normalizedSubject);
+          if (reArmed) {
+            getRuleCache().invalidateAll();
+            getDynamicPatternCache().add(normalizedSubject);
+            this.cleanupSubjectTracker(subjectHash, windowStart);
+            new LogRepository(this.db).create(
+              'system',
+              `动态规则已重新启用: ${normalizedSubject}`,
+              { ruleId: reArmed.id, pattern: normalizedSubject, detectionLatencyMs, emailsForwardedBeforeBlock },
+              'info'
+            );
+            return {
+              rule: reArmed,
+              detectionLatencyMs,
+              emailsForwardedBeforeBlock,
+            };
+          }
 
           // Create new dynamic rule with normalized subject
           const ruleDto: CreateRuleDTO = {
@@ -563,33 +619,50 @@ export class DynamicRuleService {
 
 
   /**
-   * Find an existing dynamic rule that matches a subject
-   * Checks both:
+   * Find an existing dynamic rule that already covers a subject.
+   *
+   * A rule covers the subject only if the rule's pattern is CONTAINED IN the
+   * subject — the same direction the matcher uses to intercept emails
+   * (matchMode 'contains': pattern ⊆ subject). The reverse containment
+   * (subject ⊆ pattern) is NOT coverage: a longer existing pattern can never
+   * match a shorter subject, so treating it as "already covered" silently
+   * suppresses rule creation while nothing intercepts the emails
+   * (production incident 2026-10-25: "PoloFest 2026" was shadowed by
+   * "Coming Soon: PoloFest 2026" and never got a rule of its own).
+   *
+   * Disabled rules and empty patterns are excluded by the SQL: a disabled
+   * rule never intercepts (so it must not suppress creation, nor have its
+   * lastHitAt refreshed — otherwise expiry cleanup can never remove it), and
+   * an empty pattern would match every subject.
+   *
+   * Checks:
    * 1. In-memory pattern cache first (O(1) for exact match)
    * 2. Exact match (pattern === subject)
-   * 3. Contains match (subject contains pattern OR pattern contains subject)
-   * 
+   * 3. Contains match (subject contains pattern)
+   *
    * Requirements: 4.2, 4.3 - Check in-memory Set first
    * Requirements: 3.1, 3.2 - Uses prepared statements for better performance
    */
   private findDynamicRuleBySubject(subject: string): FilterRule | null {
     // Requirements 4.3: Check in-memory pattern cache first
     const patternCache = getDynamicPatternCache();
-    
+
     // Quick check: if no matching pattern in cache, no need to query DB
     if (patternCache.isInitialized() && !patternCache.hasMatchingPattern(subject)) {
       return null;
     }
-    
-    // Requirements 3.1: Use prepared statements for database queries
+
+    // Requirements: 3.1, 3.2 - Uses prepared statements for database queries
     const stmtManager = getPreparedStatementManager();
-    
+
     // First try exact match for better performance
     const exactStmt = stmtManager.isInitialized()
       ? stmtManager.get('FIND_DYNAMIC_RULE_EXACT')
       : this.db.prepare(
-          `SELECT * FROM filter_rules 
-           WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
+          `SELECT * FROM filter_rules
+           WHERE category = 'dynamic' AND match_type = 'subject'
+             AND enabled = 1 AND pattern <> ''
+             AND pattern = ?
            LIMIT 1`
         );
     const exactResult = exactStmt.get(subject) as {
@@ -609,12 +682,13 @@ export class DynamicRuleService {
     }
 
     // Check if any existing rule's pattern is contained in this subject
-    // or if this subject is contained in any existing rule's pattern
+    // (real coverage — the matcher intercepts iff subject contains pattern)
     const allDynamicStmt = stmtManager.isInitialized()
       ? stmtManager.get('FIND_ALL_DYNAMIC_RULES')
       : this.db.prepare(
-          `SELECT * FROM filter_rules 
-           WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'`
+          `SELECT * FROM filter_rules
+           WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'
+             AND enabled = 1 AND pattern <> ''`
         );
     const allRules = allDynamicStmt.all() as {
       id: string;
@@ -631,18 +705,50 @@ export class DynamicRuleService {
     const subjectLower = subject.toLowerCase();
     for (const rule of allRules) {
       const patternLower = rule.pattern.toLowerCase();
-      // If existing pattern matches this subject, return that rule
-      if (subjectLower.includes(patternLower)) {
-        return this.mapRuleRow(rule);
-      }
-      // If this subject would be a more specific version, also return existing rule
-      // (e.g., "Don't miss! Sale" contains "Sale", so "Sale" rule already covers it)
-      if (patternLower.includes(subjectLower)) {
+      // Existing pattern is part of this subject → the rule intercepts it,
+      // no new rule needed (e.g. subject "Don't miss! Sale" is covered by
+      // the rule "Sale")
+      if (patternLower && subjectLower.includes(patternLower)) {
         return this.mapRuleRow(rule);
       }
     }
 
     return null;
+  }
+
+  /**
+   * Re-arm a disabled dynamic rule whose pattern exactly matches the subject.
+   *
+   * A fresh qualifying burst is the strongest possible signal that the
+   * subject is spamming again, and the repository refuses duplicate patterns
+   * (DUPLICATE_RULE) — so instead of failing the create, re-enable the
+   * existing disabled rule. Returns the re-armed rule, or null when no
+   * disabled rule has this exact pattern.
+   */
+  private rearmDisabledRuleByPattern(pattern: string): FilterRule | null {
+    const stmt = this.db.prepare(
+      `SELECT * FROM filter_rules
+       WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
+         AND enabled = 0
+       LIMIT 1`
+    );
+    const row = stmt.get(pattern) as {
+      id: string;
+      category: string;
+      match_type: string;
+      match_mode: string;
+      pattern: string;
+      enabled: number;
+      created_at: string;
+      updated_at: string;
+      last_hit_at: string | null;
+    } | undefined;
+    if (!row) {
+      return null;
+    }
+    const reArmed = this.ruleRepository.update(row.id, { enabled: true });
+    this.ruleRepository.updateLastHit(row.id);
+    return reArmed ?? this.mapRuleRow(row);
   }
 
   /**

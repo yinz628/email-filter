@@ -33,15 +33,22 @@ export const SQL_STATEMENTS = {
     WHERE subject_hash = ? AND received_at < ?
   `,
   
-  // Dynamic rule lookup statements
+  // Dynamic rule lookup statements.
+  // Coverage lookups only consider enabled rules with non-empty patterns:
+  // a disabled rule never intercepts, and an empty pattern matches everything,
+  // so either would silently suppress creation of a rule that is actually
+  // needed (production incident 2026-10-25).
   FIND_DYNAMIC_RULE_EXACT: `
-    SELECT * FROM filter_rules 
-    WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
+    SELECT * FROM filter_rules
+    WHERE category = 'dynamic' AND match_type = 'subject'
+      AND enabled = 1 AND pattern <> ''
+      AND pattern = ?
     LIMIT 1
   `,
   FIND_ALL_DYNAMIC_RULES: `
-    SELECT * FROM filter_rules 
+    SELECT * FROM filter_rules
     WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'
+      AND enabled = 1 AND pattern <> ''
   `,
   
   // Dynamic config statements

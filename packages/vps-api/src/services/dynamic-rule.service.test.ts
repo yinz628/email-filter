@@ -26,9 +26,11 @@ interface DynamicRuleCreationResult {
   emailsForwardedBeforeBlock?: number;
 }
 
-// Arbitrary for generating valid email subjects
+// Arbitrary for generating valid email subjects.
+// Mirrors the domain policy: dynamic rules are only created for subjects that
+// normalize to >= MIN_PATTERN_LENGTH characters (trim().length >= 2).
 const subjectArb = fc.string({ minLength: 1, maxLength: 100 })
-  .filter((s) => s.trim().length > 0 && !s.includes('\n'));
+  .filter((s) => s.trim().length >= 2 && !s.includes('\n'));
 
 // Arbitrary for generating dynamic config
 const dynamicConfigArb: fc.Arbitrary<DynamicConfig> = fc.record({
@@ -44,22 +46,26 @@ const dynamicConfigArb: fc.Arbitrary<DynamicConfig> = fc.record({
  * Test-specific RuleRepository that works with sql.js
  */
 class TestRuleRepository {
+  // Explicit column list: positional mapping must not depend on the full
+  // table shape (SELECT * gains columns as filter_rules evolves, which
+  // silently shifted these indices before).
+  private static readonly RULE_COLUMNS =
+    'id, category, match_type, match_mode, pattern, enabled, created_at, updated_at, last_hit_at';
+
   constructor(private db: SqlJsDatabase) {}
 
   private rowToRule(row: any[]): FilterRule {
-    // Schema: id, worker_id, category, match_type, match_mode, pattern, tags, enabled, created_at, updated_at, last_hit_at
+    // Column order matches RULE_COLUMNS above
     return {
       id: row[0] as string,
-      // row[1] is worker_id (skipped for FilterRule)
-      category: row[2] as RuleCategory,
-      matchType: row[3] as MatchType,
-      matchMode: row[4] as MatchMode,
-      pattern: row[5] as string,
-      // row[6] is tags (skipped for FilterRule)
-      enabled: row[7] === 1,
-      createdAt: new Date(row[8] as string),
-      updatedAt: new Date(row[9] as string),
-      lastHitAt: row[10] ? new Date(row[10] as string) : undefined,
+      category: row[1] as RuleCategory,
+      matchType: row[2] as MatchType,
+      matchMode: row[3] as MatchMode,
+      pattern: row[4] as string,
+      enabled: row[5] === 1,
+      createdAt: new Date(row[6] as string),
+      updatedAt: new Date(row[7] as string),
+      lastHitAt: row[8] ? new Date(row[8] as string) : undefined,
     };
   }
 
@@ -94,7 +100,10 @@ class TestRuleRepository {
 
 
   findById(id: string): FilterRule | null {
-    const result = this.db.exec('SELECT * FROM filter_rules WHERE id = ?', [id]);
+    const result = this.db.exec(
+      `SELECT ${TestRuleRepository.RULE_COLUMNS} FROM filter_rules WHERE id = ?`,
+      [id]
+    );
     if (result.length === 0 || result[0].values.length === 0) {
       return null;
     }
@@ -102,9 +111,9 @@ class TestRuleRepository {
   }
 
   findAll(options?: { category?: RuleCategory }): FilterRule[] {
-    let query = 'SELECT * FROM filter_rules';
+    let query = `SELECT ${TestRuleRepository.RULE_COLUMNS} FROM filter_rules`;
     const params: string[] = [];
-    
+
     if (options?.category) {
       query += ' WHERE category = ?';
       params.push(options.category);
@@ -132,6 +141,12 @@ class TestRuleRepository {
 
 /**
  * Test-specific DynamicRuleService that works with sql.js
+ *
+ * MIRRORS the semantics of the real DynamicRuleService (dynamic-rule.service.ts):
+ * subject normalization, dedup/coverage direction, and creation guards must
+ * stay in lockstep with production, otherwise tests pass while production
+ * drifts (that is exactly how the 2026-10-25 superstring-deadlock incident
+ * shipped: this copy lacked the contains-coverage logic entirely).
  */
 class TestDynamicRuleService {
   constructor(
@@ -226,6 +241,80 @@ class TestDynamicRuleService {
     return hash.toString(16);
   }
 
+  /** Mirrors DynamicRuleService.SUBJECT_PREFIXES (keep in lockstep). */
+  private static readonly SUBJECT_PREFIXES = [
+    /^don'?t miss( out)?[!:]?\s*/i,
+    /^trending[!:]?\s*/i,
+    /^hot[!:]?\s*/i,
+    /^new[!:]?\s*/i,
+    /^breaking[!:]?\s*/i,
+    /^urgent[!:]?\s*/i,
+    /^important[!:]?\s*/i,
+    /^reminder[!:]?\s*/i,
+    /^last chance[!:]?\s*/i,
+    /^final[!:]?\s*/i,
+    /^limited time[!:]?\s*/i,
+    /^act now[!:]?\s*/i,
+    /^hurry[!:]?\s*/i,
+    /^re:\s*/i,
+    /^fw:\s*/i,
+    /^fwd:\s*/i,
+    /^sale[!:]?\s*/i,
+    /^flash sale[!:]?\s*/i,
+    /^exclusive[!:]?\s*/i,
+    /^special[!:]?\s*/i,
+    /^\[.*?\]\s*/,
+    /^【.*?】\s*/,
+  ];
+
+  /** Mirrors DynamicRuleService.MIN_PATTERN_LENGTH (keep in lockstep). */
+  private static readonly MIN_PATTERN_LENGTH = 2;
+
+  /** Mirrors DynamicRuleService.normalizeSubject — never returns an empty
+   *  pattern for non-empty input (falls back to the raw subject). */
+  private normalizeSubject(subject: string): string {
+    let normalized = subject.trim();
+    for (let i = 0; i < 3; i++) {
+      const before = normalized;
+      for (const prefix of TestDynamicRuleService.SUBJECT_PREFIXES) {
+        normalized = normalized.replace(prefix, '');
+      }
+      if (normalized === before) break;
+    }
+    const result = normalized.trim();
+    return result || subject.trim();
+  }
+
+  /** The pattern the service is expected to create for a subject — exposed
+   *  so property tests can assert against the normalized form rather than
+   *  the raw subject (normalization trims and strips known prefixes). */
+  expectedPattern(subject: string): string {
+    return this.normalizeSubject(subject);
+  }
+
+  /** Mirrors DynamicRuleService.rearmDisabledRuleByPattern — a fresh
+   *  qualifying burst re-enables a disabled rule with the same pattern
+   *  instead of failing create with DUPLICATE_RULE. */
+  private rearmDisabledRuleByPattern(pattern: string): FilterRule | null {
+    const result = this.db.exec(
+      `SELECT id FROM filter_rules
+       WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
+         AND enabled = 0
+       LIMIT 1`,
+      [pattern]
+    );
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+    const id = result[0].values[0][0] as string;
+    this.db.run(
+      'UPDATE filter_rules SET enabled = 1, updated_at = ? WHERE id = ?',
+      [new Date().toISOString(), id]
+    );
+    this.ruleRepository.updateLastHit(id);
+    return this.ruleRepository.findById(id);
+  }
+
 
   /**
    * Track an email subject for dynamic rule detection
@@ -284,17 +373,27 @@ class TestDynamicRuleService {
         
         // Create rule only if time span <= threshold
         if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
-          const existingRule = this.findDynamicRuleBySubject(subject);
+          const normalizedSubject = this.normalizeSubject(subject);
+          if (normalizedSubject.trim().length < TestDynamicRuleService.MIN_PATTERN_LENGTH) {
+            return null;
+          }
+
+          const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
           if (existingRule) {
             this.ruleRepository.updateLastHit(existingRule.id);
             return existingRule;
+          }
+
+          const reArmed = this.rearmDisabledRuleByPattern(normalizedSubject);
+          if (reArmed) {
+            return reArmed;
           }
 
           const ruleDto: CreateRuleDTO = {
             category: 'dynamic',
             matchType: 'subject',
             matchMode: 'contains',
-            pattern: subject,
+            pattern: normalizedSubject,
             enabled: true,
           };
 
@@ -310,31 +409,54 @@ class TestDynamicRuleService {
     return null;
   }
 
+  /**
+   * Mirrors DynamicRuleService.findDynamicRuleBySubject (fixed semantics):
+   * a rule covers the subject only if its pattern is contained IN the subject
+   * — the same direction the matcher intercepts with. A longer existing
+   * pattern (superstring of the subject) is NOT coverage. Disabled rules and
+   * empty patterns never count as coverage.
+   */
   private findDynamicRuleBySubject(subject: string): FilterRule | null {
-    const result = this.db.exec(
-      `SELECT * FROM filter_rules 
-       WHERE category = 'dynamic' AND match_type = 'subject' AND pattern = ?
+    const COLUMNS = `id, category, match_type, match_mode, pattern, enabled, created_at, updated_at, last_hit_at`;
+
+    // Exact match first
+    let result = this.db.exec(
+      `SELECT ${COLUMNS} FROM filter_rules
+       WHERE category = 'dynamic' AND match_type = 'subject'
+         AND enabled = 1 AND pattern <> ''
+         AND pattern = ?
        LIMIT 1`,
       [subject]
     );
 
     if (result.length === 0 || result[0].values.length === 0) {
-      return null;
+      // Real-coverage check: the subject contains an enabled rule's pattern
+      result = this.db.exec(
+        `SELECT ${COLUMNS} FROM filter_rules
+         WHERE category = 'dynamic' AND match_type = 'subject' AND match_mode = 'contains'
+           AND enabled = 1 AND pattern <> ''`
+      );
+      const subjectLower = subject.toLowerCase();
+      const rows = result.length > 0 ? result[0].values : [];
+      const covered = rows.find((r) => subjectLower.includes(String(r[4]).toLowerCase()));
+      return covered ? this.mapCoverageRow(covered) : null;
     }
 
-    const row = result[0].values[0];
-    // Schema: id, worker_id, category, match_type, match_mode, pattern, enabled, created_at, updated_at, last_hit_at
+    return this.mapCoverageRow(result[0].values[0]);
+  }
+
+  private mapCoverageRow(row: any[]): FilterRule {
+    // Column order matches the explicit SELECT above
     return {
       id: row[0] as string,
-      // row[1] is worker_id (skipped)
-      category: row[2] as 'dynamic',
-      matchType: row[3] as MatchType,
-      matchMode: row[4] as MatchMode,
-      pattern: row[5] as string,
-      enabled: row[6] === 1,
-      createdAt: new Date(row[7] as string),
-      updatedAt: new Date(row[8] as string),
-      lastHitAt: row[9] ? new Date(row[9] as string) : undefined,
+      category: row[1] as 'dynamic',
+      matchType: row[2] as MatchType,
+      matchMode: row[3] as MatchMode,
+      pattern: row[4] as string,
+      enabled: row[5] === 1,
+      createdAt: new Date(row[6] as string),
+      updatedAt: new Date(row[7] as string),
+      lastHitAt: row[8] ? new Date(row[8] as string) : undefined,
     };
   }
 
@@ -470,7 +592,12 @@ class TestDynamicRuleService {
         
         // Create rule only if time span <= threshold
         if (timeSpanMinutes <= config.timeSpanThresholdMinutes) {
-          const existingRule = this.findDynamicRuleBySubject(subject);
+          const normalizedSubject = this.normalizeSubject(subject);
+          if (normalizedSubject.trim().length < TestDynamicRuleService.MIN_PATTERN_LENGTH) {
+            return { rule: null };
+          }
+
+          const existingRule = this.findDynamicRuleBySubject(normalizedSubject);
           if (existingRule) {
             this.ruleRepository.updateLastHit(existingRule.id);
             return {
@@ -485,11 +612,16 @@ class TestDynamicRuleService {
           // Emails forwarded = count - 1 (current email will be blocked)
           const emailsForwardedBeforeBlock = count - 1;
 
+          const reArmed = this.rearmDisabledRuleByPattern(normalizedSubject);
+          if (reArmed) {
+            return { rule: reArmed, detectionLatencyMs, emailsForwardedBeforeBlock };
+          }
+
           const ruleDto: CreateRuleDTO = {
             category: 'dynamic',
             matchType: 'subject',
             matchMode: 'contains',
-            pattern: subject,
+            pattern: normalizedSubject,
             enabled: true,
           };
 
@@ -1357,7 +1489,7 @@ describe('DynamicRuleService', () => {
             expect(finalResult).not.toBeNull();
             expect(finalResult?.category).toBe('dynamic');
             expect(finalResult?.matchType).toBe('subject');
-            expect(finalResult?.pattern).toBe(subject);
+            expect(finalResult?.pattern).toBe(dynamicRuleService.expectedPattern(subject));
             expect(finalResult?.enabled).toBe(true);
           }
         ),
@@ -1410,6 +1542,96 @@ describe('DynamicRuleService', () => {
    * For any dynamic rule that has not been hit within the expiration period,
    * the cleanup process should delete the expired rule.
    */
+  describe('Property 12: 生产事故回归 2026-10-25 (超串/禁用死锁)', () => {
+    const T0 = Date.parse('2026-10-25T03:00:00Z');
+
+    beforeEach(() => {
+      // Mirror production config at incident time
+      dynamicRuleService.updateConfig({
+        enabled: true,
+        timeWindowMinutes: 5,
+        thresholdCount: 10,
+        timeSpanThresholdMinutes: 2,
+        expirationHours: 48,
+        lastHitThresholdHours: 72,
+      });
+    });
+
+    function seedRule(pattern: string, enabled: boolean): FilterRule {
+      return ruleRepository.create({
+        category: 'dynamic',
+        matchType: 'subject',
+        matchMode: 'contains',
+        pattern,
+        enabled,
+      });
+    }
+
+    function burst(subject: string, count = 10): DynamicRuleCreationResult {
+      let last: DynamicRuleCreationResult = { rule: null };
+      for (let i = 0; i < count; i++) {
+        last = dynamicRuleService.trackSubjectWithMetrics(subject, new Date(T0 + i * 3000));
+      }
+      return last;
+    }
+
+    it('超串老规则不得压制新规则创建 (Coming Soon: PoloFest 2026 案例)', () => {
+      const seeded = seedRule('Coming Soon: PoloFest 2026', true);
+      const result = burst('PoloFest 2026');
+      expect(result.rule).not.toBeNull();
+      expect(result.rule!.pattern).toBe('PoloFest 2026');
+      expect(result.rule!.id).not.toBe(seeded.id);
+      expect(ruleRepository.findAll({ category: 'dynamic' })).toHaveLength(2);
+    });
+
+    it('子串老规则仍视为已覆盖,不重复建规则 (去重不回归)', () => {
+      // Note: 'Sale' itself is a strippable prefix — use a stable anchor word
+      // so the normalized subject still contains the seeded pattern.
+      const seeded = seedRule('PoloFest', true);
+      const result = burst("Don't miss! PoloFest 2026");
+      expect(result.rule).not.toBeNull();
+      expect(result.rule!.id).toBe(seeded.id);
+      expect(ruleRepository.findAll({ category: 'dynamic' })).toHaveLength(1);
+    });
+
+    it('禁用老规则不得压制创建,也不得被刷新 lastHit', () => {
+      const seeded = seedRule('Coming Soon: PoloFest 2026', false);
+      const result = burst('PoloFest 2026');
+      expect(result.rule).not.toBeNull();
+      expect(result.rule!.pattern).toBe('PoloFest 2026');
+      const row = db.exec('SELECT last_hit_at FROM filter_rules WHERE id = ?', [seeded.id]);
+      expect(row[0].values[0][0]).toBeNull();
+    });
+
+    it('空 pattern 规则不得视为覆盖任何主题', () => {
+      seedRule('', true);
+      const result = burst('PoloFest 2026');
+      expect(result.rule).not.toBeNull();
+      expect(result.rule!.pattern).toBe('PoloFest 2026');
+    });
+
+    it('同 pattern 禁用规则在新合格爆发时被重新武装 (re-arm 而非 DUPLICATE_RULE)', () => {
+      const seeded = seedRule('PoloFest 2026', false);
+      const result = burst('PoloFest 2026');
+      expect(result.rule).not.toBeNull();
+      expect(result.rule!.id).toBe(seeded.id);
+      expect(result.rule!.enabled).toBe(true);
+      expect(ruleRepository.findAll({ category: 'dynamic' })).toHaveLength(1);
+    });
+
+    it('全括号主题归一化不得产生空 pattern (【】炸弹)', () => {
+      const result = burst('【PoloFest 2026】');
+      expect(result.rule).not.toBeNull();
+      expect(result.rule!.pattern).toBe('【PoloFest 2026】');
+    });
+
+    it('空白主题不创建规则', () => {
+      const result = burst('   ');
+      expect(result.rule).toBeNull();
+      expect(ruleRepository.findAll({ category: 'dynamic' })).toHaveLength(0);
+    });
+  });
+
   describe('Property 10: 动态规则过期清理', () => {
     it('should delete expired dynamic rules during cleanup', () => {
       fc.assert(
@@ -1763,6 +1985,8 @@ describe('DynamicRuleService', () => {
             dynamicRuleService.updateConfig(newConfig);
             
             // Verify existing rule is still intact after config change
+            // (pattern preserved byte-for-byte — this rule was seeded directly
+            // with the raw subject, not created via trackSubject)
             const existingRule = dynamicRuleService.getDynamicRule(existingRuleId);
             expect(existingRule).not.toBeNull();
             expect(existingRule?.id).toBe(existingRuleId);
@@ -2592,7 +2816,7 @@ describe('DynamicRuleService', () => {
             expect(finalResult.rule).not.toBeNull();
             expect(finalResult.rule?.category).toBe('dynamic');
             expect(finalResult.rule?.matchType).toBe('subject');
-            expect(finalResult.rule?.pattern).toBe(subject);
+            expect(finalResult.rule?.pattern).toBe(dynamicRuleService.expectedPattern(subject));
             expect(finalResult.rule?.enabled).toBe(true);
             
             // Detection metrics should be present
@@ -2861,12 +3085,12 @@ describe('DynamicRuleService', () => {
             expect(log.category).toBe('system');
             expect(log.level).toBe('info');
             expect(log.message).toContain('动态规则已创建');
-            expect(log.message).toContain(subject);
+            expect(log.message).toContain(dynamicRuleService.expectedPattern(subject));
             
             // Verify log details contain required metrics
             expect(log.details).not.toBeNull();
             expect(log.details!.ruleId).toBeDefined();
-            expect(log.details!.pattern).toBe(subject);
+            expect(log.details!.pattern).toBe(dynamicRuleService.expectedPattern(subject));
             expect(log.details!.detectionLatencyMs).toBeDefined();
             expect(log.details!.detectionLatencyMs).toBeGreaterThanOrEqual(0);
             expect(log.details!.emailsForwardedBeforeBlock).toBe(threshold - 1);

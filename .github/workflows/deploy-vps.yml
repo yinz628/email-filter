@@ -5,10 +5,12 @@
 #   VPS_SSH_USER     e.g. root
 #   VPS_SSH_PASSWORD SSH login password
 #
-# What it does: SSH to the VPS, run packages/vps-api/deploy/update.sh with the
-# chosen branch (git checkout → pnpm install → build shared+vps-api →
-# systemctl restart email-filter-api → health check). The script's one
-# interactive prompt is auto-answered with "y" via stdin.
+# Flow: checkout the branch in the runner, package the source, scp it to the
+# VPS, then on the VPS:
+#   - git layout  (/opt/email-filter/.git exists)  → deploy/update.sh
+#   - tarball layout (docker compose, data in named volume) → swap the source
+#     tree (keeping .env / compose overrides), rebuild, recreate the container
+# The previous tree is kept at /opt/email-filter.bak.<timestamp> for rollback.
 name: Deploy VPS API
 
 on:
@@ -22,9 +24,13 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Deploy over SSH
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Package and deploy over SSH
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
@@ -36,12 +42,60 @@ jobs:
           [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_PASSWORD" ] || {
             echo "Missing VPS_SSH_* secrets — configure them in repo settings"; exit 1; }
           export SSHPASS="$SSH_PASSWORD"
-          sshpass -e ssh \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=20 \
-            "$SSH_USER@$SSH_HOST" \
-            "cd /opt/email-filter && printf 'y\n' | bash packages/vps-api/deploy/update.sh '$BRANCH'"
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+
+          echo "=== recon: current VPS layout (read-only) ==="
+          sshpass -e ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" '
+            ls -ld /opt/email-filter 2>/dev/null || echo "no /opt/email-filter"
+            [ -d /opt/email-filter/.git ] && echo "layout: git" || echo "layout: tarball/none"
+            ls -l /opt/email-filter/.env 2>/dev/null || echo "no .env"
+            docker ps --format "{{.Names}} | {{.Status}}" 2>/dev/null | grep -i email || echo "no email containers"
+            systemctl is-active email-filter-api 2>/dev/null || true
+          '
+
+          echo "=== package branch $BRANCH and upload ==="
+          tar czf /tmp/ef-src.tar.gz --exclude=.git .
+          sshpass -e scp $SSH_OPTS /tmp/ef-src.tar.gz "$SSH_USER@$SSH_HOST:/tmp/ef-src.tar.gz"
+
+          echo "=== deploy on VPS ==="
+          sshpass -e ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "BRANCH='$BRANCH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          STAMP=$(date +%Y%m%d%H%M%S)
+          if [ -d /opt/email-filter/.git ]; then
+            echo "git layout → update.sh"
+            cd /opt/email-filter
+            rm -f /tmp/ef-src.tar.gz
+            printf 'y\n' | bash packages/vps-api/deploy/update.sh "$BRANCH"
+            exit 0
+          fi
+          command -v docker >/dev/null || { echo "no git layout and no docker — aborting, manual deploy needed"; exit 2; }
+          docker compose version >/dev/null 2>&1 || docker-compose version >/dev/null 2>&1 || { echo "docker compose unavailable"; exit 2; }
+
+          echo "tarball layout → staged swap + compose rebuild"
+          rm -rf /opt/email-filter.staging
+          mkdir -p /opt/email-filter.staging
+          tar xzf /tmp/ef-src.tar.gz -C /opt/email-filter.staging
+          rm -f /tmp/ef-src.tar.gz
+          # preserve runtime config from the existing tree
+          for f in .env docker-compose.override.yml; do
+            if [ -f "/opt/email-filter/$f" ]; then
+              cp -a "/opt/email-filter/$f" "/opt/email-filter.staging/$f"
+              echo "preserved $f"
+            fi
+          done
+          if [ -d /opt/email-filter ]; then
+            mv /opt/email-filter "/opt/email-filter.bak.$STAMP"
+            echo "backup: /opt/email-filter.bak.$STAMP"
+          fi
+          mv /opt/email-filter.staging /opt/email-filter
+          cd /opt/email-filter
+          docker compose build api 2>&1 | tail -3
+          docker compose up -d api
+          sleep 8
+          docker ps --filter name=email-filter-api --format '{{.Names}} | {{.Status}}'
+          curl -fsS -o /dev/null -w 'health HTTP %{http_code}\n' http://localhost:3000/health
+          REMOTE
+
       - name: Post-deploy health check
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
@@ -50,9 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           export SSHPASS="$SSH_PASSWORD"
-          sleep 3
-          sshpass -e ssh \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
+          sleep 5
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "$SSH_USER@$SSH_HOST" \
-            'systemctl is-active email-filter-api; curl -s -o /dev/null -w "health HTTP %{http_code}\n" http://localhost:3000/health || true; cd /opt/email-filter && git log -1 --oneline'
+            'docker ps --filter name=email-filter-api --format "{{.Names}} | {{.Status}}"; curl -s -o /dev/null -w "health HTTP %{http_code}\n" http://localhost:3000/health || true; ls -d /opt/email-filter.bak.* 2>/dev/null | tail -3'

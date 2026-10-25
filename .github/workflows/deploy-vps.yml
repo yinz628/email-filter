@@ -41,7 +41,7 @@ jobs:
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=20 \
             "$SSH_USER@$SSH_HOST" \
-            "cd /opt/email-filter && printf 'y\n' | ./packages/vps-api/deploy/update.sh '$BRANCH'"
+            "cd /opt/email-filter && printf 'y\n' | bash packages/vps-api/deploy/update.sh '$BRANCH'"
       - name: Post-deploy health check
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}

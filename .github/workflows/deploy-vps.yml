@@ -1,0 +1,58 @@
+# Manual VPS API deployment — run from the branch you want deployed.
+#
+# Requires repo secrets (Settings → Secrets → Actions):
+#   VPS_SSH_HOST     e.g. 103.219.192.147
+#   VPS_SSH_USER     e.g. root
+#   VPS_SSH_PASSWORD SSH login password
+#
+# What it does: SSH to the VPS, run packages/vps-api/deploy/update.sh with the
+# chosen branch (git checkout → pnpm install → build shared+vps-api →
+# systemctl restart email-filter-api → health check). The script's one
+# interactive prompt is auto-answered with "y" via stdin.
+name: Deploy VPS API
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Git branch to deploy'
+        required: true
+        default: 'fix/dynamic-rule-superstring-deadlock'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.VPS_SSH_PASSWORD }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          command -v sshpass >/dev/null || { echo "sshpass missing"; exit 1; }
+          [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_PASSWORD" ] || {
+            echo "Missing VPS_SSH_* secrets — configure them in repo settings"; exit 1; }
+          export SSHPASS="$SSH_PASSWORD"
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=20 \
+            "$SSH_USER@$SSH_HOST" \
+            "cd /opt/email-filter && printf 'y\n' | ./packages/vps-api/deploy/update.sh '$BRANCH'"
+      - name: Post-deploy health check
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.VPS_SSH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$SSH_PASSWORD"
+          sleep 3
+          sshpass -e ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "$SSH_USER@$SSH_HOST" \
+            'systemctl is-active email-filter-api; curl -s -o /dev/null -w "health HTTP %{http_code}\n" http://localhost:3000/health || true; cd /opt/email-filter && git log -1 --oneline'
